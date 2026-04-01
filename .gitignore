@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# Production
+dist/
+build/
+
+# IDE/Editor
+.vs/
+.vscode/
+*.swp
+*.swo
+*.user
+bin/
+obj/
+*.bak
+*.docx
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project Specific (Old Code to REPLACE)
+mvc api/
+BomManager.bak
+IIS.docx
+~$IIS.docx
+
+# Security
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+
+# AG-K Internal (Optional - can be included)
+# .agent/
