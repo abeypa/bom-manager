@@ -12,30 +12,32 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('CRITICAL: Supabase environment variables are missing. High-level orchestrator will fail.');
 }
 
-// Create Supabase client with enhanced configuration
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
-    storage: localStorage,
-    storageKey: 'supabase.auth.token',
-    flowType: 'pkce',
-  },
-  global: {
-    headers: {
-      'x-application-name': 'bom-manager',
-    },
-  },
-  db: {
-    schema: 'public',
-  },
-  realtime: {
-    params: {
-      eventsPerSecond: 10,
-    },
-  },
-});
+// Create Supabase client with enhanced configuration (only if config exists)
+export const supabase = (supabaseUrl && supabaseAnonKey) 
+  ? createClient<Database>(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true,
+        storage: localStorage,
+        storageKey: 'supabase.auth.token',
+        flowType: 'pkce',
+      },
+      global: {
+        headers: {
+          'x-application-name': 'bom-manager',
+        },
+      },
+      db: {
+        schema: 'public',
+      },
+      realtime: {
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
+    })
+  : null as any;
 
 // Helper function to check if Supabase is properly configured
 export function isSupabaseConfigured(): boolean {
