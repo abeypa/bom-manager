@@ -2,7 +2,7 @@
   "name": "bep-bom-manager-v3",
   "private": true,
   "scripts": {
-    "build": "npm run build --prefix bom-manager",
-    "deploy": "npm run build --prefix bom-manager && npx wrangler deploy --prefix bom-manager"
+    "build": "npm install --prefix bom-manager && npm run build --prefix bom-manager",
+    "deploy": "npm install --prefix bom-manager && npm run build --prefix bom-manager && npx wrangler deploy --prefix bom-manager"
   }
 }
