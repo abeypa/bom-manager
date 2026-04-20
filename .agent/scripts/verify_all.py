@@ -41,21 +41,22 @@ class Colors:
     BOLD = '\033[1m'
 
 def print_header(text: str):
+    clean_text = text.replace('🚀', '').replace('📋', '').replace('📊', '').strip()
     print(f"\n{Colors.BOLD}{Colors.CYAN}{'='*70}{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.CYAN}{text.center(70)}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.CYAN}{clean_text.center(70)}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.CYAN}{'='*70}{Colors.ENDC}\n")
 
 def print_step(text: str):
-    print(f"{Colors.BOLD}{Colors.BLUE}🔄 {text}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.BLUE}>> {text}{Colors.ENDC}")
 
 def print_success(text: str):
-    print(f"{Colors.GREEN}✅ {text}{Colors.ENDC}")
+    print(f"{Colors.GREEN}[PASS] {text}{Colors.ENDC}")
 
 def print_warning(text: str):
-    print(f"{Colors.YELLOW}⚠️  {text}{Colors.ENDC}")
+    print(f"{Colors.YELLOW}[WARN] {text}{Colors.ENDC}")
 
 def print_error(text: str):
-    print(f"{Colors.RED}❌ {text}{Colors.ENDC}")
+    print(f"{Colors.RED}[FAIL] {text}{Colors.ENDC}")
 
 # Complete verification suite
 VERIFICATION_SUITE = [
@@ -213,9 +214,9 @@ def print_final_report(results: List[dict], start_time: datetime):
     
     print(f"Total Duration: {total_duration:.1f}s")
     print(f"Total Checks: {total}")
-    print(f"{Colors.GREEN}✅ Passed: {passed}{Colors.ENDC}")
-    print(f"{Colors.RED}❌ Failed: {failed}{Colors.ENDC}")
-    print(f"{Colors.YELLOW}⏭️  Skipped: {skipped}{Colors.ENDC}")
+    print(f"{Colors.GREEN}Passed: {passed}{Colors.ENDC}")
+    print(f"{Colors.RED}Failed: {failed}{Colors.ENDC}")
+    print(f"{Colors.YELLOW}Skipped: {skipped}{Colors.ENDC}")
     print()
     
     # Category breakdown
@@ -229,11 +230,11 @@ def print_final_report(results: List[dict], start_time: datetime):
         
         # Print result
         if r.get("skipped"):
-            status = f"{Colors.YELLOW}⏭️ {Colors.ENDC}"
+            status = f"{Colors.YELLOW}[SKIP]{Colors.ENDC}"
         elif r["passed"]:
-            status = f"{Colors.GREEN}✅{Colors.ENDC}"
+            status = f"{Colors.GREEN}[PASS]{Colors.ENDC}"
         else:
-            status = f"{Colors.RED}❌{Colors.ENDC}"
+            status = f"{Colors.RED}[FAIL]{Colors.ENDC}"
         
         duration_str = f"({r.get('duration', 0):.1f}s)" if not r.get("skipped") else ""
         print(f"  {status} {r['name']} {duration_str}")
@@ -254,10 +255,10 @@ def print_final_report(results: List[dict], start_time: datetime):
     # Final verdict
     if failed > 0:
         print_error(f"VERIFICATION FAILED - {failed} check(s) need attention")
-        print(f"\n{Colors.YELLOW}💡 Tip: Fix critical (security, lint) issues first{Colors.ENDC}")
+        print(f"\n{Colors.YELLOW}Tip: Fix critical (security, lint) issues first{Colors.ENDC}")
         return False
     else:
-        print_success("✨ ALL CHECKS PASSED - Ready for deployment! ✨")
+        print_success("ALL CHECKS PASSED - Ready for deployment!")
         return True
 
 def main():
