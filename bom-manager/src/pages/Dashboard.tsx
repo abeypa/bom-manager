@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Package, FolderKanban, AlertTriangle, CheckCircle,
   FileText, ShoppingCart, RefreshCcw, ArrowUpRight,
