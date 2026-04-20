@@ -28,7 +28,44 @@ const queryClient = new QueryClient({
   },
 });
 
+import supabase, { isSupabaseConfigured } from './lib/supabase';
+
 function App() {
+  if (!isSupabaseConfigured()) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-white font-sans">
+        <div className="max-w-md w-full bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl">
+          <div className="w-16 h-16 bg-amber-500/10 rounded-xl flex items-center justify-center mb-6">
+            <span className="text-3xl">⚙️</span>
+          </div>
+          <h1 className="text-2xl font-bold mb-4">Configuration Required</h1>
+          <p className="text-slate-400 mb-8 leading-relaxed">
+            The application is running but the <strong>Supabase credentials</strong> are missing. 
+            Please ensure <code className="bg-slate-900 px-2 py-1 rounded text-amber-400">VITE_SUPABASE_URL</code> and 
+            <code className="bg-slate-900 px-2 py-1 rounded text-amber-400">VITE_SUPABASE_ANON_KEY</code> 
+            are set in your environment variables.
+          </p>
+          <div className="space-y-4">
+            <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700 text-sm">
+              <p className="font-bold text-slate-300 mb-1">How to fix:</p>
+              <ol className="list-decimal list-inside space-y-1 text-slate-400">
+                <li>Go to Cloudflare Pages settings</li>
+                <li>Add these as <strong>Environment Variables</strong></li>
+                <li>Trigger a <strong>new build</strong></li>
+              </ol>
+            </div>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-3 bg-slate-700 hover:bg-slate-600 transition-colors rounded-xl font-bold text-sm"
+            >
+              Check Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>

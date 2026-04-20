@@ -8,12 +8,8 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // Validate environment variables
-if (!supabaseUrl) {
-  throw new Error('Missing environment variable: VITE_SUPABASE_URL');
-}
-
-if (!supabaseAnonKey) {
-  throw new Error('Missing environment variable: VITE_SUPABASE_ANON_KEY');
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('CRITICAL: Supabase environment variables are missing. High-level orchestrator will fail.');
 }
 
 // Create Supabase client with enhanced configuration
