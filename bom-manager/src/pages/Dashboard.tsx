@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  Package, FolderKanban, AlertTriangle, CheckCircle,
+  Package, FolderKanban, AlertTriangle, CheckCircle, Database,
   FileText, ShoppingCart, RefreshCcw, ArrowUpRight,
   TrendingUp, Clock, ArrowRight, Zap, ArrowUpDown, ChevronRight, Activity, Globe
 } from 'lucide-react'
