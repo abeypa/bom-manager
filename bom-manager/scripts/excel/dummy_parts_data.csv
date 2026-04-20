@@ -1,0 +1,6 @@
+PartType,PartNumber,beperp_part_no,Description,BasePrice,Currency,DiscountPercent,SupplierId,Manufacturer,ManufacturerPartNo,StockQuantity,MinStockLevel,LeadTime,Material,Finish,Weight,Specifications,PortSize,OperatingPressure,DatasheetUrl,CadFileUrl,ImagePath,PdfPath,Pdf2Path,Pdf3Path,VendorPartNo,PoNumber
+DUMMY DATA - START FROM ROW 3,,,,,,,,,,,,,,,,,,,,,,,,,,
+MechanicalManufacture,MM-9101581,9101581,ROLLER SHAFT REAR,965.00,INR,0,5,Bep Engineering,BEP-MM-910,10,2,1 week,EN21,Natural,1.25,Precision Ground,,,,https://docs.com/ds1,https://storage.com/cad1,,parts/910/dwg1.pdf,,,V-9101,PO-2024-001
+MechanicalBoughtOut,MBO-B001,B001,6202-ZZ BEARING,450.00,INR,15.5,1,SKF,6202-ZZ,50,10,2 days,,,0.05,Deep Groove Ball Bearing,,,,https://skf.com/6202,,parts/bearings/6202.jpg,,,,SKF-6202,PO-2024-002
+ElectricalBoughtOut,EBO-S100,S100,24VDC SMPS 5A,1800.00,INR,5.0,2,MeanWell,LRS-100-24,5,1,Next Day,,,0.45,Metal Case Power Supply,,,,https://mw.com/lrs100,,parts/elec/lrs100.png,,,,MW-LRS-100,PO-2024-003
+PneumaticBoughtOut,PBO-C025,C025,AIR CYLINDER 25x50,3200.00,INR,12.0,3,SMC,CDM2B25-50Z,2,1,2 weeks,,,0.85,Double Acting,1/4 BSP,6-8 Bar,https://smc.com/cdm2,,parts/pneu/cyl25.png,,,,SMC-C025,PO-2024-004
