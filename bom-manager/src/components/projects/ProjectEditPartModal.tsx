@@ -105,7 +105,24 @@ export const ProjectEditPartModal = ({ isOpen, onClose, projectId, projectPart }
                 />
               </div>
               <div className="p-4 bg-gray-50/50 rounded-2xl border border-gray-100">
-                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Unit Price</label>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">Unit Price</label>
+                  {projectPart.part_ref && (
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setFormData(prev => ({ 
+                          ...prev, 
+                          unit_price: projectPart.part_ref.base_price,
+                          discount_percent: projectPart.part_ref.discount_percent || prev.discount_percent
+                        }))
+                      }}
+                      className="text-[9px] font-black text-primary-600 uppercase tracking-tighter hover:text-primary-700 underline decoration-primary-200"
+                    >
+                      Sync (₹{projectPart.part_ref.base_price})
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                    <DollarSign className="w-3.5 h-3.5 absolute left-3 top-3 text-gray-300 pointer-events-none" />
                    <input
@@ -147,6 +164,25 @@ export const ProjectEditPartModal = ({ isOpen, onClose, projectId, projectPart }
                     className="block w-full bg-white border border-gray-100 rounded-xl py-2.5 pl-9 pr-3 text-sm font-bold tabular-nums outline-none focus:ring-2 focus:ring-gray-100"
                   />
                 </div>
+              </div>
+
+              {/* Valuation Summary */}
+              <div className="p-4 bg-navy-900 rounded-[2rem] shadow-xl space-y-3">
+                 <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-navy-400">
+                    <span>Gross Total</span>
+                    <span>₹{(formData.quantity * formData.unit_price).toLocaleString('en-IN')}</span>
+                 </div>
+                 <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                    <span>Applied Discount ({formData.discount_percent}%)</span>
+                    <span>-₹{((formData.quantity * formData.unit_price) * (formData.discount_percent / 100)).toLocaleString('en-IN')}</span>
+                 </div>
+                 <div className="h-px bg-navy-800" />
+                 <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-white">Line Total After Discount</span>
+                    <span className="text-xl font-black text-white tabular-nums">
+                       ₹{((formData.quantity * formData.unit_price) * (1 - (formData.discount_percent / 100))).toLocaleString('en-IN')}
+                    </span>
+                 </div>
               </div>
             </div>
 

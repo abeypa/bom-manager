@@ -103,6 +103,7 @@ export interface Database {
           quantity: number
           unit_price: number
           currency: string
+          discount_percent: number
           reference_designator: string | null
           notes: string | null
           created_date: string
@@ -116,6 +117,7 @@ export interface Database {
           quantity?: number
           unit_price?: number
           currency?: string
+          discount_percent?: number
           reference_designator?: string | null
           notes?: string | null
           created_date?: string

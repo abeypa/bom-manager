@@ -213,7 +213,16 @@ const BOMPartsTable = ({
                     </span>
                   </div>
                 </td>
-                <td className={`font-semibold text-navy-900 leading-tight px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>{part.description || part.part_ref?.description}</td>
+                                <td className={`px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
+                  <div className="flex flex-col gap-0.5 max-w-md">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight truncate">
+                      {part.part_ref?.manufacturer_part_number || 'N/A'}
+                    </span>
+                    <span className="font-semibold text-navy-900 leading-tight">
+                      {part.description || part.part_ref?.description}
+                    </span>
+                  </div>
+                </td>
                 <td className={`px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
                   <span className={`badge-${type.toLowerCase().replace(/[^a-z]/g, '')} px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-tighter`}>
                     {type}
@@ -295,8 +304,17 @@ const BOMPartsTable = ({
                   )}
                 </td>
 
-                <td className={`text-right font-black tabular-nums text-primary-600 px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
-                  {total > 0 ? `₹${total.toLocaleString('en-IN')}` : '—'}
+                <td className={`text-right px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
+                  <div className="flex flex-col items-end">
+                    {discount > 0 && (
+                      <span className="text-[10px] text-gray-400 line-through tabular-nums decoration-red-300">
+                        ₹{(quantity * unitPrice).toLocaleString('en-IN')}
+                      </span>
+                    )}
+                    <span className="font-black tabular-nums text-primary-600">
+                      {total > 0 ? `₹${total.toLocaleString('en-IN')}` : '—'}
+                    </span>
+                  </div>
                 </td>
                 <td className={`px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

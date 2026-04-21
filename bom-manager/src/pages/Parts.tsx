@@ -30,7 +30,7 @@ const Parts = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [partToEdit, setPartToEdit] = useState<any | null>(null)
   const [selectedSupplier, setSelectedSupplier] = useState('')
-  const [detailModal, setDetailModal] = useState<any>(null)
+  const [detailModal, setDetailModal] = useState<{ id: number; category: PartCategory } | null>(null)
   
   const [historyModal, setHistoryModal] = useState<{
     isOpen: boolean;
@@ -242,7 +242,7 @@ const Parts = () => {
                   return (
                     <div
                       key={part.id}
-                      onClick={() => setDetailModal({ part, category: activeTab })}
+                      onClick={() => setDetailModal({ id: part.id, category: activeTab })}
                       className="card group hover:shadow-2xl hover:-translate-y-1.5 transition-all duration-300 overflow-hidden flex flex-col cursor-pointer border-b-4 hover:border-navy-500"
                     >
                       {/* Card Preview */}
@@ -334,7 +334,7 @@ const Parts = () => {
                     </thead>
                     <tbody>
                         {filteredParts.map((part: any) => (
-                            <tr key={part.id} className="table-row-hover group" onClick={() => setDetailModal({ part, category: activeTab })}>
+                            <tr key={part.id} className="table-row-hover group" onClick={() => setDetailModal({ id: part.id, category: activeTab })}>
                                 <td>
                                     <div className="flex items-center gap-4">
                                         <div className="w-12 h-12 bg-white border border-slate-100 rounded-xl flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
@@ -423,7 +423,7 @@ const Parts = () => {
             isOpen={true}
             onClose={() => setDetailModal(null)}
             onEdit={handleEditPart}
-            part={detailModal.part}
+            part={parts?.find((p: any) => p.id === detailModal.id)}
             category={detailModal.category}
         />
       )}
