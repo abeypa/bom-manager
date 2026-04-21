@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   ip              TEXT                 -- Optional: client IP address
 );
 
+-- Fix type if it was previously UUID
+DO $$ 
+BEGIN 
+    IF (SELECT data_type FROM information_schema.columns WHERE table_name = 'activity_logs' AND column_name = 'entity_id') = 'uuid' THEN
+        ALTER TABLE activity_logs ALTER COLUMN entity_id TYPE TEXT;
+    END IF;
+END $$;
+
 -- Step 3: Add indexes for fast querying
 CREATE INDEX IF NOT EXISTS idx_activity_logs_entity 
   ON activity_logs(entity_type, entity_id);
