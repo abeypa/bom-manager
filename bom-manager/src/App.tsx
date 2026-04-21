@@ -16,6 +16,7 @@ import PartInOut from './pages/PartInOut';
 import Suppliers from './pages/Suppliers';
 import PartUsageLogs from './pages/PartUsageLogs';
 import Admin from './pages/Admin';
+import ChangeLog from './pages/ChangeLog';
 import ProcurementDashboard from './pages/ProcurementDashboard';
 
 const queryClient = new QueryClient({
@@ -137,6 +138,12 @@ function App() {
                 <Route path="/admin" element={
                   <RoleGuard requiredRole="admin">
                     <Admin />
+                  </RoleGuard>
+                } />
+
+                <Route path="/change-log" element={
+                  <RoleGuard requiredRole="admin">
+                    <ChangeLog />
                   </RoleGuard>
                 } />
               </Route>
