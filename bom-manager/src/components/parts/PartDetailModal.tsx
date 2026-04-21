@@ -250,7 +250,15 @@ export default function PartDetailModal({ isOpen, onClose, onEdit, part, categor
                   {/* Actions & Side Info */}
                   <div className="space-y-6">
                     <div className="p-8 bg-gray-50 rounded-[2.5rem] border border-gray-100 space-y-4">
-                        <button className="w-full flex items-center justify-between px-8 py-5 bg-white border border-gray-100 rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest hover:shadow-xl transition-all group">
+                        <button
+                          onClick={() => {
+                            if (onEdit) {
+                              onEdit(part);
+                              onClose();
+                            }
+                          }}
+                          className="w-full flex items-center justify-between px-8 py-5 bg-white border border-gray-100 rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest hover:shadow-xl transition-all group"
+                        >
                             <span>Modify Specs</span>
                             <Edit className="w-4 h-4 text-gray-300 group-hover:text-gray-900" />
                         </button>

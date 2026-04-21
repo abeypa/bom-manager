@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { logActivityAsync } from './activity-logs';
 
 export const adminApi = {
   /**
@@ -39,6 +40,10 @@ export const adminApi = {
    * Update a user's role in the profiles table
    */
   updateUserRole: async (userId: string, role: 'admin' | 'user') => {
+    // Fetch old role for audit trail
+    const { data: oldProfile } = await (supabase as any)
+      .from('profiles').select('role').eq('id', userId).single();
+
     const { data, error } = await (supabase as any)
       .from('profiles')
       .update({ role, updated_date: new Date().toISOString() })
@@ -47,6 +52,15 @@ export const adminApi = {
       .single();
 
     if (error) throw error;
+
+    logActivityAsync({
+      action: 'ROLE_CHANGE',
+      entity_type: 'user',
+      entity_id: userId,
+      old_values: { role: oldProfile?.role },
+      new_values: { role },
+    });
+
     return data;
   },
 
@@ -132,6 +146,13 @@ export const adminApi = {
       // Don't throw — the auth user was created successfully
     }
 
+    logActivityAsync({
+      action: 'CREATE',
+      entity_type: 'user',
+      entity_id: authData.user.id,
+      new_values: { email, full_name: fullName, role: 'user' },
+    });
+
     return authData.user;
   },
 
@@ -160,6 +181,10 @@ export const adminApi = {
    * Note: This does NOT change the auth.users login email — profiles only.
    */
   updateUserProfile: async (userId: string, updates: { fullName?: string; email?: string }) => {
+    // Fetch old profile for audit trail
+    const { data: oldProfile } = await (supabase as any)
+      .from('profiles').select('full_name, email').eq('id', userId).single();
+
     const patch: Record<string, any> = { updated_date: new Date().toISOString() };
     if (updates.fullName !== undefined) patch.full_name = updates.fullName;
     if (updates.email !== undefined) patch.email = updates.email;
@@ -172,7 +197,28 @@ export const adminApi = {
       .single();
 
     if (error) throw error;
+
+    logActivityAsync({
+      action: 'UPDATE',
+      entity_type: 'user',
+      entity_id: userId,
+      old_values: oldProfile ? { full_name: oldProfile.full_name, email: oldProfile.email } : null,
+      new_values: { full_name: patch.full_name, email: patch.email },
+    });
+
     return data;
+  },
+
+  /**
+   * Send a password reset email to the user via Supabase Auth.
+   * Uses the standard auth.resetPasswordForEmail which sends a secure
+   * link — the user clicks it and sets their own new password.
+   */
+  sendPasswordResetEmail: async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    });
+    if (error) throw error;
   },
 
   /**
@@ -186,6 +232,13 @@ export const adminApi = {
       new_password: newPassword,
     });
     if (error) throw error;
+
+    logActivityAsync({
+      action: 'PASSWORD_RESET',
+      entity_type: 'user',
+      entity_id: userId,
+      new_values: { password_changed: true, method: 'admin_override' },
+    });
   },
 };
 

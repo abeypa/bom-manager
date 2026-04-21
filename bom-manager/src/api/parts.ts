@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import type { Database } from '@/types/database'
+import { logActivityAsync } from './activity-logs'
 
 export type PartCategory = 
   | 'mechanical_manufacture' 
@@ -131,6 +132,12 @@ export const partsApi = {
     // Log initial price
     if (data) {
       await logPriceHistory(category, data.id, data.part_number, null, data, 'initial_entry', revisionDate);
+      logActivityAsync({
+        action: 'CREATE',
+        entity_type: 'part',
+        entity_id: String(data.id),
+        new_values: { part_number: data.part_number, category, base_price: data.base_price },
+      });
     }
     
     return data
@@ -162,6 +169,14 @@ export const partsApi = {
     if (current && updated) {
       await logPriceHistory(category, id, current.part_number, current, updated, 'manual_edit', revisionDate);
     }
+
+    logActivityAsync({
+      action: 'UPDATE',
+      entity_type: 'part',
+      entity_id: String(id),
+      old_values: current ? { base_price: current.base_price, part_number: current.part_number } : null,
+      new_values: { base_price: updated?.base_price, category },
+    });
 
     return updated;
   },
@@ -283,8 +298,19 @@ export const partsApi = {
   },
 
   deletePart: async (category: PartCategory, id: number) => {
+    // Fetch part info before deletion for audit
+    const { data: partInfo } = await (supabase as any)
+      .from(category).select('part_number, description, base_price').eq('id', id).single();
+
     const { error } = await (supabase as any).from(category).delete().eq('id', id);
     if (error) throw error;
+
+    logActivityAsync({
+      action: 'DELETE',
+      entity_type: 'part',
+      entity_id: String(id),
+      old_values: partInfo ? { part_number: partInfo.part_number, category, description: partInfo.description } : null,
+    });
   },
 
   // New: Strict import with validation (abort on any error)

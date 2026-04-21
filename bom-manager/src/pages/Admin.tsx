@@ -195,6 +195,307 @@ function CreateUserModal({ isOpen, onClose, onSuccess }: CreateModalProps) {
   );
 }
 
+// ─── Edit User Modal ──────────────────────────────────────────────────────────
+
+interface EditModalProps {
+  user: any;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function EditUserModal({ user, onClose, onSuccess }: EditModalProps) {
+  const { showToast } = useToast();
+  const [fullName, setFullName] = useState(user?.full_name || '');
+  const [email, setEmail]       = useState(user?.email || '');
+  const [loading, setLoading]   = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setFullName(user.full_name || '');
+      setEmail(user.email || '');
+    }
+  }, [user]);
+
+  if (!user) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fullName.trim()) {
+      showToast('error', 'Full name is required');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await adminApi.updateUserProfile(user.id, {
+        fullName: fullName.trim(),
+        email: email.trim() || undefined,
+      });
+      showToast('success', `Profile for "${fullName.trim()}" updated successfully`);
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to update profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-navy-900/60 backdrop-blur-sm transition-all duration-300">
+      <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-200">
+        <div className="flex items-center justify-between px-8 py-6 border-b border-slate-100 bg-slate-50/50">
+          <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white text-sm font-black shadow-lg ${avatarColor(user.id)}`}>
+              {initials(user)}
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-navy-900 tracking-tight">Modify Identity</h2>
+              <p className="label-caps !text-[9px] !text-tertiary mt-0.5">Update User Metadata</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="btn btn-icon btn-ghost">
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          <div className="space-y-4">
+            <div>
+              <label className="label-caps !text-[10px] mb-2 px-1">Full Name</label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary" />
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={e => setFullName(e.target.value)}
+                  placeholder="Full legal name"
+                  autoFocus
+                  className="input pl-11"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="label-caps !text-[10px] mb-2 px-1">Display Email</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary" />
+                <input
+                  type="text"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="user@bepindia.com"
+                  className="input pl-11"
+                />
+              </div>
+              <p className="text-[9px] font-bold text-amber-600 mt-1.5 ml-1 flex items-center gap-1">
+                <AlertTriangle size={10} />
+                Changes the profile display email only — login credential unchanged
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="label-caps !text-[9px] !text-tertiary">Current Role</span>
+              <span className={`badge ${user.role === 'admin' ? 'badge-navy !bg-navy-900 !text-white' : 'badge-slate'} !px-2 font-black text-[8px] tracking-widest`}>
+                {user.role === 'admin' ? <ShieldCheck size={9} className="mr-1 inline" /> : <User size={9} className="mr-1 inline" />}
+                {user.role?.toUpperCase() || 'USER'}
+              </span>
+            </div>
+            <p className="text-[9px] text-tertiary font-bold">
+              User ID: <span className="font-mono">{user.id?.slice(0, 8)}…</span>
+            </p>
+          </div>
+
+          <div className="flex gap-4 pt-2">
+            <button type="button" onClick={onClose} className="btn btn-secondary flex-1 uppercase tracking-widest text-[10px]">Cancel</button>
+            <button type="submit" disabled={loading} className="btn btn-primary btn-lg flex-[2] text-[10px] tracking-[0.15em]">
+              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <><Edit2 className="w-4 h-4" />SAVE CHANGES</>}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Reset / Change Password Modal ────────────────────────────────────────────
+
+interface ResetPwdModalProps {
+  user: any;
+  onClose: () => void;
+}
+
+function ResetPasswordModal({ user, onClose }: ResetPwdModalProps) {
+  const { showToast } = useToast();
+  const [mode, setMode] = useState<'choose' | 'change'>('choose');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [resetSending, setResetSending] = useState(false);
+
+  if (!user) return null;
+
+  const handleSendResetEmail = async () => {
+    if (!user.email) {
+      showToast('error', 'User has no email address — cannot send reset link');
+      return;
+    }
+    setResetSending(true);
+    try {
+      await adminApi.sendPasswordResetEmail(user.email);
+      showToast('success', `Password reset email sent to ${user.email}`);
+      onClose();
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to send reset email');
+    } finally {
+      setResetSending(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 6) {
+      showToast('error', 'Password must be at least 6 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast('error', 'Passwords do not match');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await adminApi.resetUserPassword(user.id, newPassword);
+      showToast('success', `Password for "${displayName(user)}" updated successfully`);
+      setNewPassword('');
+      setConfirmPassword('');
+      onClose();
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to change password. Make sure the admin_reset_user_password SQL function is deployed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-navy-900/60 backdrop-blur-sm transition-all duration-300">
+      <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-200">
+        <div className="flex items-center justify-between px-8 py-6 border-b border-slate-100 bg-slate-50/50">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-amber-500 rounded-2xl shadow-lg">
+              <Key className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-navy-900 tracking-tight">Credential Reset</h2>
+              <p className="label-caps !text-[9px] !text-tertiary mt-0.5">{displayName(user)}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="btn btn-icon btn-ghost">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-8">
+          {mode === 'choose' ? (
+            <div className="space-y-4">
+              {/* Option 1: Send Reset Email */}
+              <button
+                onClick={handleSendResetEmail}
+                disabled={resetSending || !user.email}
+                className="w-full p-5 border border-slate-100 rounded-2xl hover:border-navy-300 hover:shadow-lg transition-all text-left group flex items-start gap-4 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <div className="p-3 bg-navy-50 rounded-xl group-hover:bg-navy-900 transition-all shrink-0">
+                  <Mail size={18} className="text-navy-500 group-hover:text-white transition-all" />
+                </div>
+                <div>
+                  <p className="text-sm font-black text-navy-900 uppercase tracking-tight mb-1">
+                    {resetSending ? 'Sending…' : 'Send Reset Email'}
+                  </p>
+                  <p className="text-[10px] text-tertiary font-bold leading-relaxed">
+                    Sends a secure password reset link to <span className="font-mono text-navy-500">{user.email || 'no email'}</span>. User chooses their own new password.
+                  </p>
+                </div>
+              </button>
+
+              {/* Option 2: Admin Set Password */}
+              <button
+                onClick={() => setMode('change')}
+                className="w-full p-5 border border-slate-100 rounded-2xl hover:border-amber-300 hover:shadow-lg transition-all text-left group flex items-start gap-4"
+              >
+                <div className="p-3 bg-amber-50 rounded-xl group-hover:bg-amber-500 transition-all shrink-0">
+                  <Lock size={18} className="text-amber-500 group-hover:text-white transition-all" />
+                </div>
+                <div>
+                  <p className="text-sm font-black text-navy-900 uppercase tracking-tight mb-1">Set New Password</p>
+                  <p className="text-[10px] text-tertiary font-bold leading-relaxed">
+                    Admin override — directly set a new password for this user. Requires the <span className="font-mono text-amber-600">admin_reset_user_password</span> SQL function.
+                  </p>
+                </div>
+              </button>
+
+              <div className="pt-2">
+                <button onClick={onClose} className="btn btn-secondary w-full uppercase tracking-widest text-[10px]">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleChangePassword} className="space-y-5">
+              <div className="bg-amber-50/50 border border-amber-100 p-4 rounded-2xl flex items-start gap-3 mb-2">
+                <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-[10px] font-bold text-amber-800 leading-relaxed uppercase tracking-tight">
+                  This will immediately change the login password. The user will need to use this new password on their next login.
+                </p>
+              </div>
+
+              <div>
+                <label className="label-caps !text-[10px] mb-2 px-1">New Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary" />
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="Minimum 6 characters"
+                    autoFocus
+                    className="input pl-11"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label-caps !text-[10px] mb-2 px-1">Confirm Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary" />
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter password"
+                    className="input pl-11"
+                  />
+                </div>
+                {confirmPassword && newPassword !== confirmPassword && (
+                  <p className="text-[9px] font-bold text-red-500 mt-1.5 ml-1 flex items-center gap-1">
+                    <AlertTriangle size={10} /> Passwords do not match
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-4 pt-2">
+                <button type="button" onClick={() => setMode('choose')} className="btn btn-secondary flex-1 uppercase tracking-widest text-[10px]">Back</button>
+                <button type="submit" disabled={loading || !newPassword || newPassword !== confirmPassword} className="btn btn-primary btn-lg flex-[2] text-[10px] tracking-[0.15em] disabled:opacity-40">
+                  {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <><Key className="w-4 h-4" />SET PASSWORD</>}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Admin Page ──────────────────────────────────────────────────────────
 
 export default function Admin() {
@@ -416,7 +717,10 @@ export default function Admin() {
         )}
       </div>
 
+      {/* Modals */}
       <CreateUserModal isOpen={createOpen} onClose={() => setCreateOpen(false)} onSuccess={fetchData} />
+      {editUser && <EditUserModal user={editUser} onClose={() => setEditUser(null)} onSuccess={fetchData} />}
+      {resetPwdUser && <ResetPasswordModal user={resetPwdUser} onClose={() => setResetPwdUser(null)} />}
     </div>
   );
 }
