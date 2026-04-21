@@ -1,7 +1,7 @@
 import { resolvePartType } from '@/utils/partTypeUtils'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2, Edit2, Check, X, ImageIcon } from 'lucide-react'
+import { Trash2, Edit2, Check, X, ImageIcon, ArrowUpDown } from 'lucide-react'
 import { projectsApi } from '@/api/projects'
 import { useToast } from '@/context/ToastContext'
 
@@ -85,6 +85,25 @@ const BOMPartsTable = ({
     }
   }
 
+  const handleSyncWithMaster = async () => {
+    if (!selectedPartIds.size) return
+    if (!confirm(`Synchronize ${selectedPartIds.size} parts with their latest master prices?`)) return
+    
+    try {
+      showToast('info', 'Synchronizing prices...')
+      for (const id of selectedPartIds) {
+        const part = parts.find(p => p.id === id)
+        if (part && part.part_ref?.base_price !== undefined) {
+          await projectsApi.updatePartInSection(id, { unit_price: part.part_ref.base_price })
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['project'] })
+      showToast('success', 'Prices synchronized with master')
+    } catch (e: any) {
+      showToast('error', 'Failed to sync prices: ' + e.message)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="px-5 py-8 space-y-2">
@@ -112,7 +131,14 @@ const BOMPartsTable = ({
             <>
               <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{selectedPartIds.size} selected</span>
               <button onClick={handleBulkDelete} className="text-xs text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded-md font-medium transition-colors">Bulk Delete</button>
-              <button className="text-xs text-primary-600 hover:text-primary-700 bg-primary-50 hover:bg-primary-100 px-2 py-0.5 rounded-md font-medium transition-colors">Add to PO</button>
+              <button 
+                onClick={handleSyncWithMaster}
+                className="text-xs text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-md font-medium transition-colors flex items-center gap-1"
+                title="Sync selected parts with latest master prices"
+              >
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                Sync with Master
+              </button>
             </>
           )}
         </div>
@@ -242,9 +268,24 @@ const BOMPartsTable = ({
                     </div>
                   ) : (
                     <div className="flex flex-col items-end">
-                      <span onClick={() => startEditing(part, 'unit_price')} className="cursor-pointer hover:text-primary-600 tabular-nums text-slate-500 text-sm border-b border-dashed border-gray-300 transition-colors">
-                        {unitPrice > 0 ? `₹${unitPrice.toLocaleString('en-IN')}` : '—'}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {part.part_ref?.base_price !== undefined && Math.abs(unitPrice - part.part_ref.base_price) > 0.01 && (
+                          <button 
+                            onClick={() => updatePartMutation.mutate({ id: part.id, unit_price: part.part_ref.base_price })}
+                            className="bg-amber-500 p-0.5 rounded text-white shadow-sm hover:bg-emerald-500 transition-colors animate-in zoom-in-50"
+                            title={`Price deviation! Latest: ₹${part.part_ref.base_price}. Click to sync.`}
+                          >
+                            <ArrowUpDown className="h-2 w-2" />
+                          </button>
+                        )}
+                        <span onClick={() => startEditing(part, 'unit_price')} className={`cursor-pointer hover:text-primary-600 tabular-nums text-sm border-b border-dashed transition-colors ${
+                          part.part_ref?.base_price !== undefined && Math.abs(unitPrice - part.part_ref.base_price) > 0.01 
+                            ? 'text-amber-600 border-amber-300 font-bold' 
+                            : 'text-slate-500 border-gray-300'
+                        }`}>
+                          {unitPrice > 0 ? `₹${unitPrice.toLocaleString('en-IN')}` : '—'}
+                        </span>
+                      </div>
                       {discount > 0 && (
                         <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md mt-1 animate-in fade-in slide-in-from-top-1">
                           -{discount}%

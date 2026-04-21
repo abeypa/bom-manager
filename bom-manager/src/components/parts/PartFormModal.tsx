@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X, Save, FileUp, Factory, Upload, FileText, Image as ImageIcon, Box } from 'lucide-react'
 import { partsApi, PartCategory } from '@/api/parts'
 import { suppliersApi } from '@/api/suppliers'
+import { priceHistoryApi } from '@/api/price-history'
 import { FileUpload } from '../ui/FileUpload'
 
 interface PartFormModalProps {
@@ -99,8 +100,34 @@ const PartFormModal = ({ isOpen, onClose, activeTab, partToEdit }: PartFormModal
   })
 
   const updateMutation = useMutation({
-    mutationFn: (updatedPart: any) => partsApi.updatePart(activeTab, partToEdit.id, updatedPart),
+    mutationFn: async (updatedPart: any) => {
+      // 1. Update the master part
+      const result = await partsApi.updatePart(activeTab, partToEdit.id, updatedPart);
+
+      // 2. If base_price changed, log it to history
+      const oldPrice = partToEdit.base_price;
+      const newPrice = updatedPart.base_price;
+
+      if (newPrice !== undefined && newPrice !== oldPrice && newPrice !== null) {
+        try {
+          await priceHistoryApi.addEntry({
+            part_table_name: activeTab,
+            part_id: partToEdit.id,
+            part_number: partToEdit.part_number,
+            old_price: oldPrice,
+            new_price: newPrice,
+            change_reason: 'Engineering Update',
+            changed_at: new Date().toISOString()
+          });
+        } catch (historyErr) {
+          console.error('Failed to log price history during update:', historyErr);
+          // Don't fail the whole update if history fails
+        }
+      }
+      return result;
+    },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['parts'] })
       queryClient.invalidateQueries({ queryKey: ['parts', activeTab] })
       onClose()
     },

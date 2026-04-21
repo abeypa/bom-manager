@@ -79,16 +79,25 @@ export default function PartDetailModal({ isOpen, onClose, onEdit, part, categor
         changed_at: new Date(newPriceData.date).toISOString()
       });
 
+      // SYNC MASTER PRICE: Update the actual part's base price to reflect the latest audit entry
+      await partsApi.updatePart(category as any, part.id, {
+        base_price: parseFloat(newPriceData.price)
+      });
+
       // Reload history
       const historyData = await priceHistoryApi.getHistory(category, part.id);
       setPriceHistory(historyData);
+      
+      // Invalidate parts query to update cards/BOMs elsewhere
+      queryClient.invalidateQueries({ queryKey: ['parts'] });
+      
       setIsAddingPrice(false);
       setNewPriceData({
         price: '',
         date: new Date().toISOString().split('T')[0],
         reason: 'Manual Audit'
       });
-      showToast('success', 'Historical entry recorded');
+      showToast('success', 'Latest price recorded & synced to master registry');
     } catch (err) {
       showToast('error', 'Failed to record entry');
     } finally {
