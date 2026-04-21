@@ -37,11 +37,11 @@ import JobOrderTab from '@/components/projects/JobOrderTab'
 
 // New modular components
 import BOMSectionCard from '@/components/projects/BOMSectionCard'
+import BOMTreeView from '@/components/projects/BOMTreeView'
 import BOMImageModal from '@/components/projects/BOMImageModal'
 import ProjectSidebar from '@/components/projects/ProjectSidebar'
 import { resolvePartType } from '@/utils/partTypeUtils'
 import { partsApi } from '@/api/parts'
-
 import BOMDraggableSection from '@/components/projects/BOMDraggableSection'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
 import {
@@ -395,45 +395,20 @@ const ProjectDetails = () => {
                 </div>
               ) : (
                 <div className="space-y-8">
-                  <DndContext
-                    sensors={sensors}
-                    collisionDetection={closestCenter}
-                    onDragEnd={async (event) => {
-                      const { active, over } = event
-                      if (over && active.id !== over.id) {
-                        const oldIndex = project.sections.findIndex((s: any) => s.id === active.id)
-                        const newIndex = project.sections.findIndex((s: any) => s.id === over.id)
-                        const newSections = arrayMove(project.sections, oldIndex, newIndex)
-                        await updateSectionOrder.mutateAsync(newSections.map((s: any) => s.id))
-                      }
-                    }}
-                  >
-                    <SortableContext items={project.sections.map((s: any) => s.id)} strategy={verticalListSortingStrategy}>
-                      {project.sections.map((section: any) => (
-                        <div key={section.id}>
-                          <BOMDraggableSection
-                            section={section}
-                            projectId={projectId}
-                            collapsed={collapsedSections.has(section.id)}
-                            onToggle={() => toggleSection(section.id)}
-                            onEdit={() => handleEditSection(section)}
-                            onDelete={() => handleDeleteSection(section.id)}
-                            onAddSubsection={() => handleAddSubsection(section.id)}
-                            onEditSubsection={handleEditSubsection}
-                            onDeleteSubsection={handleDeleteSubsection}
-                            onCopySubsection={handleCopySubsection}
-                            onAddPart={handleAddPart}
-                            onEditPart={handleEditPart}
-                            onDeletePart={handleDeletePart}
-                            selectedPartIds={selectedPartIds}
-                            onToggleSelectPart={handleSelectPart}
-                            onToggleSelectAll={handleSelectAll}
-                            onImageClick={handleImageClick}
-                          />
-                        </div>
-                      ))}
-                    </SortableContext>
-                  </DndContext>
+                  <BOMTreeView
+                    project={project}
+                    projectId={projectId}
+                    onEditSection={handleEditSection}
+                    onDeleteSection={handleDeleteSection}
+                    onAddSubsection={handleAddSubsection}
+                    onEditSubsection={handleEditSubsection}
+                    onDeleteSubsection={handleDeleteSubsection}
+                    onCopySubsection={handleCopySubsection}
+                    onAddPart={handleAddPart}
+                    onEditPart={handleEditPart}
+                    onDeletePart={handleDeletePart}
+                    onImageClick={handleImageClick}
+                  />
 
                   {/* Orphaned subsections */}
                   {project.orphaned_subsections && project.orphaned_subsections.length > 0 && (

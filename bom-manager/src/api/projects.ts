@@ -213,7 +213,9 @@ export const projectsApi = {
     // 5. Build hierarchy in JS
     const subsectionsWithParts = (subsections || []).map((sub: any) => ({
       ...sub,
-      parts: parts.filter((p: any) => p.project_section_id === sub.id),
+      parts: parts
+        .filter((p: any) => p.project_section_id === sub.id)
+        .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     }))
 
     const sectionIds = new Set((sections || []).map((s: any) => s.id))
@@ -362,6 +364,13 @@ export const projectsApi = {
   deleteSubsection: async (id: number) => {
     const { error } = await (supabase as any).from('project_subsections').delete().eq('id', id)
     if (error) throw error
+  },
+
+  reorderSubsections: async (sectionId: number, subsectionIds: number[]) => {
+    const updates = subsectionIds.map((id, index) => 
+      (supabase as any).from('project_subsections').update({ sort_order: index, section_id: sectionId }).eq('id', id)
+    );
+    await Promise.all(updates);
   },
 
   // ─── COPY SUBSECTION ───────────────────────────────────────────────────────
@@ -570,11 +579,12 @@ export const projectsApi = {
     const { data, error } = await (supabase as any)
       .from('project_parts')
       .update({
-        quantity: payload.quantity,
-        unit_price: payload.unit_price,
-        discount_percent: payload.discount_percent,
-        reference_designator: payload.reference_designator ?? null,
-        notes: payload.notes ?? null,
+        project_section_id: payload.project_section_id ?? oldLink.project_section_id,
+        quantity: payload.quantity ?? oldLink.quantity,
+        unit_price: payload.unit_price ?? oldLink.unit_price,
+        discount_percent: payload.discount_percent ?? oldLink.discount_percent,
+        reference_designator: payload.reference_designator !== undefined ? payload.reference_designator : oldLink.reference_designator,
+        notes: payload.notes !== undefined ? payload.notes : oldLink.notes,
         updated_date: new Date().toISOString(),
       })
       .eq('id', id)
@@ -590,6 +600,13 @@ export const projectsApi = {
     }
 
     return data
+  },
+
+  reorderProjectParts: async (subsectionId: number, partIds: number[]) => {
+    const updates = partIds.map((id, index) => 
+      (supabase as any).from('project_parts').update({ sort_order: index, project_section_id: subsectionId }).eq('id', id)
+    );
+    await Promise.all(updates);
   },
 }
 
