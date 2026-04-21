@@ -8,6 +8,8 @@ import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { dashboardApi } from '@/api/dashboard'
 import { useRole } from '@/hooks/useRole'
+import { partsApi } from '@/api/parts'
+import { useToast } from '@/context/ToastContext'
 
 const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
   planning:  { cls: 'badge-slate',   label: 'Planning' },
@@ -20,9 +22,12 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
 }
 
 const Dashboard = () => {
-  const { displayName, userEmail } = useRole() as any
+  const { displayName, userEmail, isAdmin } = useRole() as any
   const [lastUpdated, setLastUpdated] = useState(new Date())
-
+  const [isHealing, setIsHealing] = useState(false)
+  const [healResult, setHealResult] = useState<{ sync: number; err: number } | null>(null)
+  const { showToast } = useToast()
+  const queryClient = useQueryClient()
   useEffect(() => {
     document.title = 'Dashboard | BOM Manager'
   }, [])
@@ -273,6 +278,65 @@ const Dashboard = () => {
               ))}
             </div>
           </div>
+
+          {/* Admin Diagnostics */}
+          {isAdmin && (
+            <div className="card shadow-lg border-navy-100 bg-navy-50/20 overflow-hidden animate-in slide-in-from-bottom-5">
+              <div className="px-6 py-5 border-b border-navy-100 flex items-center justify-between bg-navy-900 text-white">
+                <div className="flex items-center gap-3">
+                  <Activity size={18} className="text-amber-400" />
+                  <h3 className="section-title !text-white !mb-0">System Integrity</h3>
+                </div>
+                {isHealing && <RefreshCcw size={16} className="animate-spin text-amber-400" />}
+              </div>
+              <div className="p-6">
+                <p className="text-[10px] font-bold text-navy-400 uppercase tracking-widest mb-4">Diagnostic Tools</p>
+                
+                <button
+                  onClick={async () => {
+                    if (!window.confirm('HEAL PRICING: This will scan all parts and synchronize master prices with the latest historical audit entries. Proceed?')) return;
+                    setIsHealing(true);
+                    showToast('info', 'Synchronizing registry valuations...');
+                    try {
+                      const result = await partsApi.healPriceSynchronicity();
+                      setHealResult({ sync: result.synchronizedCount, err: result.errorCount });
+                      showToast('success', `Database Healed: ${result.synchronizedCount} records synchronized.`);
+                      queryClient.invalidateQueries();
+                    } catch (err) {
+                      showToast('error', 'Integrity check failed');
+                    } finally {
+                      setIsHealing(false);
+                    }
+                  }}
+                  disabled={isHealing}
+                  className="w-full flex items-center justify-between p-4 bg-white border border-navy-100 rounded-2xl hover:border-navy-400 hover:shadow-md transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-navy-50 rounded-xl flex items-center justify-center group-hover:bg-navy-900 transition-colors">
+                      <ArrowUpDown size={16} className="text-navy-600 group-hover:text-white" />
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xs font-black text-navy-900 uppercase tracking-tight">Repair Registry Pricing</div>
+                      <div className="text-[9px] font-bold text-navy-400 opacity-70">Sync Master Tables with Audit Trail</div>
+                    </div>
+                  </div>
+                  <ChevronRight size={14} className="text-slate-200 group-hover:text-navy-900" />
+                </button>
+
+                {healResult && (
+                  <div className="mt-4 p-3 bg-emerald-50 rounded-xl border border-emerald-100 animate-in fade-in">
+                    <div className="flex items-center gap-2 text-[10px] font-black text-emerald-700 uppercase tracking-widest">
+                      <CheckCircle size={12} />
+                      Repair Complete
+                    </div>
+                    <div className="mt-1 text-[10px] font-medium text-emerald-600">
+                      {healResult.sync} entities synchronized. {healResult.err ? `${healResult.err} errors encountered.` : 'Integrity 100% verified.'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -522,6 +522,61 @@ export const partsApi = {
     );
 
     return results.flat().sort((a, b) => a.part_number.localeCompare(b.part_number));
+  },
+
+  // NEW: Heal routine to synchronize all master prices with their latest historical audit entries
+  healPriceSynchronicity: async () => {
+    const categories: PartCategory[] = [
+      'mechanical_manufacture',
+      'mechanical_bought_out',
+      'electrical_manufacture',
+      'electrical_bought_out',
+      'pneumatic_bought_out'
+    ];
+
+    let synchronizedCount = 0;
+    let errorCount = 0;
+
+    for (const category of categories) {
+      try {
+        // 1. Get all parts in category
+        const { data: parts, error: fetchError } = await (supabase as any)
+          .from(category)
+          .select('id, part_number, base_price');
+        
+        if (fetchError) throw fetchError;
+
+        for (const part of (parts || [])) {
+          // 2. Get latest history entry for this part
+          const { data: latestEntry } = await supabase
+            .from('part_price_history')
+            .select('new_price, currency')
+            .eq('part_table_name', category)
+            .eq('part_id', part.id)
+            .order('changed_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          // 3. If history exists and differs from master, update master
+          if (latestEntry && Math.abs((latestEntry as any).new_price - part.base_price) > 0.01) {
+            await (supabase as any)
+              .from(category)
+              .update({ 
+                base_price: (latestEntry as any).new_price,
+                currency: (latestEntry as any).currency || part.currency
+              })
+              .eq('id', part.id);
+            
+            synchronizedCount++;
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to heal category ${category}:`, err);
+        errorCount++;
+      }
+    }
+
+    return { synchronizedCount, errorCount };
   }
 };
 

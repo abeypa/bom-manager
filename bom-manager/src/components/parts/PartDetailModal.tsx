@@ -70,26 +70,18 @@ export default function PartDetailModal({ isOpen, onClose, onEdit, part, categor
 
     try {
       setLoading(true);
-      await priceHistoryApi.addEntry({
-        part_table_name: category,
-        part_id: part.id,
-        part_number: part.part_number,
-        new_price: parseFloat(newPriceData.price),
-        change_reason: newPriceData.reason,
-        changed_at: new Date(newPriceData.date).toISOString()
-      });
-
-      // SYNC MASTER PRICE: Update the actual part's base price to reflect the latest audit entry
+      // Centralized Update: Use updatePart which handles master sync AND history logging
       await partsApi.updatePart(category as any, part.id, {
-        base_price: parseFloat(newPriceData.price)
+        base_price: parseFloat(newPriceData.price),
+        price_revision_date: new Date(newPriceData.date).toISOString()
       });
 
-      // Reload history
+      // Reload local history view
       const historyData = await priceHistoryApi.getHistory(category, part.id);
       setPriceHistory(historyData);
       
-      // Invalidate parts query to update cards/BOMs elsewhere
-      queryClient.invalidateQueries({ queryKey: ['parts'] });
+      // Invalidate globally
+      queryClient.invalidateQueries();
       
       setIsAddingPrice(false);
       setNewPriceData({
