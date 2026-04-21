@@ -37,8 +37,10 @@ import JobOrderTab from '@/components/projects/JobOrderTab'
 
 // New modular components
 import BOMSectionCard from '@/components/projects/BOMSectionCard'
+import BOMImageModal from '@/components/projects/BOMImageModal'
 import ProjectSidebar from '@/components/projects/ProjectSidebar'
 import { resolvePartType } from '@/utils/partTypeUtils'
+import { partsApi } from '@/api/parts'
 
 import BOMDraggableSection from '@/components/projects/BOMDraggableSection'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
@@ -103,6 +105,11 @@ const ProjectDetails = () => {
   const [selectedPartIds, setSelectedPartIds] = useState<Set<number>>(new Set())
   const [activeTab, setActiveTab] = useState<'bom' | 'documents' | 'jo' | 'pos'>('bom')
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set())
+  const [imageModal, setImageModal] = useState<{
+    open: boolean
+    entity: any | null
+    type: 'section' | 'subsection' | 'part'
+  }>({ open: false, entity: null, type: 'section' })
 
   // ── Data ────────────────────────────────────────────────────
   const { data: project, isLoading, error: projectError } = useQuery<any>({
@@ -209,6 +216,30 @@ const ProjectDetails = () => {
   const handleCopySubsection = (sub: any) => setCopyModal({ open: true, subsectionId: sub.id, subsectionName: sub.section_name })
   const handleAddPart = (sub: any) => setAddPartModal({ open: true, subsectionId: sub.id, subsectionName: sub.section_name })
   const handleEditPart = (part: any) => setEditPartModal({ open: true, part })
+
+  const handleImageClick = (entity: any, type: 'section' | 'subsection' | 'part') => {
+    setImageModal({ open: true, entity, type })
+  }
+
+  const handleImageSave = async (imageUrl: string | null) => {
+    if (!imageModal.entity) return
+    const { entity, type } = imageModal
+    try {
+      if (type === 'section') {
+        await projectsApi.updateSection(entity.id, { image_path: imageUrl } as any)
+      } else if (type === 'subsection') {
+        await projectsApi.updateSubsection(entity.id, { image_path: imageUrl })
+      } else if (type === 'part' && entity.part_ref) {
+        // Update the master part's image_path
+        await partsApi.updatePart(entity.part_type, entity.part_id, { image_path: imageUrl })
+      }
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+      showToast('success', 'Image updated')
+    } catch (err: any) {
+      showToast('error', 'Failed to update image: ' + err.message)
+      throw err
+    }
+  }
   
   const handleSelectPart = (id: number) => {
     setSelectedPartIds(prev => {
@@ -397,6 +428,7 @@ const ProjectDetails = () => {
                             selectedPartIds={selectedPartIds}
                             onToggleSelectPart={handleSelectPart}
                             onToggleSelectAll={handleSelectAll}
+                            onImageClick={handleImageClick}
                           />
                         </div>
                       ))}
@@ -557,6 +589,25 @@ const ProjectDetails = () => {
           sectionId={copyModal.subsectionId}
           sectionName={copyModal.subsectionName}
           currentProjectId={projectId}
+        />
+      )}
+
+      {imageModal.open && imageModal.entity && (
+        <BOMImageModal
+          isOpen={imageModal.open}
+          onClose={() => setImageModal({ open: false, entity: null, type: 'section' })}
+          currentImageUrl={
+            imageModal.type === 'part'
+              ? imageModal.entity.part_ref?.image_path || null
+              : imageModal.entity.image_path || null
+          }
+          entityType={imageModal.type}
+          entityName={
+            imageModal.type === 'section' ? imageModal.entity.name :
+            imageModal.type === 'subsection' ? (imageModal.entity.section_name || imageModal.entity.name) :
+            (imageModal.entity.part_ref?.part_number || `Part #${imageModal.entity.part_id}`)
+          }
+          onSave={handleImageSave}
         />
       )}
 

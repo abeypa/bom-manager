@@ -285,7 +285,7 @@ export const projectsApi = {
     return data
   },
 
-  updateSection: async (id: number, section: { name?: string; order_index?: number }) => {
+  updateSection: async (id: number, section: { name?: string; order_index?: number; image_path?: string | null }) => {
     const { data, error } = await (supabase as any)
       .from('project_sections')
       .update(section)

@@ -1,4 +1,4 @@
-import { Trash2, PlusCircle, Copy } from 'lucide-react'
+import { Trash2, PlusCircle, Copy, ImageIcon } from 'lucide-react'
 import BOMPartsTable from './BOMPartsTable'
 
 interface BOMSubsectionRowProps {
@@ -13,6 +13,7 @@ interface BOMSubsectionRowProps {
   onCopySubsection: (subsection: any) => void
   onEditPart: (partId: any) => void
   onDeletePart: (partId: number) => void
+  onImageClick?: (entity: any, type: 'section' | 'subsection' | 'part') => void
 }
 
 const BOMSubsectionRow = ({
@@ -27,6 +28,7 @@ const BOMSubsectionRow = ({
   onCopySubsection,
   onEditPart,
   onDeletePart,
+  onImageClick,
 }: BOMSubsectionRowProps) => {
   return (
     <div className="subsection-row rounded-2xl mb-8 border border-slate-100 shadow-sm transition-all hover:shadow-md bg-white">
@@ -37,6 +39,16 @@ const BOMSubsectionRow = ({
             <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />
             <div className="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-25" />
           </div>
+          {/* Subsection image thumbnail */}
+          {subsection.image_path && (
+            <button
+              onClick={() => onImageClick?.(subsection, 'subsection')}
+              className="w-8 h-8 rounded-lg overflow-hidden border border-slate-200 hover:border-navy-400 transition-all shrink-0 shadow-sm"
+              title="View image"
+            >
+              <img src={subsection.image_path} alt="" className="w-full h-full object-cover" />
+            </button>
+          )}
           <div className="min-w-0">
             <h4 
               className="font-black text-navy-900 text-sm sm:text-base flex items-center gap-2 sm:gap-4 cursor-pointer hover:text-primary-600 transition-colors"
@@ -61,6 +73,14 @@ const BOMSubsectionRow = ({
           </button>
 
           <div className="flex items-center gap-1 pl-2 ml-2 border-l border-slate-200">
+            <button
+              onClick={() => onImageClick?.(subsection, 'subsection')}
+              className={`p-1.5 rounded-lg transition-colors ${subsection.image_path ? 'text-amber-500 hover:text-amber-600 hover:bg-amber-50' : 'text-slate-400 hover:text-navy-900 hover:bg-slate-100'}`}
+              title={subsection.image_path ? 'View/Change Image' : 'Add Image'}
+            >
+              <ImageIcon className="h-4 w-4" />
+            </button>
+
             <button
               onClick={() => onCopySubsection(subsection)}
               className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-navy-900 transition-colors"
@@ -89,6 +109,7 @@ const BOMSubsectionRow = ({
         onToggleSelectAll={onToggleSelectAll}
         onEditPart={onEditPart}
         onDeletePart={onDeletePart}
+        onImageClick={onImageClick}
       />
     </div>
   )

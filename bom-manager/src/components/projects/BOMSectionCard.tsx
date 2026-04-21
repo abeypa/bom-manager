@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, Trash2, PlusCircle, Copy, Edit2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Trash2, PlusCircle, Copy, Edit2, ImageIcon } from 'lucide-react'
 import BOMSubsectionRow from './BOMSubsectionRow'
 
 interface BOMSectionCardProps {
@@ -19,6 +19,7 @@ interface BOMSectionCardProps {
   onDeleteSubsection: (subsectionId: number) => void
   onEditPart: (part: any) => void
   onDeletePart: (partId: number) => void
+  onImageClick?: (entity: any, type: 'section' | 'subsection' | 'part') => void
 }
 
 const BOMSectionCard = ({
@@ -37,7 +38,8 @@ const BOMSectionCard = ({
   onEditSubsection,
   onDeleteSubsection,
   onEditPart,
-  onDeletePart
+  onDeletePart,
+  onImageClick,
 }: BOMSectionCardProps) => {
 
   return (
@@ -48,6 +50,16 @@ const BOMSectionCard = ({
           <button className="text-white/80 hover:text-white" onClick={(e) => { e.stopPropagation(); onToggle(); }}>
             {collapsed ? <ChevronDown className="h-5 w-5" /> : <ChevronUp className="h-5 w-5" />}
           </button>
+          {/* Section image thumbnail */}
+          {section.image_path && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onImageClick?.(section, 'section') }}
+              className="w-7 h-7 rounded-lg overflow-hidden border border-white/20 hover:border-white/60 transition-all shrink-0"
+              title="View image"
+            >
+              <img src={section.image_path} alt="" className="w-full h-full object-cover" />
+            </button>
+          )}
           <h3 className="font-semibold text-white">{section.name}</h3>
           <span className="text-xs bg-white/20 text-white px-2.5 py-0.5 rounded-full">
             {section.subsections?.length || 0} subsections
@@ -55,6 +67,13 @@ const BOMSectionCard = ({
         </div>
 
         <div className="action-group flex items-center gap-1 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => { e.stopPropagation(); onImageClick?.(section, 'section') }}
+            className={`p-1 rounded-lg hover:bg-white/10 transition-colors ${section.image_path ? 'text-amber-400 hover:text-amber-300' : 'text-white/80 hover:text-white'}`}
+            title={section.image_path ? 'View/Change Image' : 'Add Image'}
+          >
+            <ImageIcon className="h-4 w-4" />
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); onEdit() }}
             className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10"
@@ -96,6 +115,7 @@ const BOMSectionCard = ({
               onCopySubsection={onCopySubsection}
               onEditPart={onEditPart}
               onDeletePart={onDeletePart}
+              onImageClick={onImageClick}
             />
           ))}
 

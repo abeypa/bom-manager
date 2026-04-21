@@ -1,7 +1,7 @@
 import { resolvePartType } from '@/utils/partTypeUtils'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2, Edit2, Check, X } from 'lucide-react'
+import { Trash2, Edit2, Check, X, ImageIcon } from 'lucide-react'
 import { projectsApi } from '@/api/projects'
 import { useToast } from '@/context/ToastContext'
 
@@ -14,6 +14,7 @@ interface BOMPartsTableProps {
   onToggleSelectAll: (ids: number[]) => void
   onEditPart: (part: any) => void
   onDeletePart: (partId: number) => void
+  onImageClick?: (entity: any, type: 'section' | 'subsection' | 'part') => void
 }
 
 const BOMPartsTable = ({ 
@@ -24,7 +25,8 @@ const BOMPartsTable = ({
   onToggleSelectPart,
   onToggleSelectAll,
   onEditPart,
-  onDeletePart 
+  onDeletePart,
+  onImageClick,
 }: BOMPartsTableProps) => {
   const queryClient = useQueryClient()
   const { showToast } = useToast()
@@ -162,7 +164,29 @@ const BOMPartsTable = ({
                     aria-label={`Select part ${part.part_ref || part.id}`}
                   />
                 </td>
-                <td className={`font-mono text-xs tracking-wider px-6 text-slate-500 ${density === 'compact' ? 'py-1' : 'py-3'}`}>{typeof part.part_ref === 'object' ? part.part_ref?.part_number : part.part_ref || ref}</td>
+                <td className={`px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
+                  <div className="flex items-center gap-2.5">
+                    {/* Part image thumbnail */}
+                    <button
+                      onClick={() => onImageClick?.(part, 'part')}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all border ${
+                        part.part_ref?.image_path
+                          ? 'overflow-hidden border-slate-200 hover:border-navy-400 shadow-sm'
+                          : 'border-dashed border-slate-200 hover:border-slate-400 text-slate-300 hover:text-slate-500'
+                      }`}
+                      title={part.part_ref?.image_path ? 'View image' : 'Add image'}
+                    >
+                      {part.part_ref?.image_path ? (
+                        <img src={part.part_ref.image_path} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImageIcon size={12} />
+                      )}
+                    </button>
+                    <span className="font-mono text-xs tracking-wider text-slate-500">
+                      {typeof part.part_ref === 'object' ? part.part_ref?.part_number : part.part_ref || ref}
+                    </span>
+                  </div>
+                </td>
                 <td className={`font-semibold text-navy-900 leading-tight px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>{part.description || part.part_ref?.description}</td>
                 <td className={`px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
                   <span className={`badge-${type.toLowerCase().replace(/[^a-z]/g, '')} px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-tighter`}>
