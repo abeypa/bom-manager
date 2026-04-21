@@ -312,23 +312,30 @@ const ProjectDetails = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleExport}
-            className="btn btn-secondary flex items-center gap-2"
-          >
-            <FileDown className="h-4 w-4" />
-            Export BOM
-          </button>
-          {isAdmin && (
+        <div className="flex gap-2">
+          {selectedPartIds.size > 0 && isAdmin && (
             <button
-              onClick={() => setSectionModal({ open: true, editing: null })}
-              className="btn btn-primary flex items-center gap-2 shadow-lg shadow-navy-900/10"
+              onClick={() => setPoModal(true)}
+              className="btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20 px-6 animate-in slide-in-from-right duration-300"
             >
-              <Layers className="h-4 w-4" />
-              Add Section
+              <ShoppingCart className="h-4 w-4 mr-2" />
+              RELEASE PO ({selectedPartIds.size})
             </button>
           )}
+          <button 
+            onClick={handleExport}
+            className="btn btn-secondary border-navy-100 text-navy-900"
+          >
+            <FileDown className="h-4 w-4 mr-2" />
+            EXPORT BOM
+          </button>
+          <button 
+            onClick={() => setSectionModal({ open: true, editing: null })}
+            className="btn btn-primary shadow-lg shadow-primary-600/20"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            ADD SECTION
+          </button>
         </div>
       </header>
 
@@ -408,6 +415,9 @@ const ProjectDetails = () => {
                     onEditPart={handleEditPart}
                     onDeletePart={handleDeletePart}
                     onImageClick={handleImageClick}
+                    selectedPartIds={selectedPartIds}
+                    onToggleSelectPart={handleSelectPart}
+                    onToggleSelectAll={handleSelectAll}
                   />
 
                   {/* Orphaned subsections */}

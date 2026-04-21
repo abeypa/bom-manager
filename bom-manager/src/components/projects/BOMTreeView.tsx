@@ -51,6 +51,8 @@ interface TreeItemProps {
   onCopy?: () => void
   onAddChild?: () => void
   onImageClick?: () => void
+  isSelected?: boolean
+  onSelect?: (selected: boolean) => void
 }
 
 const TreeItem = ({ 
@@ -66,7 +68,9 @@ const TreeItem = ({
   onDelete,
   onCopy,
   onAddChild,
-  onImageClick
+  onImageClick,
+  isSelected,
+  onSelect
 }: TreeItemProps) => {
   const {
     attributes,
@@ -113,6 +117,17 @@ const TreeItem = ({
         )}
 
         <div className="flex items-center gap-3 flex-1 min-w-0">
+          {onSelect && (
+            <div className="flex items-center pr-1 scale-110">
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={(e) => onSelect(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-600 cursor-pointer"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
           <div className="shrink-0">
             {getIcon()}
           </div>
@@ -181,6 +196,9 @@ interface BOMTreeViewProps {
   onEditPart: (part: any) => void
   onDeletePart: (partId: number) => void
   onImageClick: (entity: any, type: 'section' | 'subsection' | 'part') => void
+  selectedPartIds: Set<number>
+  onToggleSelectPart: (id: number) => void
+  onToggleSelectAll: (ids: number[]) => void
 }
 
 export default function BOMTreeView({
@@ -195,7 +213,10 @@ export default function BOMTreeView({
   onAddPart,
   onEditPart,
   onDeletePart,
-  onImageClick
+  onImageClick,
+  selectedPartIds,
+  onToggleSelectPart,
+  onToggleSelectAll
 }: BOMTreeViewProps) {
   const queryClient = useQueryClient()
   const { showToast } = useToast()
@@ -401,6 +422,11 @@ export default function BOMTreeView({
                           onCopy={() => onCopySubsection(sub)}
                           onAddChild={() => onAddPart(sub)}
                           onImageClick={() => onImageClick(sub, 'subsection')}
+                          isSelected={sub.parts.every((p: any) => selectedPartIds.has(p.id)) && sub.parts.length > 0}
+                          onSelect={(checked) => {
+                            const ids = sub.parts.map((p: any) => p.id)
+                            onToggleSelectAll(ids)
+                          }}
                         >
                           <SortableContext 
                             items={sub.parts.map((part: any) => `part-${part.id}`)} 
@@ -418,6 +444,8 @@ export default function BOMTreeView({
                                   onEdit={() => onEditPart(part)}
                                   onDelete={() => onDeletePart(part.id)}
                                   onImageClick={() => onImageClick(part, 'part')}
+                                  isSelected={selectedPartIds.has(part.id)}
+                                  onSelect={() => onToggleSelectPart(part.id)}
                                 />
                               ))}
                             </div>
