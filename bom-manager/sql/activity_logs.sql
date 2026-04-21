@@ -40,10 +40,12 @@ CREATE INDEX IF NOT EXISTS idx_activity_logs_action
 ALTER TABLE activity_logs ENABLE ROW LEVEL SECURITY;
 
 -- Authenticated users can read all activity logs
+DROP POLICY IF EXISTS "activity_logs_select" ON activity_logs;
 CREATE POLICY "activity_logs_select" ON activity_logs
   FOR SELECT USING (auth.role() = 'authenticated');
 
 -- Authenticated users can insert (for client-side logging)
+DROP POLICY IF EXISTS "activity_logs_insert" ON activity_logs;
 CREATE POLICY "activity_logs_insert" ON activity_logs
   FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
