@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   performed_by    UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   action          TEXT NOT NULL,       -- 'CREATE', 'UPDATE', 'DELETE', 'PASSWORD_RESET', 'ROLE_CHANGE', etc.
   entity_type     TEXT NOT NULL,       -- 'user', 'part', 'project', 'bom_item', 'supplier', 'purchase_order', etc.
-  entity_id       UUID NOT NULL,       -- The ID of the affected entity (cast to UUID)
+  entity_id       TEXT NOT NULL,       -- The ID of the affected entity (stringified)
   old_values      JSONB,               -- Snapshot of values BEFORE the change (NULL for CREATE)
   new_values      JSONB,               -- Snapshot of values AFTER the change (NULL for DELETE)
   created_at      TIMESTAMPTZ DEFAULT NOW(),
@@ -60,7 +60,7 @@ CREATE OR REPLACE FUNCTION log_activity(
   p_performed_by UUID,
   p_action TEXT,
   p_entity_type TEXT,
-  p_entity_id UUID,
+  p_entity_id TEXT,
   p_old_values JSONB DEFAULT NULL,
   p_new_values JSONB DEFAULT NULL,
   p_ip TEXT DEFAULT NULL
@@ -86,7 +86,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION log_activity(UUID, TEXT, TEXT, UUID, JSONB, JSONB, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION log_activity(UUID, TEXT, TEXT, TEXT, JSONB, JSONB, TEXT) TO authenticated;
 
 -- ================================================================
 -- OPTIONAL: Trigger-based automatic audit logging for key tables

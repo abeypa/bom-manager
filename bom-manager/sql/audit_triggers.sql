@@ -18,7 +18,7 @@ SET search_path = public
 AS $$
 DECLARE
   log_action TEXT;
-  log_entity_id UUID;
+  log_entity_id TEXT;
   log_old JSONB := NULL;
   log_new JSONB := NULL;
   caller_id UUID;
@@ -38,18 +38,18 @@ BEGIN
     log_new := to_jsonb(NEW);
     -- Remove large/sensitive fields from snapshot
     log_new := log_new - 'encrypted_password' - 'raw_app_meta_data' - 'raw_user_meta_data';
-    log_entity_id := NEW.id::uuid;
+    log_entity_id := NEW.id::text;
   ELSIF TG_OP = 'UPDATE' THEN
     log_old := to_jsonb(OLD);
     log_new := to_jsonb(NEW);
     -- Remove large/sensitive fields
     log_old := log_old - 'encrypted_password' - 'raw_app_meta_data' - 'raw_user_meta_data';
     log_new := log_new - 'encrypted_password' - 'raw_app_meta_data' - 'raw_user_meta_data';
-    log_entity_id := NEW.id::uuid;
+    log_entity_id := NEW.id::text;
   ELSIF TG_OP = 'DELETE' THEN
     log_old := to_jsonb(OLD);
     log_old := log_old - 'encrypted_password' - 'raw_app_meta_data' - 'raw_user_meta_data';
-    log_entity_id := OLD.id::uuid;
+    log_entity_id := OLD.id::text;
   END IF;
 
   -- Insert into activity_logs
