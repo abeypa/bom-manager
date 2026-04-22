@@ -338,6 +338,7 @@ const ProjectDetails = () => {
         const partsToAdd = collectParts(draggedData.type, draggedData.data)
         if (partsToAdd.length > 0) {
           addToBasket(partsToAdd)
+          showToast('success', `${partsToAdd.length} ${partsToAdd.length === 1 ? 'part' : 'parts'} added to basket`)
         }
       }
       return
@@ -453,7 +454,7 @@ const ProjectDetails = () => {
   return (
     <DndContext 
       sensors={sensors}
-      collisionDetection={pointerWithin}
+      collisionDetection={closestCenter}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >

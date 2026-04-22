@@ -98,13 +98,15 @@ const POBasket = ({
 
         {/* Drag-Over Feedback Overlay */}
         {isOver && (
-          <div className="absolute inset-0 z-[110] bg-primary-600/95 border-4 border-dashed border-white/40 m-2 rounded-xl flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-300 backdrop-blur-md">
+          <div className="absolute inset-0 z-[110] bg-primary-600/95 border-4 border-dashed border-white/40 m-2 rounded-xl flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-300 backdrop-blur-md shadow-2xl">
             <div className="bg-white p-8 rounded-full shadow-2xl mb-8 animate-bounce ring-8 ring-white/10">
               <ShoppingBag className="w-16 h-16 text-primary-600" />
             </div>
-            <h3 className="text-3xl font-black text-white uppercase tracking-tighter drop-shadow-2xl">DROP TO ADD</h3>
-            <p className="text-white/80 text-[11px] font-black uppercase tracking-[0.2em] mt-4 px-12 leading-relaxed">
-              Queueing items for final procurement release
+            <h3 className="text-2xl font-black text-white uppercase tracking-tight drop-shadow-lg px-6 leading-tight">
+              DROP HERE TO ADD TO PO BASKET
+            </h3>
+            <p className="text-white/80 text-[10px] font-black uppercase tracking-[0.2em] mt-6 px-12 leading-relaxed opacity-80">
+              Releasing item(s) into procurement queue
             </p>
           </div>
         )}
