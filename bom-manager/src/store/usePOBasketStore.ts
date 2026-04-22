@@ -17,10 +17,12 @@ export interface BasketItem {
 interface POBasketStore {
   basketItems: BasketItem[]
   basketOpen: boolean
+  poModalOpen: boolean
   projectId: number | null
 
   // Actions
   setBasketOpen: (open: boolean) => void
+  setPoModalOpen: (open: boolean) => void
   addToBasket: (parts: any[]) => void
   removeFromBasket: (id: number) => void
   updateItem: (id: number, updates: Partial<BasketItem>) => void
@@ -31,9 +33,11 @@ interface POBasketStore {
 export const usePOBasketStore = create<POBasketStore>((set, get) => ({
   basketItems: [],
   basketOpen: true, // Default to true as per recent requirement
+  poModalOpen: false,
   projectId: null,
 
   setBasketOpen: (open) => set({ basketOpen: open }),
+  setPoModalOpen: (open) => set({ poModalOpen: open }),
 
   addToBasket: (partsToAdd) => {
     set(state => {

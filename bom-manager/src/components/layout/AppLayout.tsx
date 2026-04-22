@@ -8,6 +8,9 @@ import {
 import { useRole } from '../../hooks/useRole';
 import { useAuth } from '../../context/AuthContext';
 import SearchOverlay from '@/components/ui/SearchOverlay';
+import POBasket from '@/components/projects/POBasket';
+import CreatePOFromBOMModal from '@/components/projects/CreatePOFromBOMModal';
+import { usePOBasketStore } from '@/store/usePOBasketStore';
 
 const NAV_SECTIONS = [
   {
@@ -269,6 +272,30 @@ export default function AppLayout() {
          </main>
        </div>
        <SearchOverlay isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+        
+        {/* Global PO Basket UI */}
+        <POBasket />
+
+        {/* Global Create PO Modal */}
+        {usePOBasketStore.getState().projectId && (
+          <GlobalPOModal />
+        )}
      </div>
    );
  }
+
+// Separate helper component to use hooks correctly
+function GlobalPOModal() {
+  const { poModalOpen, setPoModalOpen, projectId, basketItems, clearBasket } = usePOBasketStore();
+  
+  if (!projectId) return null;
+
+  return (
+    <CreatePOFromBOMModal 
+      isOpen={poModalOpen}
+      onClose={() => setPoModalOpen(false)}
+      projectId={projectId}
+      items={basketItems}
+    />
+  );
+}

@@ -11,41 +11,25 @@ import {
   ChevronLeft
 } from 'lucide-react'
 import { useDroppable } from '@dnd-kit/core'
-
-interface POBasketItem {
-  id: number
-  project_part_id: number
-  part_number: string
-  description: string
-  quantity: number
-  unit_price: number
-  discount_percent: number
-  part_type: string
-  part_id: number
-  po_info?: any
-}
+import { usePOBasketStore } from '@/store/usePOBasketStore'
 
 interface POBasketProps {
-  isOpen: boolean
-  onClose: () => void
-  items: POBasketItem[]
-  onRemoveItem: (id: number) => void
-  onUpdateItem: (id: number, updates: Partial<POBasketItem>) => void
-  onClearBasket: () => void
-  onReleasePO: () => void
   projectCurrency?: string
 }
 
 const POBasket = ({
-  isOpen,
-  onClose,
-  items,
-  onRemoveItem,
-  onUpdateItem,
-  onClearBasket,
-  onReleasePO,
   projectCurrency = '₹'
 }: POBasketProps) => {
+  const { 
+    basketItems: items, 
+    basketOpen: isOpen, 
+    setBasketOpen,
+    removeFromBasket,
+    updateItem,
+    clearBasket,
+    setPoModalOpen
+  } = usePOBasketStore()
+
   const { setNodeRef, isOver } = useDroppable({
     id: 'po-basket',
   })
@@ -71,7 +55,7 @@ const POBasket = ({
         {/* Persistent Side Handle (Visible when closed) */}
         {!isOpen && (
           <button 
-            onClick={onClose}
+            onClick={() => setBasketOpen(true)}
             className="absolute -left-12 top-1/2 -translate-y-1/2 bg-slate-900 text-white p-3 rounded-l-2xl shadow-[-10px_0_20px_rgba(0,0,0,0.3)] border border-slate-700 flex flex-col items-center gap-4 hover:bg-primary-600 transition-all group pointer-events-auto"
           >
             <ChevronLeft className="w-5 h-5 group-hover:scale-110 transition-transform" />
@@ -105,7 +89,7 @@ const POBasket = ({
             </div>
           </div>
           <button 
-            onClick={onClose}
+            onClick={() => setBasketOpen(false)}
             className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all hover:rotate-90 group"
           >
             <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
@@ -160,7 +144,7 @@ const POBasket = ({
                       </h4>
                     </div>
                     <button 
-                      onClick={() => onRemoveItem(item.id)}
+                      onClick={() => removeFromBasket(item.id)}
                       className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-xl transition-all"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -174,7 +158,7 @@ const POBasket = ({
                         type="number" 
                         min="1"
                         value={item.quantity}
-                        onChange={(e) => onUpdateItem(item.id, { quantity: parseInt(e.target.value) || 1 })}
+                        onChange={(e) => updateItem(item.id, { quantity: parseInt(e.target.value) || 1 })}
                         className="w-full bg-slate-950 border border-slate-700 text-white text-xs font-black px-3 py-2.5 rounded-xl focus:ring-2 focus:ring-primary-500/40 outline-none transition-all tabular-nums"
                       />
                     </div>
@@ -210,7 +194,7 @@ const POBasket = ({
           <div className="flex flex-col gap-3">
             <button 
               disabled={items.length === 0}
-              onClick={onReleasePO}
+              onClick={() => setPoModalOpen(true)}
               className={`w-full py-4.5 rounded-2xl flex items-center justify-center gap-3 font-black uppercase text-xs tracking-[0.15em] shadow-2xl transition-all active:scale-[0.97]
                 ${items.length === 0 
                   ? 'bg-slate-700 text-slate-500 cursor-not-allowed opacity-50' 
@@ -223,7 +207,7 @@ const POBasket = ({
             </button>
             
             <button 
-              onClick={onClearBasket}
+              onClick={clearBasket}
               className="w-full py-3 text-[10px] font-black text-slate-500 uppercase tracking-[0.25em] hover:text-red-400 transition-colors"
             >
               Clear Procurement Queue

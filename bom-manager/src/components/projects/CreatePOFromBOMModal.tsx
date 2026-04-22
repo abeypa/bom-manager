@@ -7,11 +7,11 @@ import { purchaseOrdersApi } from '@/api/purchase-orders'
 interface Props {
   isOpen: boolean
   onClose: () => void
-  project: any
-  selectedPartIds: number[]
+  projectId: number
+  items: any[]
 }
 
-const CreatePOFromBOMModal = ({ isOpen, onClose, project, selectedPartIds }: Props) => {
+const CreatePOFromBOMModal = ({ isOpen, onClose, projectId, items }: Props) => {
   const queryClient = useQueryClient()
   const [supplierId, setSupplierId] = useState<string>('')
   const [currency, setCurrency] = useState<string>('INR')
@@ -25,29 +25,15 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, project, selectedPartIds }: Pro
   })
 
   const selectedParts = useMemo(() => {
-    const list: any[] = []
-    project.sections?.forEach((section: any) => {
-      section.subsections?.forEach((sub: any) => {
-        sub.parts?.forEach((part: any) => {
-          if (selectedPartIds.includes(part.id)) {
-            const catalogItem = part.part_ref
-            const tableName = part.part_type
-
-            list.push({
-              ...part,
-              catalogItem,
-              tableName,
-              finalUnitPrice: part.unit_price || 0,
-              finalCurrency: part.currency || 'INR',
-              finalDiscount: part.discount_percent || catalogItem?.discount_percent || 0,
-              snapshotSupplier: catalogItem?.suppliers?.name || 'Unknown'
-            })
-          }
-        })
-      })
-    })
-    return list
-  }, [project.sections, selectedPartIds])
+    return items.map(p => ({
+      ...p,
+      tableName: p.part_type,
+      catalogItem: p.part_ref || { part_number: p.part_number, description: p.description },
+      finalUnitPrice: p.unit_price || 0,
+      finalCurrency: p.currency || 'INR',
+      finalDiscount: p.discount_percent || 0,
+    }))
+  }, [items])
 
   const totalAmount = useMemo(() => {
     return selectedParts.reduce((acc, p) => {
@@ -60,7 +46,7 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, project, selectedPartIds }: Pro
       if (!supplierId) throw new Error('Please select a supplier')
 
       const poData = {
-        project_id: project.id,
+        project_id: projectId,
         supplier_id: parseInt(supplierId),
         po_number: `PO-${Date.now().toString().slice(-8)}`,
         po_date: new Date().toISOString(),
@@ -93,7 +79,7 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, project, selectedPartIds }: Pro
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
-      queryClient.invalidateQueries({ queryKey: ['project-pos', project.id] })
+      queryClient.invalidateQueries({ queryKey: ['project-pos', projectId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       alert('Purchase Order created successfully in Draft status!')
       onClose()

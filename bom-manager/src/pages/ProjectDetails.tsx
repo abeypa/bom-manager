@@ -101,7 +101,6 @@ const ProjectDetails = () => {
     part: any | null
   }>({ open: false, part: null })
 
-  const [poModal, setPoModal] = useState(false)
   const [copyModal, setCopyModal] = useState<{
     open: boolean
     subsectionId: number
@@ -126,7 +125,8 @@ const ProjectDetails = () => {
     removeFromBasket, 
     updateItem: updateBasketItem,
     clearBasket,
-    setProjectId
+    setProjectId,
+    setPoModalOpen
   } = usePOBasketStore()
 
   const [activeDragItem, setActiveDragItem] = useState<any | null>(null)
@@ -557,7 +557,7 @@ const ProjectDetails = () => {
           <ProjectSidebar 
             project={project} 
             projectPOs={projectPOs || []}
-            onCreatePO={() => setPoModal(true)}
+            onCreatePO={() => setPoModalOpen(true)}
           />
 
           {/* Content Area */}
@@ -706,16 +706,7 @@ const ProjectDetails = () => {
           </div>
         </div>
 
-        {/* PO Basket Sidebar (Fixed position, handled internally) */}
-        <POBasket 
-          isOpen={basketOpen}
-          onClose={() => setBasketOpen(false)}
-          items={basketItems}
-          onRemoveItem={removeFromBasket}
-          onUpdateItem={updateBasketItem}
-          onClearBasket={clearBasket}
-          onReleasePO={() => setPoModal(true)}
-        />
+
 
         {/* Actual Drag Overlay for better UX */}
         <DragOverlay>
@@ -770,18 +761,7 @@ const ProjectDetails = () => {
           />
         )}
 
-        {poModal && (
-          <CreatePOFromBOMModal
-            isOpen={poModal}
-            onClose={() => {
-              setPoModal(false)
-              clearBasket()
-              setSelectedPartIds(new Set())
-            }}
-            project={project}
-            selectedPartIds={basketItems.map(item => item.id)}
-          />
-        )}
+
 
         {copyModal && (
           <ProjectSectionCopyModal
