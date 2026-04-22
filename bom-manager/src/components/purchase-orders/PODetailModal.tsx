@@ -7,7 +7,7 @@ import {
   Hash,
 } from 'lucide-react';
 import { purchaseOrdersApi } from '../../api/purchase-orders';
-import { poPaymentsApi, POPayment, PaymentType, PaymentMode } from '../../api/po-payments';
+import { poPaymentsApi, POPayment, PaymentType, PaymentMode, receivePoItem, issueOutPoItem } from '../../api/po-payments';
 import { uploadFile, getSignedUrl } from '../../api/storage';
 import { useToast } from '../../context/ToastContext';
 
@@ -50,6 +50,96 @@ export default function PODetailModal({
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [isUpdating, setIsUpdating] = useState(false);
+
+  // Modal flow state logic
+  const [receiveModalItem, setReceiveModalItem] = useState<any>(null);
+  const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
+  const [issueOutModalItem, setIssueOutModalItem] = useState<any>(null);
+  const [isIssueOutModalOpen, setIsIssueOutModalOpen] = useState(false);
+  const [currentAvailableStock, setCurrentAvailableStock] = useState<number>(0);
+
+  const handleOpenReceiveModal = (item: any) => {
+    setReceiveModalItem(item);
+    setIsReceiveModalOpen(true);
+  };
+
+  const handleOpenIssueOutModal = async (item: any) => {
+    setIssueOutModalItem(item);
+    setIsIssueOutModalOpen(true);
+    setCurrentAvailableStock(0);
+    // Fetch live stock
+    try {
+      const { supabase } = await import('../../lib/supabase');
+      const { data } = await supabase.from(item.part_type).select('stock_quantity').eq('id', item.part_id).single();
+      if (data) setCurrentAvailableStock(data.stock_quantity || 0);
+    } catch {}
+  };
+  
+  const handleIssueOutSubmit = async (formData: {
+    quantity: number;
+    issueDate: string;
+    notes?: string;
+  }) => {
+    if (!issueOutModalItem) return;
+  
+    if (formData.quantity <= 0 || formData.quantity > currentAvailableStock) {
+      showToast('error', `Quantity must be between 1 and ${currentAvailableStock}`);
+      return;
+    }
+  
+    try {
+      await issueOutPoItem(
+        issueOutModalItem.id.toString(),
+        formData.quantity,
+        formData.issueDate,
+        formData.notes
+      );
+  
+      setIsIssueOutModalOpen(false);
+      setIssueOutModalItem(null);
+      showToast('success', 'Part issued to project successfully');
+  
+      await loadData();
+      if (onStatusUpdated) onStatusUpdated();
+    } catch (error: any) {
+      console.error('Failed to issue part:', error);
+      showToast('error', error.message || 'Error issuing part. Please try again.');
+    }
+  };
+  
+  const handleReceiveSubmit = async (formData: {
+    quantity: number;
+    receiptDate: string;
+    notes?: string;
+  }) => {
+    if (!receiveModalItem) return;
+  
+    const pending = Math.max(0, receiveModalItem.quantity - (receiveModalItem.received_qty || 0));
+    if (formData.quantity <= 0 || formData.quantity > pending) {
+      showToast('error', `Quantity must be between 1 and ${pending}`);
+      return;
+    }
+  
+    try {
+      await receivePoItem(
+        receiveModalItem.id.toString(),
+        formData.quantity,
+        formData.receiptDate,
+        formData.notes
+      );
+  
+      setIsReceiveModalOpen(false);
+      setReceiveModalItem(null);
+      showToast('success', 'Receipt recorded successfully');
+      
+      // Refresh the PO data so RECEIVED / PENDING update instantly
+      await loadData();
+      if (onStatusUpdated) onStatusUpdated();
+    } catch (error: any) {
+      console.error('Failed to record receipt:', error);
+      showToast('error', error.message || 'Error recording receipt. Please try again.');
+    }
+  };
 
   // Overview state
   const [bepPoPdfUrl, setBepPoPdfUrl] = useState('');   // stored value (path or external URL)
@@ -587,7 +677,7 @@ export default function PODetailModal({
                     <table className="w-full text-left">
                       <thead className="bg-gray-50">
                         <tr>
-                          {['Part', 'Description', 'Unit Price', 'Disc. %', 'Ordered', 'Received', 'Pending', 'Value'].map(h => (
+                          {['Part', 'Description', 'Unit Price', 'Disc. %', 'Ordered', 'Received', 'Pending', 'Value', 'Actions'].map(h => (
                             <th key={h} className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
                           ))}
                         </tr>
@@ -622,6 +712,23 @@ export default function PODetailModal({
                             </td>
                             <td className="px-6 py-4 font-black text-sm tabular-nums">
                               ₹{item.total_amount?.toLocaleString('en-IN')}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => handleOpenReceiveModal(item)}
+                                  className="inline-flex items-center px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-md transition-colors"
+                                >
+                                  + Receive
+                                </button>
+                                
+                                <button
+                                  onClick={() => handleOpenIssueOutModal(item)}
+                                  className="inline-flex items-center px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-md transition-colors"
+                                >
+                                  + Issue Out
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -955,6 +1062,184 @@ export default function PODetailModal({
           </button>
         </div>
       </div>
+
+      {/* RECEIVE MODAL */}
+      {isReceiveModalOpen && receiveModalItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full mx-4 overflow-hidden border border-gray-100">
+            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-white">
+              <h3 className="font-black text-gray-900 tracking-tight text-lg">Record Receipt</h3>
+              <button
+                onClick={() => { setIsReceiveModalOpen(false); setReceiveModalItem(null); }}
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50">
+                <label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1.5">Receiving Part</label>
+                <div className="font-bold text-sm text-blue-900">
+                  <span className="font-mono bg-white px-2 py-0.5 rounded shadow-sm border border-blue-100 mr-2">{receiveModalItem.part_number || receiveModalItem.id}</span>
+                  <span className="opacity-80">{receiveModalItem.description || 'No description'}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                  Quantity to Receive <span className="text-amber-600">(MAX {Math.max(0, receiveModalItem.quantity - (receiveModalItem.received_qty || 0))})</span>
+                </label>
+                <input
+                  type="number"
+                  id="receive-quantity"
+                  defaultValue={Math.max(0, receiveModalItem.quantity - (receiveModalItem.received_qty || 0))}
+                  min="1"
+                  max={Math.max(0, receiveModalItem.quantity - (receiveModalItem.received_qty || 0))}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-5 py-3.5 text-base font-bold focus:bg-white focus:ring-2 focus:ring-gray-900 focus:border-transparent outline-none transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Receipt Date</label>
+                <div className="relative">
+                  <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    id="receive-date"
+                    defaultValue={new Date().toISOString().split('T')[0]}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl pl-12 pr-5 py-3.5 text-sm font-bold focus:bg-white focus:ring-2 focus:ring-gray-900 focus:border-transparent outline-none transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Notes (optional)</label>
+                <textarea
+                  id="receive-notes"
+                  rows={3}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-5 py-3.5 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-gray-900 focus:border-transparent outline-none transition-all resize-none"
+                  placeholder="Invoice references, GRN info..."
+                />
+              </div>
+            </div>
+
+            <div className="px-6 py-5 bg-gray-50/80 border-t border-gray-100 flex gap-3">
+              <button
+                onClick={() => { setIsReceiveModalOpen(false); setReceiveModalItem(null); }}
+                className="flex-1 py-3.5 px-4 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700 text-xs font-black rounded-2xl uppercase tracking-widest transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const qty = parseInt((document.getElementById('receive-quantity') as HTMLInputElement).value);
+                  const date = (document.getElementById('receive-date') as HTMLInputElement).value;
+                  const notes = (document.getElementById('receive-notes') as HTMLTextAreaElement).value.trim();
+
+                  handleReceiveSubmit({
+                    quantity: qty,
+                    receiptDate: date,
+                    notes: notes || undefined
+                  });
+                }}
+                className="flex-1 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-200 text-white text-xs font-black rounded-2xl uppercase tracking-widest transition-all focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
+              >
+                Confirm Receipt
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ISSUE OUT MODAL */}
+      {isIssueOutModalOpen && issueOutModalItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full mx-4 overflow-hidden border border-gray-100">
+            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-white">
+              <h3 className="font-black text-gray-900 tracking-tight text-lg">Issue Out to Project</h3>
+              <button
+                onClick={() => { setIsIssueOutModalOpen(false); setIssueOutModalItem(null); }}
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="bg-red-50/50 p-4 rounded-2xl border border-red-100/50">
+                <label className="block text-[10px] font-black text-red-400 uppercase tracking-widest mb-1.5">Issuing Part</label>
+                <div className="font-bold text-sm text-red-900">
+                  <span className="font-mono bg-white px-2 py-0.5 rounded shadow-sm border border-red-100 mr-2">{issueOutModalItem.part_number || issueOutModalItem.id}</span>
+                  <span className="opacity-80">{issueOutModalItem.description || 'No description'}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                  Quantity to Issue Out <span className="text-red-600">(MAX {currentAvailableStock})</span>
+                </label>
+                <input
+                  type="number"
+                  id="issue-quantity"
+                  defaultValue="1"
+                  min="1"
+                  max={currentAvailableStock}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-5 py-3.5 text-base font-bold focus:bg-white focus:ring-2 focus:ring-red-600 focus:border-transparent outline-none transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Issue Date</label>
+                <div className="relative">
+                  <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    id="issue-date"
+                    defaultValue={new Date().toISOString().split('T')[0]}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl pl-12 pr-5 py-3.5 text-sm font-bold focus:bg-white focus:ring-2 focus:ring-red-600 focus:border-transparent outline-none transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Notes (optional)</label>
+                <textarea
+                  id="issue-notes"
+                  rows={3}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-5 py-3.5 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-red-600 focus:border-transparent outline-none transition-all resize-none"
+                  placeholder="Project usage, reason, etc."
+                />
+              </div>
+            </div>
+
+            <div className="px-6 py-5 bg-gray-50/80 border-t border-gray-100 flex gap-3">
+              <button
+                onClick={() => { setIsIssueOutModalOpen(false); setIssueOutModalItem(null); }}
+                className="flex-1 py-3.5 px-4 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700 text-xs font-black rounded-2xl uppercase tracking-widest transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const qty = parseInt((document.getElementById('issue-quantity') as HTMLInputElement).value);
+                  const date = (document.getElementById('issue-date') as HTMLInputElement).value;
+                  const notes = (document.getElementById('issue-notes') as HTMLTextAreaElement).value.trim();
+
+                  handleIssueOutSubmit({
+                    quantity: qty,
+                    issueDate: date,
+                    notes: notes || undefined
+                  });
+                }}
+                className="flex-1 py-3.5 px-4 bg-red-600 hover:bg-red-700 hover:shadow-lg hover:shadow-red-200 text-white text-xs font-black rounded-2xl uppercase tracking-widest transition-all focus:ring-2 focus:ring-red-600 focus:ring-offset-2"
+              >
+                Confirm Issue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

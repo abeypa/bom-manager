@@ -147,3 +147,184 @@ export const poPaymentsApi = {
     return { success: true };
   },
 };
+
+export const receivePoItem = async (
+  poLineItemId: number | string,
+  quantity: number,
+  receiptDate?: string,
+  notes?: string
+): Promise<void> => {
+  if (quantity <= 0) throw new Error('Quantity must be greater than 0');
+
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  const userEmail = userData.user?.email || 'system';
+
+  // 1. Fetch PO Line Item context
+  const { data: poItem, error: poItemErr } = await supabase
+    .from('purchase_order_items')
+    .select('*, po:purchase_orders(po_number, id)')
+    .eq('id', poLineItemId)
+    .single();
+
+  if (poItemErr || !poItem) throw new Error('PO Line item not found');
+
+  const partTable = (poItem as any).part_type;
+  const partId = (poItem as any).part_id;
+  const poNumber = (poItem as any).po?.po_number;
+  const purchaseOrderId = (poItem as any).po?.id;
+
+  if (!partTable || !partId) throw new Error('Part metadata missing on line item');
+
+  // 2. Fetch master Part
+  const { data: part, error: partErr } = await (supabase as any)
+    .from(partTable)
+    .select('stock_quantity, part_number')
+    .eq('id', partId)
+    .single();
+
+  if (partErr || !part) throw new Error('Master part not found');
+
+  const newStock = (part.stock_quantity || 0) + quantity;
+
+  // 3. Execute queries atomically
+  await Promise.all([
+    // Update master stock
+    (supabase as any)
+      .from(partTable)
+      .update({ stock_quantity: newStock, updated_date: new Date().toISOString() })
+      .eq('id', partId),
+      
+    // Log typical stock movement ledger
+    (supabase as any).from('stock_movements').insert({
+      movement_type: 'IN',
+      part_table_name: partTable,
+      part_id: partId,
+      part_number: part.part_number,
+      quantity: quantity,
+      stock_before: part.stock_quantity || 0,
+      stock_after: newStock,
+      po_number: poNumber,
+      moved_by: userEmail,
+    }),
+    
+    // Save to the dedicated receipts table
+    (supabase as any).from('po_receipts').insert({
+      po_line_item_id: poLineItemId,
+      quantity,
+      receipt_date: receiptDate ? new Date(receiptDate).toISOString() : new Date().toISOString(),
+      notes: notes || null,
+      created_by: userId || null
+    }),
+    
+    // Maintain legacy received_qty increment
+    (supabase as any)
+      .from('purchase_order_items')
+      .update({ received_qty: ((poItem as any).received_qty || 0) + quantity })
+      .eq('id', poLineItemId),
+  ]);
+
+  // Check if entire PO is now fully received
+  const { data: allItems } = await supabase
+    .from('purchase_order_items')
+    .select('id, quantity, received_qty')
+    .eq('purchase_order_id', purchaseOrderId);
+    
+  if (allItems && allItems.length > 0) {
+    const allReceived = allItems.every((i: any) => {
+      // For the item we just updated, use the new qty
+      if (i.id == poLineItemId) {
+        return ((i.received_qty || 0) + quantity) >= i.quantity;
+      }
+      return (i.received_qty || 0) >= i.quantity;
+    });
+
+    if (allReceived) {
+      await (supabase as any)
+        .from('purchase_orders')
+        .update({
+          status: 'Received',
+          actual_delivery_date: new Date().toISOString(),
+          updated_date: new Date().toISOString(),
+        })
+        .eq('id', purchaseOrderId);
+    }
+  }
+};
+
+export const issueOutPoItem = async (
+  poLineItemId: number | string,
+  quantity: number,
+  issueDate?: string,
+  notes?: string
+): Promise<void> => {
+  if (quantity <= 0) throw new Error('Quantity must be greater than 0');
+
+  const { data: userData } = await supabase.auth.getUser();
+  const userEmail = userData.user?.email || 'system';
+
+  // 1. Fetch PO Line Item context
+  const { data: poItem, error: poItemErr } = await supabase
+    .from('purchase_order_items')
+    .select('*, po:purchase_orders(po_number, id)')
+    .eq('id', poLineItemId)
+    .single();
+
+  if (poItemErr || !poItem) throw new Error('PO Line item not found');
+
+  const partTable = (poItem as any).part_type;
+  const partId = (poItem as any).part_id;
+  const poNumber = (poItem as any).po?.po_number;
+
+  if (!partTable || !partId) throw new Error('Part metadata missing on line item');
+
+  // 2. Fetch master Part
+  const { data: part, error: partErr } = await (supabase as any)
+    .from(partTable)
+    .select('stock_quantity, part_number')
+    .eq('id', partId)
+    .single();
+
+  if (partErr || !part) throw new Error('Master part not found');
+
+  const stockBefore = part.stock_quantity || 0;
+  if (quantity > stockBefore) {
+    throw new Error(`Cannot issue ${quantity} parts. Only ${stockBefore} in stock.`);
+  }
+
+  const newStock = stockBefore - quantity;
+
+  // 3. Execute queries atomically
+  await Promise.all([
+    // Update master stock
+    (supabase as any)
+      .from(partTable)
+      .update({ stock_quantity: newStock, updated_date: new Date().toISOString() })
+      .eq('id', partId),
+      
+    // Log stock movement OUT
+    (supabase as any).from('stock_movements').insert({
+      movement_type: 'OUT',
+      part_table_name: partTable,
+      part_id: partId,
+      part_number: part.part_number,
+      quantity: quantity, // quantity is positive, type is OUT
+      stock_before: stockBefore,
+      stock_after: newStock,
+      po_number: poNumber,
+      moved_by: userEmail,
+      notes: notes || null
+    }),
+    
+    // Also log in part_usage_logs for backward compatibility
+    (supabase as any).from('part_usage_logs').insert({
+      project_name: poItem.project_part_id ? 'Project Allocation' : 'General Issue',
+      site_name: `PO: ${poNumber}`,
+      part_number: part.part_number,
+      part_table_name: partTable,
+      quantity: quantity, // or -quantity based on backend norms, usually positive since they group by
+      use_date_time: issueDate ? new Date(issueDate).toISOString() : new Date().toISOString(),
+      created_date: new Date().toISOString()
+    })
+  ]);
+};
