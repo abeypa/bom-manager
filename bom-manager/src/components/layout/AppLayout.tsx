@@ -277,16 +277,14 @@ export default function AppLayout() {
         <POBasket />
 
         {/* Global Create PO Modal */}
-        {usePOBasketStore.getState().projectId && (
-          <GlobalPOModal />
-        )}
-     </div>
-   );
- }
+        <GlobalPOModal />
+      </div>
+    );
+}
 
 // Separate helper component to use hooks correctly
 function GlobalPOModal() {
-  const { poModalOpen, setPoModalOpen, projectId, basketItems, clearBasket } = usePOBasketStore();
+  const { poModalOpen, setPoModalOpen, projectId, basketItems } = usePOBasketStore();
   
   if (!projectId) return null;
 
