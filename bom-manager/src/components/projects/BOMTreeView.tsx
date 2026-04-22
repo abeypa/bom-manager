@@ -91,7 +91,22 @@ const TreeItem = ({
     if (type === 'subsection') {
       return data.name || data.title || data.section_name || 'UNTITLED SUBSECTION'
     }
-    return data.name || data.description || 'Untitled'
+    
+    // ✅ CORRECT part row name display logic 
+    const part = data;
+    const manufacturerPartNo = part.manufacturerPartNo || part.part_ref?.manufacturer_part_number || '';
+    const globalDescription = part.globalDescription || part.description || part.part_ref?.description || '';
+    
+    if (type === 'part') {
+      return globalDescription || 
+             part.description || 
+             part.name || 
+             `${manufacturerPartNo} ${globalDescription}`.trim() ||
+             _label ||
+             'Untitled';
+    }
+    
+    return data.name || data.description || _label || 'Untitled';
   }
 
   // Checkbox sub-component
