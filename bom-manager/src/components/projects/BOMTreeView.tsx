@@ -127,7 +127,7 @@ const TreeItem = ({
             {getIcon()}
           </div>
           <div className="flex flex-col min-w-0">
-            <span className={`text-sm tracking-tight truncate ${type === 'section' ? 'font-black text-navy-900 uppercase' : (type === 'subsection' ? 'font-black text-slate-900 uppercase text-[11px] tracking-wider' : 'font-bold text-slate-700')}`}>
+            <span className={`text-sm tracking-tight truncate ${type === 'section' ? 'font-black text-navy-900 uppercase' : (type === 'subsection' ? 'font-black text-slate-800 uppercase' : 'font-bold text-slate-700')}`}>
               {label}
             </span>
             {type === 'part' && (
@@ -136,77 +136,44 @@ const TreeItem = ({
                   {data.part_ref?.part_number || 'No PN'} • QTY: {data.quantity}
                 </span>
 
-                {/* SINGLE TOOLTIP WRAPPER FOR STATUS */}
-                <Tooltip>
+                {/* EXACT PATTERN START */}
+                <Tooltip key={data.id}>
                   <TooltipTrigger asChild>
                     <div className="flex items-center gap-2 cursor-help">
                       {data.po_info ? (
-                        <Badge 
-                          variant={data.po_info.status === 'Draft' ? 'warning' : 'success'}
-                          className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase"
-                        >
+                        <Badge variant={data.po_info.status === 'Draft' ? 'warning' : 'success'} className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase">
                           {data.po_info.status === 'Draft' ? <Clock size={8} /> : <CheckCircle2 size={8} />}
-                          {data.po_info.status === 'Draft' ? 'Pending' : 'Released'}
+                          {data.po_info.status === 'Draft' ? 'PENDING PO' : 'RELEASED'}
                         </Badge>
                       ) : (
                         <Badge variant="secondary" className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase opacity-40">
                           <ShoppingBag size={8} />
-                          Not Ordered
+                          ORDERING
                         </Badge>
                       )}
 
                       {(() => {
-                        const isInStock = (data.po_info && data.po_info.received_qty >= data.quantity) || 
-                                       (!data.po_info && (data.part_ref?.stock_quantity || 0) >= data.quantity);
+                        const isInStock = (data.po_info && (data.po_info.received_qty || 0) >= (data.quantity || 0)) || 
+                                       (!data.po_info && (data.part_ref?.stock_quantity || 0) >= (data.quantity || 0));
                         return (
-                          <Badge 
-                            variant={isInStock ? 'success' : 'destructive'}
-                            className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase"
-                          >
+                          <Badge variant={isInStock ? 'success' : 'destructive'} className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase">
                             {isInStock ? <Package size={8} /> : <AlertTriangle size={8} />}
-                            {isInStock ? 'In Stock' : 'Arrived'}
+                            {isInStock ? 'ARRIVED' : 'NOT ARRIVED'}
                           </Badge>
                         )
                       })()}
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent side="right" className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl animate-in fade-in zoom-in duration-200">
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-[9px] font-black text-navy-900 uppercase tracking-widest mb-1 opacity-50">Procurement</p>
-                        {data.po_info ? (
-                          <div className="space-y-0.5">
-                            <p className="text-xs font-bold text-slate-700">PO #{data.po_info.po_number}</p>
-                            <p className="text-[10px] text-slate-400 capitalize">{data.po_info.status}</p>
-                          </div>
-                        ) : (
-                          <p className="text-[10px] font-medium text-slate-400">No linked PO</p>
-                        )}
-                      </div>
-                      
-                      <div className="pt-2 border-t border-slate-100">
-                        <p className="text-[9px] font-black text-navy-900 uppercase tracking-widest mb-1 opacity-50">Logistics</p>
-                        {data.po_info ? (
-                          <>
-                            <p className="text-xs font-bold text-slate-700">
-                              Received: <span className={data.po_info.received_qty >= data.quantity ? 'text-emerald-600' : 'text-red-500'}>
-                                {data.po_info.received_qty} / {data.quantity}
-                              </span>
-                            </p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-xs font-bold text-slate-700">
-                              Master Stock: <span className={(data.part_ref?.stock_quantity || 0) >= data.quantity ? 'text-emerald-600' : 'text-red-500'}>
-                                {data.part_ref?.stock_quantity || 0}
-                              </span>
-                            </p>
-                          </>
-                        )}
-                      </div>
+                  <TooltipContent side="right" className="max-w-xs bg-white border-slate-200 shadow-xl p-3 rounded-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="space-y-1 text-xs">
+                      <div className="font-bold text-navy-900 mb-1 tracking-wider uppercase text-[9px] opacity-50">Status Intelligence</div>
+                      <div>PO Number: <span className="font-bold text-navy-600">#{data.po_info?.po_number || 'N/A'}</span></div>
+                      <div>Received for Project: <span className="font-bold text-slate-700">{data.po_info?.received_qty || 0} / {data.quantity}</span></div>
+                      <div>System Status: <span className="capitalize font-bold text-slate-700">{data.po_info?.status || 'No PO'}</span></div>
                     </div>
                   </TooltipContent>
                 </Tooltip>
+                {/* EXACT PATTERN END */}
               </div>
             )}
           </div>

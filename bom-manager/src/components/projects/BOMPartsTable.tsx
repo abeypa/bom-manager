@@ -252,7 +252,8 @@ const BOMPartsTable = ({
     
     return (
       <div className="flex flex-col gap-1.5 min-w-[100px]">
-        <Tooltip>
+        {/* EXACT PATTERN START */}
+        <Tooltip key={part.id}>
           <TooltipTrigger asChild>
             <div className="flex flex-col gap-1.5 cursor-help">
               {/* PO Status Badge */}
@@ -262,19 +263,19 @@ const BOMPartsTable = ({
                   className="gap-1.5 px-2 text-[9px] font-black uppercase tracking-wider w-fit"
                 >
                   {poInfo.status === 'Draft' ? <Clock size={10} /> : <CheckCircle2 size={10} />}
-                  <span>{poInfo.status === 'Draft' ? 'Pending PO' : 'Released'}</span>
+                  <span>{poInfo.status === 'Draft' ? 'PENDING PO' : 'RELEASED'}</span>
                 </Badge>
               ) : (
                 <Badge variant="secondary" className="gap-1.5 px-2 text-[9px] font-black uppercase tracking-wider w-fit opacity-40">
                   <ShoppingBag size={10} />
-                  <span>Not Ordered</span>
+                  <span>ORDERING</span>
                 </Badge>
               )}
 
               {/* Stock / Arrival Status Badge */}
               {(() => {
                 const requiredQty = part.quantity || 0;
-                const isFullyReceived = poInfo && poInfo.received_qty >= requiredQty;
+                const isFullyReceived = poInfo && (poInfo.received_qty || 0) >= requiredQty;
                 const isMasterAvailable = !poInfo && (part.part_ref?.stock_quantity || 0) >= requiredQty;
                 const isInStock = isFullyReceived || isMasterAvailable;
 
@@ -284,43 +285,22 @@ const BOMPartsTable = ({
                     className="gap-1.5 px-2 text-[9px] font-black uppercase tracking-wider w-fit"
                   >
                     {isInStock ? <Package size={10} /> : <AlertTriangle size={10} />}
-                    <span>{isInStock ? 'In Stock' : 'Not Arrived'}</span>
+                    <span>{isInStock ? 'ARRIVED' : 'NOT ARRIVED'}</span>
                   </Badge>
                 )
               })()}
             </div>
           </TooltipTrigger>
-          <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl animate-in fade-in zoom-in duration-200">
-            <div className="space-y-3">
-              <div>
-                <p className="text-[9px] font-black text-navy-900 uppercase tracking-widest mb-1 opacity-50">Status Context</p>
-                {poInfo ? (
-                  <div className="space-y-1">
-                    <p className="text-xs font-bold text-slate-700">PO Number: <span className="text-navy-600">#{poInfo.po_number}</span></p>
-                    <p className="text-xs text-slate-500">Status: <span className="capitalize font-medium">{poInfo.status}</span></p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-400">Not part of any project PO.</p>
-                )}
-              </div>
-              
-              <div className="pt-2 border-t border-slate-100">
-                <p className="text-[9px] font-black text-navy-900 uppercase tracking-widest mb-1 opacity-50">Availability</p>
-                {poInfo ? (
-                  <>
-                    <p className="text-xs font-bold text-slate-700">Received for Project: <span className={poInfo.received_qty >= (part.quantity || 0) ? 'text-emerald-600' : 'text-red-600'}>{poInfo.received_qty} / {part.quantity || 0}</span></p>
-                    <p className="text-[10px] text-slate-400 mt-1 italic">Tracking specifically for this project assembly.</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs font-bold text-slate-700">Master Stock: <span className={(part.part_ref?.stock_quantity || 0) >= (part.quantity || 0) ? 'text-emerald-600' : 'text-red-600'}>{part.part_ref?.stock_quantity || 0} units</span></p>
-                    <p className="text-[10px] text-slate-400 mt-1 italic">Showing overall inventory capacity.</p>
-                  </>
-                )}
-              </div>
+          <TooltipContent side="right" className="max-w-xs bg-white border-slate-200 shadow-xl p-3 rounded-2xl animate-in fade-in zoom-in duration-200">
+            <div className="space-y-1 text-xs">
+              <div className="font-bold text-navy-900 mb-1 tracking-wider uppercase text-[9px] opacity-50">Status Intelligence</div>
+              <div>PO Number: <span className="font-bold text-navy-600">#{poInfo?.po_number || 'N/A'}</span></div>
+              <div>Received for Project: <span className="font-bold text-slate-700">{poInfo?.received_qty || 0} / {part.quantity}</span></div>
+              <div>System Status: <span className="capitalize font-bold text-slate-700">{poInfo?.status || 'No PO'}</span></div>
             </div>
           </TooltipContent>
         </Tooltip>
+        {/* EXACT PATTERN END */}
       </div>
     );
   };
