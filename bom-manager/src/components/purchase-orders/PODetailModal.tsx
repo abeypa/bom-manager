@@ -717,16 +717,16 @@ export default function PODetailModal({
                               <div className="flex items-center gap-2">
                                 <button
                                   onClick={() => handleOpenReceiveModal(item)}
-                                  className="inline-flex items-center px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-md transition-colors"
+                                  className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black rounded-lg uppercase tracking-widest shadow-md shadow-blue-200 transition-all transform active:scale-95"
                                 >
-                                  + Receive
+                                  Data IN
                                 </button>
                                 
                                 <button
                                   onClick={() => handleOpenIssueOutModal(item)}
-                                  className="inline-flex items-center px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-md transition-colors"
+                                  className="inline-flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-black rounded-lg uppercase tracking-widest transition-all transform active:scale-95"
                                 >
-                                  + Issue Out
+                                  Issue Out
                                 </button>
                               </div>
                             </td>
