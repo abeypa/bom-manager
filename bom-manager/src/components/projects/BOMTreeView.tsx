@@ -40,18 +40,25 @@ import { Badge } from '@/components/ui/badge'
 /**
  * Highlight Utility
  * Wraps matching parts of string in a yellow mark tag for search visibility.
+ * Supports multiple queries.
  */
-const Highlight = ({ text, query }: { text: any, query: string }) => {
+const Highlight = ({ text, queries = [] }: { text: any, queries?: string[] }) => {
   const str = String(text || '');
-  if (!query || !str) return <>{str}</>;
+  if (!queries.length || !str || queries.every(q => !q)) return <>{str}</>;
   
-  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  // Clean queries: remove empty and escape
+  const activeQueries = queries.filter(q => q && q.trim().length > 0)
+    .map(q => q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  
+  if (activeQueries.length === 0) return <>{str}</>;
+
+  const regex = new RegExp(`(${activeQueries.join('|')})`, 'gi');
   const parts = str.split(regex);
   
   return (
     <>
       {parts.map((part, i) => 
-        part.toLowerCase() === query.toLowerCase() ? (
+        activeQueries.some(q => part.toLowerCase() === q.toLowerCase() || new RegExp(q, 'gi').test(part)) ? (
           <mark key={i} className="bg-yellow-300 text-black px-0.5 rounded font-bold shadow-sm">{part}</mark>
         ) : part
       )}
@@ -67,6 +74,7 @@ interface TreeItemProps {
   type: 'section' | 'subsection' | 'part'
   data: any
   searchQuery?: string
+  bulkSearchIds?: string[]
   isExpanded?: boolean
   onToggle?: () => void
   onEdit?: () => void
@@ -86,6 +94,7 @@ const TreeItem = ({
   type, 
   data, 
   searchQuery = '',
+  bulkSearchIds = [],
   isExpanded, 
   onToggle,
   onEdit,
@@ -206,7 +215,7 @@ const TreeItem = ({
             
             <Folder className="h-5 w-5 text-amber-600" />
             <span className="font-semibold text-base text-slate-900 truncate">
-              <Highlight text={getDisplayName()} query={searchQuery} />
+              <Highlight text={getDisplayName()} queries={[searchQuery, ...bulkSearchIds]} />
             </span>
             
             <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
@@ -226,12 +235,17 @@ const TreeItem = ({
   }
 
   // ── SECTION / PART RENDER ─────────────────────────────────────
+  const isBulkMatch = type === 'part' && bulkSearchIds.length > 0 && bulkSearchIds.some(q => 
+    String(erpId || '').toLowerCase().includes(q.toLowerCase()) || 
+    String(data.part_ref?.part_number || '').toLowerCase().includes(q.toLowerCase())
+  )
+
   return (
     <div ref={setNodeRef} style={style} className="group select-none">
       <div className={`
         flex items-center gap-2 py-2 px-2 rounded-xl transition-all duration-300
         ${level === 0 ? 'mt-6 bg-slate-50/30' : 'mt-1'} 
-        ${isSelected ? 'bg-primary-50/80 border-l-2 border-primary-500 shadow-sm' : 'hover:bg-slate-100/50'}
+        ${isSelected ? 'bg-primary-50/80 border-l-2 border-primary-500 shadow-sm' : isBulkMatch ? 'bg-yellow-50 border-l-2 border-yellow-400' : 'hover:bg-slate-100/50'}
       `}>
         <div 
           className="p-1 hover:bg-white rounded-lg text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing"
@@ -262,21 +276,21 @@ const TreeItem = ({
               text-sm tracking-tight truncate 
               ${type === 'section' ? 'font-black text-navy-900 uppercase tracking-widest' : 'font-bold text-slate-600'}
             `}>
-              <Highlight text={getDisplayName()} query={searchQuery} />
+              <Highlight text={getDisplayName()} queries={[searchQuery, ...bulkSearchIds]} />
             </span>
 
             {type === 'part' && (
               <div className="flex flex-col gap-1.5 mt-1.5">
                 <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
                   <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
-                    <Highlight text={data.part_ref?.part_number} query={searchQuery} />
+                    <Highlight text={data.part_ref?.part_number} queries={[searchQuery, ...bulkSearchIds]} />
                     {data.part_ref?.part_number && ' • '}
                     QTY: {data.quantity}
                   </span>
 
                   {erpId && (
                     <span className="text-[10px] font-mono text-navy-400 bg-navy-50/50 px-1.5 py-0.5 rounded border border-navy-100 shrink-0">
-                      ERP ID: <Highlight text={erpId} query={searchQuery} />
+                      ERP ID: <Highlight text={erpId} queries={[searchQuery, ...bulkSearchIds]} />
                     </span>
                   )}
                 </div>
@@ -410,6 +424,8 @@ export default function BOMTreeView({
   const [searchQuery, setSearchQuery] = useState('')
   const [tempErpSearch, setTempErpSearch] = useState('')
   const [erpSearchQuery, setErpSearchQuery] = useState('')
+  const [bulkSearchRaw, setBulkSearchRaw] = useState('')
+  const [bulkSearchIds, setBulkSearchIds] = useState<string[]>([])
 
   // Debounced search logic
   React.useEffect(() => {
@@ -427,15 +443,30 @@ export default function BOMTreeView({
     return () => clearTimeout(timer)
   }, [tempErpSearch])
 
+  // Debounced Bulk Search logic
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      const ids = bulkSearchRaw.split(',')
+        .map(id => id.trim())
+        .filter(id => id.length > 0)
+      
+      // Deduplicate
+      const uniqueIds = Array.from(new Set(ids))
+      setBulkSearchIds(uniqueIds)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [bulkSearchRaw])
+
   /**
    * Filtered Data Logic
    * Hierarchical filter: If a part matches, its subsection and section must remain visible.
    */
   const filteredSections = useMemo(() => {
-    if (!searchQuery && !erpSearchQuery) return project.sections || [];
+    if (!searchQuery && !erpSearchQuery && bulkSearchIds.length === 0) return project.sections || [];
 
     const sQuery = searchQuery.toLowerCase();
     const eQuery = erpSearchQuery.toLowerCase();
+    const bQueries = bulkSearchIds.map(id => id.toLowerCase());
 
     return (project.sections || []).map((section: any) => {
       const filteredSubsections = (section.subsections || []).map((sub: any) => {
@@ -444,6 +475,9 @@ export default function BOMTreeView({
           const partPbo = String(part.part_ref?.part_number || '').toLowerCase();
           const partDesc = String(part.description || part.part_ref?.description || '').toLowerCase();
           const partName = String(part.name || '').toLowerCase();
+
+          // Bulk matches
+          const matchesBulk = bQueries.length === 0 || bQueries.some(q => partErpId.includes(q) || partPbo.includes(q));
 
           // ERP Query must match ERP ID specifically if present
           const matchesErp = !erpSearchQuery || partErpId.includes(eQuery);
@@ -455,7 +489,7 @@ export default function BOMTreeView({
             partName.includes(sQuery) ||
             partErpId.includes(sQuery);
 
-          return matchesErp && matchesGlobal;
+          return matchesBulk && matchesErp && matchesGlobal;
         });
 
         // Subsection matches if its name matches QR if it has matching parts
@@ -476,11 +510,32 @@ export default function BOMTreeView({
       }
       return null;
     }).filter(Boolean);
-  }, [project.sections, searchQuery, erpSearchQuery]);
+  }, [project.sections, searchQuery, erpSearchQuery, bulkSearchIds]);
+
+  // Bulk Auto-Select Logic
+  React.useEffect(() => {
+    if (bulkSearchIds.length > 0) {
+      const matchingPartIds: number[] = []
+      filteredSections.forEach((s: any) => {
+        s.subsections?.forEach((sub: any) => {
+          sub.parts?.forEach((p: any) => {
+             // Only select if not already selected
+             if (!selectedPartIds.has(p.id)) {
+               matchingPartIds.push(p.id)
+             }
+          })
+        })
+      })
+
+      if (matchingPartIds.length > 0) {
+        onToggleSelectAll(matchingPartIds)
+      }
+    }
+  }, [bulkSearchIds, filteredSections])
 
   // Auto-expand nodes when searching
   React.useEffect(() => {
-    if (searchQuery || erpSearchQuery) {
+    if (searchQuery || erpSearchQuery || bulkSearchIds.length > 0) {
       const newExpanded = new Set<string>();
       filteredSections.forEach((s: any) => {
         newExpanded.add(`section-${s.id}`);
@@ -492,7 +547,7 @@ export default function BOMTreeView({
       });
       setExpandedNodes(newExpanded);
     }
-  }, [searchQuery, erpSearchQuery, filteredSections]);
+  }, [searchQuery, erpSearchQuery, bulkSearchIds, filteredSections]);
 
   const allContainerIds = useMemo(() => {
     const ids: string[] = []
@@ -517,6 +572,7 @@ export default function BOMTreeView({
 
   return (
     <div className="bg-white rounded-[2rem] border border-slate-100 shadow-2xl shadow-navy-900/5 overflow-hidden">
+      {/* Search & Global Controls Toolbar */}
       <div className="bg-slate-50/80 px-8 py-5 border-b border-slate-200/60 flex items-center justify-between gap-6 flex-wrap backdrop-blur-md">
         <div className="flex items-center gap-6">
           <h3 className="text-xs font-black text-navy-900 tracking-[0.3em] uppercase flex items-center gap-3">
@@ -560,30 +616,61 @@ export default function BOMTreeView({
                 </div>
                 <input
                   type="text"
-                  placeholder="Search by ERP ID..."
+                  placeholder="ERP ID..."
                   value={tempErpSearch}
                   onChange={(e) => setTempErpSearch(e.target.value)}
-                  className="h-9 pl-9 pr-8 bg-navy-50/30 border border-navy-100 rounded-xl text-xs font-bold placeholder:text-navy-300 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 transition-all w-56 shadow-sm"
+                  className="h-9 pl-9 pr-8 bg-navy-50/30 border border-navy-100 rounded-xl text-xs font-bold placeholder:text-navy-300 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 transition-all w-40 shadow-sm"
                 />
                 {tempErpSearch && (
                   <button onClick={() => setTempErpSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500"><CloseIcon size={12} /></button>
+                )}
+              </div>
+
+              <div className="relative group">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-primary-400 group-focus-within:text-primary-600 transition-colors">
+                  <PlusCircle size={14} />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Bulk ERP IDs (csv)..."
+                  value={bulkSearchRaw}
+                  onChange={(e) => setBulkSearchRaw(e.target.value)}
+                  className="h-9 pl-9 pr-8 bg-primary-50/20 border border-primary-100 rounded-xl text-xs font-bold placeholder:text-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all w-64 shadow-sm"
+                />
+                {bulkSearchRaw && (
+                  <button onClick={() => setBulkSearchRaw('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500"><CloseIcon size={12} /></button>
                 )}
               </div>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          {selectedPartIds.size > 0 && onAddSelectedToBasket && (
+        {/* Selected Items Summary Bar */}
+        {selectedPartIds.size > 0 && (
+          <div className="flex items-center gap-4 bg-navy-900 px-4 py-1.5 rounded-xl shadow-lg animate-in slide-in-from-right duration-500 border border-white/10 ring-1 ring-white/5">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+              <span className="text-[10px] font-black text-white uppercase tracking-widest leading-none">
+                {selectedPartIds.size} Parts Selected
+              </span>
+            </div>
+            <div className="w-px h-3 bg-white/20" />
             <button
               onClick={onAddSelectedToBasket}
-              className="btn h-9 bg-primary-600 hover:bg-primary-700 text-white border-none text-[10px] px-5 font-black uppercase tracking-widest shadow-lg shadow-primary-500/25 transition-all"
+              className="text-[9px] font-black text-primary-400 hover:text-white uppercase tracking-[0.15em] transition-all flex items-center gap-2 group"
             >
-              <ShoppingCart className="w-3.5 h-3.5 mr-2" />
-              Add Selected ({selectedPartIds.size})
+              <ShoppingCart size={11} className="group-hover:scale-110 transition-transform" />
+              Add to Basket
             </button>
-          )}
-        </div>
+            <div className="w-px h-3 bg-white/20" />
+            <button
+              onClick={() => onToggleSelectAll([])}
+              className="text-[9px] font-black text-slate-400 hover:text-red-400 uppercase tracking-[0.15em] transition-all"
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="p-8 lg:p-12">
@@ -619,6 +706,7 @@ export default function BOMTreeView({
                     type="section"
                     data={section}
                     searchQuery={erpSearchQuery || searchQuery}
+                    bulkSearchIds={bulkSearchIds}
                     isExpanded={expandedNodes.has(`section-${section.id}`)}
                     onToggle={() => toggleNode(`section-${section.id}`)}
                     onEdit={() => onEditSection(section)}
@@ -640,6 +728,7 @@ export default function BOMTreeView({
                             type="subsection"
                             data={sub}
                             searchQuery={erpSearchQuery || searchQuery}
+                            bulkSearchIds={bulkSearchIds}
                             isExpanded={expandedNodes.has(`sub-${sub.id}`)}
                             onToggle={() => toggleNode(`sub-${sub.id}`)}
                             onEdit={() => onEditSubsection(sub)}
@@ -667,6 +756,7 @@ export default function BOMTreeView({
                                     type="part"
                                     data={part}
                                     searchQuery={erpSearchQuery || searchQuery}
+                                    bulkSearchIds={bulkSearchIds}
                                     onEdit={() => onEditPart(part)}
                                     onDelete={() => onDeletePart(part.id)}
                                     onImageClick={() => onImageClick(part, 'part')}
