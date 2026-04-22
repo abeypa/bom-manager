@@ -85,6 +85,7 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, projectId, items }: Props) => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
       queryClient.invalidateQueries({ queryKey: ['project-pos', projectId] })
       queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['bom-tree', projectId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       
       clearBasket()

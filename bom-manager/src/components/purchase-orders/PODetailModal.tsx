@@ -148,6 +148,7 @@ export default function PODetailModal({
       if (po?.project_id) {
         queryClient.invalidateQueries({ queryKey: ['project', po.project_id] });
         queryClient.invalidateQueries({ queryKey: ['project-pos', po.project_id] });
+        queryClient.invalidateQueries({ queryKey: ['bom-tree', po.project_id] });
       }
 
       await loadData();

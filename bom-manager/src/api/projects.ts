@@ -217,16 +217,21 @@ export const projectsApi = {
       .in('project_part_id', parts.map(p => p.id))
 
     if (!poItemsErr && poItems) {
-      // Map PO info to parts
+      // Map PO info to parts - prioritize non-Draft statuses if multiple POs exist for the same item
       parts = parts.map(p => {
-        const item = (poItems as any[]).find(i => i.project_part_id === p.id)
+        const itemMatches = (poItems as any[]).filter(i => i.project_part_id === p.id)
+        if (itemMatches.length === 0) return { ...p, po_info: null }
+        
+        // Prioritize released/sent/received over Draft
+        const bestMatch = itemMatches.find(i => i.purchase_orders?.status !== 'Draft') || itemMatches[0]
+        
         return {
           ...p,
-          po_info: item ? {
-            po_number: item.purchase_orders?.po_number,
-            status: item.purchase_orders?.status,
-            received_qty: item.received_qty || 0
-          } : null
+          po_info: {
+            po_number: bestMatch.purchase_orders?.po_number,
+            status: bestMatch.purchase_orders?.status,
+            received_qty: bestMatch.received_qty || 0
+          }
         }
       })
     }
