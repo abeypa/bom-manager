@@ -1,7 +1,7 @@
 import { resolvePartType } from '@/utils/partTypeUtils'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2, Edit2, Check, X, ImageIcon, ArrowUpDown, Clock, CheckCircle2, Package, ShoppingCart, GripVertical } from 'lucide-react'
+import { Trash2, Edit2, Check, X, ImageIcon, ArrowUpDown, Clock, CheckCircle2, Package, ShoppingCart, GripVertical, AlertTriangle, ShoppingBag } from 'lucide-react'
 import { projectsApi } from '@/api/projects'
 import { useToast } from '@/context/ToastContext'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -112,7 +112,7 @@ const DraggableRow = ({
         </div>
       </td>
       <td className={`px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
-        {renderPOStatus(part.po_info)}
+        {renderPOStatus(part)}
       </td>
       <td className={`px-6 ${density === 'compact' ? 'py-1' : 'py-3'}`}>
         <span className={`badge-${type.toLowerCase().replace(/[^a-z]/g, '')} px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-tighter`}>
@@ -247,40 +247,75 @@ const BOMPartsTable = ({
   const [density, setDensity] = useState<'compact' | 'comfortable'>('comfortable')
 
   // Helper to render PO status badge
-  const renderPOStatus = (poInfo: any) => {
-    if (!poInfo) return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold text-slate-300 uppercase tracking-widest bg-slate-50 border border-slate-100">
-        Available
-      </span>
-    );
-
-    const isReleased = ['Released', 'Sent', 'Confirmed', 'Partial', 'Received'].includes(poInfo.status);
+  const renderPOStatus = (part: any) => {
+    const poInfo = part.po_info;
     
     return (
       <TooltipProvider delayDuration={0}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span 
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-tighter border cursor-help ${
-                isReleased 
-                  ? 'text-emerald-600 bg-emerald-50 border-emerald-100' 
-                  : 'text-amber-600 bg-amber-50 border-amber-100'
-              }`}
-            >
-              {isReleased ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-              {isReleased ? 'Released' : 'Pending'}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="bg-navy-900 text-white border-navy-800 text-[10px] font-bold uppercase tracking-widest px-3 py-2">
-            <div className="flex flex-col gap-1">
-              <span className="text-navy-400">PO Number</span>
-              <span className="text-white">{poInfo.po_number || 'N/A'}</span>
-              <div className="h-px bg-white/10 my-1" />
-              <span className="text-navy-400">Current Status</span>
-              <span className={`${isReleased ? 'text-emerald-400' : 'text-amber-400'}`}>{poInfo.status}</span>
+        <div className="flex flex-col gap-1.5 min-w-[100px]">
+          {/* PO Status Badge */}
+          {poInfo ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider cursor-help w-fit ${
+                  poInfo.status === 'Draft' 
+                    ? 'bg-amber-50 text-amber-700 border-amber-100' 
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                }`}>
+                  {poInfo.status === 'Draft' ? <Clock size={10} /> : <CheckCircle2 size={10} />}
+                  <span>{poInfo.status === 'Draft' ? 'Pending PO' : 'Released'}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
+                <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Purchase Order Info</p>
+                <p className="text-xs font-bold text-slate-600">PO Number: <span className="text-navy-600">#{poInfo.po_number}</span></p>
+                <p className="text-xs font-bold text-slate-600">Status: <span className="capitalize">{poInfo.status}</span></p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider bg-slate-50 text-slate-400 border-slate-100 w-fit">
+              <ShoppingBag size={10} />
+              <span>Not Ordered</span>
             </div>
-          </TooltipContent>
-        </Tooltip>
+          )}
+
+          {/* Stock / Arrival Status Badge */}
+          {(() => {
+            const requiredQty = part.quantity || 0;
+            const isFullyReceived = poInfo && poInfo.received_qty >= requiredQty;
+            const isMasterAvailable = !poInfo && (part.part_ref?.stock_quantity || 0) >= requiredQty;
+            const isInStock = isFullyReceived || isMasterAvailable;
+
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider cursor-help w-fit ${
+                    isInStock 
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                      : 'bg-red-50 text-red-700 border-red-100'
+                  }`}>
+                    {isInStock ? <Package size={10} /> : <AlertTriangle size={10} />}
+                    <span>{isInStock ? 'In Stock' : 'Not Arrived'}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
+                  <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Inventory Context</p>
+                  {poInfo ? (
+                    <>
+                      <p className="text-xs font-bold text-slate-600">Received for Project: <span className={poInfo.received_qty >= requiredQty ? 'text-emerald-600' : 'text-red-600'}>{poInfo.received_qty} / {requiredQty}</span></p>
+                      <p className="text-xs font-medium text-slate-400 mt-1">Status tracks arrival against official PO release.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs font-bold text-slate-600">Master Stock: <span className={(part.part_ref?.stock_quantity || 0) >= requiredQty ? 'text-emerald-600' : 'text-red-600'}>{part.part_ref?.stock_quantity || 0} units</span></p>
+                      <p className="text-xs font-medium text-slate-400 mt-1">Showing general availability in master inventory.</p>
+                    </>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            )
+          })()}
+        </div>
       </TooltipProvider>
     );
   };

@@ -213,7 +213,7 @@ export const projectsApi = {
     // 5. PO Status Integration (NEW)
     const { data: poItems, error: poItemsErr } = await supabase
       .from('purchase_order_items')
-      .select('id, project_part_id, purchase_orders(po_number, status)')
+      .select('id, project_part_id, received_qty, purchase_orders(po_number, status)')
       .in('project_part_id', parts.map(p => p.id))
 
     if (!poItemsErr && poItems) {
@@ -224,7 +224,8 @@ export const projectsApi = {
           ...p,
           po_info: item ? {
             po_number: item.purchase_orders?.po_number,
-            status: item.purchase_orders?.status
+            status: item.purchase_orders?.status,
+            received_qty: item.received_qty || 0
           } : null
         }
       })

@@ -17,8 +17,18 @@ import {
   Copy,
   PlusCircle,
   ImageIcon,
-  Plus
+  Plus,
+  Clock,
+  CheckCircle2,
+  AlertTriangle,
+  ShoppingBag
 } from 'lucide-react'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 interface TreeItemProps {
   id: string | number
@@ -36,6 +46,31 @@ interface TreeItemProps {
   onImageClick?: () => void
   isSelected?: boolean
   onSelect?: (selected: boolean) => void
+}
+
+const StatusBadge = ({ 
+  label, 
+  icon: Icon, 
+  variant = 'default' 
+}: { 
+  label: string, 
+  icon: any, 
+  variant?: 'success' | 'warning' | 'destructive' | 'secondary' 
+}) => {
+  const variants = {
+    success: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    warning: 'bg-amber-50 text-amber-700 border-amber-100',
+    destructive: 'bg-red-50 text-red-700 border-red-100',
+    secondary: 'bg-slate-50 text-slate-500 border-slate-100',
+    default: 'bg-slate-50 text-slate-500 border-slate-100'
+  }
+
+  return (
+    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider ${variants[variant]}`}>
+      <Icon size={10} className="shrink-0" />
+      <span>{label}</span>
+    </div>
+  )
 }
 
 const TreeItem = ({ 
@@ -125,9 +160,68 @@ const TreeItem = ({
               {label}
             </span>
             {type === 'part' && (
-              <span className="text-[10px] font-mono text-slate-400">
-                {data.part_ref?.part_number || 'No PN'} • QTY: {data.quantity}
-              </span>
+              <div className="flex items-center gap-3 mt-1">
+                <span className="text-[10px] font-mono text-slate-400">
+                  {data.part_ref?.part_number || 'No PN'} • QTY: {data.quantity}
+                </span>
+                
+                <div className="flex items-center gap-2">
+                  <TooltipProvider delayDuration={0}>
+                    {/* PO Status Badge */}
+                    {data.po_info ? (
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <StatusBadge 
+                            label={data.po_info.status === 'Draft' ? 'Pending PO' : 'Released'}
+                            icon={data.po_info.status === 'Draft' ? Clock : CheckCircle2}
+                            variant={data.po_info.status === 'Draft' ? 'warning' : 'success'}
+                          />
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
+                          <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Purchase Order Info</p>
+                          <p className="text-xs font-bold text-slate-600">PO Number: <span className="text-navy-600">#{data.po_info.po_number}</span></p>
+                          <p className="text-xs font-bold text-slate-600">Status: <span className="capitalize">{data.po_info.status}</span></p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <StatusBadge label="Not Ordered" icon={ShoppingBag} variant="secondary" />
+                    )}
+
+                    {/* Stock / Arrival Status Badge */}
+                    <Tooltip>
+                      <TooltipTrigger>
+                        {(() => {
+                           const isFullyReceived = data.po_info && data.po_info.received_qty >= data.quantity;
+                           const isMasterAvailable = !data.po_info && (data.part_ref?.stock_quantity || 0) >= data.quantity;
+                           const isInStock = isFullyReceived || isMasterAvailable;
+
+                           return (
+                             <StatusBadge 
+                               label={isInStock ? 'In Stock' : 'Not Arrived'}
+                               icon={isInStock ? Package : AlertTriangle}
+                               variant={isInStock ? 'success' : 'destructive'}
+                             />
+                           )
+                        })()}
+                      </TooltipTrigger>
+                      <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
+                        <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Inventory Context</p>
+                        {data.po_info ? (
+                          <>
+                            <p className="text-xs font-bold text-slate-600">Received for Project: <span className={data.po_info.received_qty >= data.quantity ? 'text-emerald-600' : 'text-red-600'}>{data.po_info.received_qty} / {data.quantity}</span></p>
+                            <p className="text-xs font-medium text-slate-400 mt-1">Status tracks arrival against official PO release.</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs font-bold text-slate-600">Master Stock: <span className={(data.part_ref?.stock_quantity || 0) >= data.quantity ? 'text-emerald-600' : 'text-red-600'}>{data.part_ref?.stock_quantity || 0} units</span></p>
+                            <p className="text-xs font-medium text-slate-400 mt-1">Showing general availability in master inventory.</p>
+                          </>
+                        )}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </div>
             )}
           </div>
         </div>

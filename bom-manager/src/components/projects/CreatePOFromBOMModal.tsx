@@ -80,6 +80,7 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, projectId, items }: Props) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
       queryClient.invalidateQueries({ queryKey: ['project-pos', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       alert('Purchase Order created successfully in Draft status!')
       onClose()
