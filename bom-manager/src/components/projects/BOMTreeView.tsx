@@ -12,9 +12,6 @@ import {
   Layers, 
   Folder, 
   FileText, 
-  MoreHorizontal, 
-  Settings, 
-  Copy,
   PlusCircle,
   ImageIcon,
   Plus,
@@ -25,6 +22,7 @@ import {
   Package,
   Edit2,
   Trash2,
+  ShoppingCart,
 } from 'lucide-react'
 import {
   Tooltip,
@@ -136,43 +134,72 @@ const TreeItem = ({
                   {data.part_ref?.part_number || 'No PN'} • QTY: {data.quantity}
                 </span>
 
-                {/* CORRECT — one Tooltip per part row */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="flex items-center gap-1.5 cursor-help">
-                      {data.po_info ? (
-                        <Badge variant={data.po_info.status === 'Draft' ? 'warning' : 'success'} className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase">
-                          {data.po_info.status === 'Draft' ? <Clock size={8} /> : <CheckCircle2 size={8} />}
-                          {data.po_info.status === 'Draft' ? 'PENDING PO' : 'RELEASED'}
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase opacity-40">
-                          <ShoppingBag size={8} />
-                          ORDERING
-                        </Badge>
-                      )}
+                {/* ✅ ONLY CORRECT PATTERN — ONE Tooltip per part row */}
+                {(() => {
+                  const poInfo = data.po_info;
+                  const hasPendingPO = poInfo && poInfo.status === 'Draft';
+                  const isReleased = poInfo && poInfo.status !== 'Draft';
+                  const requiredQty = data.quantity || 0;
+                  const receivedQty = poInfo?.received_qty || 0;
+                  const notArrived = (poInfo && receivedQty < requiredQty) || (!poInfo && (data.part_ref?.stock_quantity || 0) < requiredQty);
+                  const poNumber = poInfo?.po_number || 'N/A';
+                  const systemStatus = poInfo?.status || 'No PO';
 
-                      {(() => {
-                        const isInStock = (data.po_info && (data.po_info.received_qty || 0) >= (data.quantity || 0)) || 
-                                       (!data.po_info && (data.part_ref?.stock_quantity || 0) >= (data.quantity || 0));
-                        return (
-                          <Badge variant={isInStock ? 'success' : 'destructive'} className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase">
-                            {isInStock ? <Package size={8} /> : <AlertTriangle size={8} />}
-                            {isInStock ? 'ARRIVED' : 'NOT ARRIVED'}
-                          </Badge>
-                        )
-                      })()}
-                    </div>
-                  </TooltipTrigger>
-                  
-                  <TooltipContent side="right" className="max-w-xs bg-white border-slate-200 shadow-xl p-3 rounded-2xl animate-in fade-in zoom-in duration-200">
-                    <div className="space-y-2 text-xs">
-                      <div><strong className="text-navy-900 uppercase text-[9px] opacity-50 tracking-wider">PO Number:</strong> <span className="font-bold text-navy-600">#{data.po_info?.po_number || 'N/A'}</span></div>
-                      <div><strong className="text-navy-900 uppercase text-[9px] opacity-50 tracking-wider">Received for Project:</strong> <span className="font-bold text-slate-700">{data.po_info?.received_qty || 0} / {data.quantity}</span></div>
-                      <div><strong className="text-navy-900 uppercase text-[9px] opacity-50 tracking-wider">System Status:</strong> <span className="capitalize font-bold text-slate-700">{data.po_info?.status || 'No PO'}</span></div>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
+                  return (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-2 cursor-help">
+                          {/* Badges stay exactly as they are - with user requested clean labels */}
+                          {hasPendingPO && (
+                            <Badge variant="secondary" className="bg-amber-500 text-white text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider">
+                              <Clock size={8} className="mr-1" />
+                              PENDING PO
+                            </Badge>
+                          )}
+                          {isReleased && (
+                            <Badge variant="success" className="bg-emerald-600 text-white text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider">
+                              <CheckCircle2 size={8} className="mr-1" />
+                              RELEASED
+                            </Badge>
+                          )}
+                          {!poInfo && (
+                            <Badge variant="secondary" className="bg-slate-100 text-slate-400 text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider opacity-60">
+                              <ShoppingBag size={8} className="mr-1" />
+                              ORDERING
+                            </Badge>
+                          )}
+                          {notArrived && (
+                            <Badge variant="destructive" className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider">
+                              <AlertTriangle size={8} className="mr-1" />
+                              NOT ARRIVED
+                            </Badge>
+                          )}
+                          {!notArrived && (
+                            <Badge variant="success" className="bg-emerald-600 text-white text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider">
+                              <Package size={8} className="mr-1" />
+                              ARRIVED
+                            </Badge>
+                          )}
+                        </div>
+                      </TooltipTrigger>
+
+                      <TooltipContent 
+                        side="right" 
+                        className="max-w-xs bg-white border-slate-200 shadow-xl p-3 rounded-2xl animate-in fade-in zoom-in-95 duration-200 z-50 overflow-hidden"
+                        avoidCollisions={true}
+                      >
+                        <div className="space-y-2 text-xs">
+                          <div className="border-b border-slate-100 pb-1 mb-1">
+                            <span className="text-[9px] font-black text-navy-900/40 uppercase tracking-[0.1em]">Status intelligence</span>
+                          </div>
+                          <div><strong className="text-navy-900">PO Number:</strong> <span className="font-bold text-navy-600">#{poNumber}</span></div>
+                          <div><strong className="text-navy-900">Received for Project:</strong> <span className="font-bold text-slate-700">{receivedQty} / {requiredQty}</span></div>
+                          <div><strong className="text-navy-900">System Status:</strong> <span className="capitalize font-bold text-slate-700">{systemStatus}</span></div>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -276,7 +303,7 @@ export default function BOMTreeView({
               onClick={onAddSelectedToBasket}
               className="btn h-7 bg-primary-600 hover:bg-primary-700 text-white border-none text-[10px] px-3 font-black uppercase tracking-wider shadow-sm animate-in zoom-in duration-200"
             >
-              <Plus className="w-3 h-3 mr-1.5" />
+              <ShoppingCart className="w-3 h-3 mr-1.5" />
               Add Selected ({selectedPartIds.size})
             </button>
           )}

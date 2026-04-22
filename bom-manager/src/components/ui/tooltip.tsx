@@ -1,4 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, createContext, useContext } from 'react'
+
+const TooltipContext = createContext<{ isVisible: boolean }>({ isVisible: false })
 
 export const TooltipProvider = ({ children, delayDuration: _delayDuration }: { children: React.ReactNode, delayDuration?: number }) => <>{children}</>
 
@@ -6,20 +8,15 @@ export const Tooltip = ({ children }: { children: React.ReactNode }) => {
   const [isVisible, setIsVisible] = useState(false)
   
   return (
-    <div 
-      className="relative inline-block"
-      onMouseEnter={() => setIsVisible(true)}
-      onMouseLeave={() => setIsVisible(false)}
-    >
-      {React.Children.map(children, child => {
-        if (React.isValidElement(child)) {
-          // Pass visibility down to TooltipContent via cloning or context
-          // For simplicity in this specific project, let's just pass a prop if it's the content
-          return React.cloneElement(child as React.ReactElement<any>, { isVisible })
-        }
-        return child
-      })}
-    </div>
+    <TooltipContext.Provider value={{ isVisible }}>
+      <div 
+        className="relative inline-block"
+        onMouseEnter={() => setIsVisible(true)}
+        onMouseLeave={() => setIsVisible(false)}
+      >
+        {children}
+      </div>
+    </TooltipContext.Provider>
   )
 }
 
@@ -27,7 +24,9 @@ export const TooltipTrigger = ({ children, asChild: _asChild }: { children: Reac
   return <>{children}</>
 }
 
-export const TooltipContent = ({ children, className, side, isVisible }: { children: React.ReactNode, className?: string, side?: string, isVisible?: boolean }) => {
+export const TooltipContent = ({ children, className, side, avoidCollisions: _avoidCollisions }: { children: React.ReactNode, className?: string, side?: string, avoidCollisions?: boolean }) => {
+  const { isVisible } = useContext(TooltipContext)
+  
   const sideClasses = {
     top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
     right: 'left-full top-1/2 -translate-y-1/2 ml-2',
