@@ -103,7 +103,10 @@ const TreeItem = ({
     transform,
     transition,
     isDragging
-  } = useSortable({ id: id.toString() })
+  } = useSortable({ 
+    id: id.toString(),
+    data: { type, data }
+  })
 
   const style = {
     transform: CSS.Transform.toString(transform),

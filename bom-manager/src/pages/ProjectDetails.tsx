@@ -724,6 +724,8 @@ const ProjectDetails = () => {
             </div>
           ) : null}
         </DragOverlay>
+        
+        <POBasket />
 
         {/* Modals integrated within the main container to avoid fragment issues */}
         <ProjectSectionModal
