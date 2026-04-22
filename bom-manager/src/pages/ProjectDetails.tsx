@@ -49,6 +49,7 @@ import POBasket from '@/components/projects/POBasket'
 import {
   DndContext,
   closestCenter,
+  pointerWithin,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -288,7 +289,7 @@ const ProjectDetails = () => {
       partsToAdd.forEach(p => {
         const existing = next.find(item => item.id === p.id)
         if (existing) {
-          existing.quantity = (existing.quantity || 1) + 1
+          existing.quantity = (existing.quantity || 1) + (p.quantity || 1)
         } else {
           next.push({
             ...p,
@@ -296,7 +297,7 @@ const ProjectDetails = () => {
             project_part_id: p.id,
             part_number: p.part_ref?.part_number || p.part_ref || 'N/A',
             description: p.description || p.part_ref?.description || 'N/A',
-            quantity: 1, // Default quantity
+            quantity: p.quantity || 1,
             unit_price: p.unit_price || 0,
             discount_percent: p.discount_percent || 0
           })
@@ -306,10 +307,7 @@ const ProjectDetails = () => {
     })
     
     // Auto-open on first addition
-    if (basketItems.length === 0 && partsToAdd.length > 0) {
-      setBasketOpen(true)
-    }
-    
+    setBasketOpen(true)
     showToast('success', `${partsToAdd.length} item(s) processed in PO Basket`)
   }
 
@@ -342,48 +340,38 @@ const ProjectDetails = () => {
     const overId = over.id.toString()
 
     // 1. DROP INTO PO BASKET
-    if (overId === 'po-basket-drop-zone' || overId === 'po-basket-sidebar') {
-      const collectParts = (node: any): any[] => {
-        if (!node) return []
-        if (node.type === 'part') return [node.data]
-        if (node.type === 'subsection') return node.data.parts || []
-        if (node.type === 'section') {
-          return (node.data.subsections || []).flatMap((sub: any) => sub.parts || [])
+    if (overId === 'po-basket') {
+      const draggedData = active.data.current
+      if (!draggedData) return
+
+      const collectParts = (type: string, data: any): any[] => {
+        if (type === 'part') return [data]
+        if (type === 'subsection') return data.parts || []
+        if (type === 'section') {
+          return (data.subsections || []).flatMap((sub: any) => sub.parts || [])
         }
         return []
       }
 
-      let draggedNode: any = null
-      if (activeId.startsWith('section-')) {
-        const secId = parseInt(activeId.split('-')[1])
-        const sec = project?.sections?.find((s: any) => s.id === secId)
-        if (sec) draggedNode = { type: 'section', data: sec }
-      } else if (activeId.startsWith('sub-')) {
-        const subId = parseInt(activeId.split('-')[1])
-        const sub = project?.sections?.flatMap((s: any) => s.subsections).find((sub: any) => sub.id === subId)
-        if (sub) draggedNode = { type: 'subsection', data: sub }
-      } else if (activeId.startsWith('part-')) {
-        const partId = parseInt(activeId.split('-')[1])
-        const part = project?.sections?.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).find((p: any) => p.id === partId)
-        if (part) {
-          if (selectedPartIds && selectedPartIds.size > 1 && selectedPartIds.has(part.id)) {
-            const selectedParts = project?.sections?.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).filter((p: any) => selectedPartIds.has(p.id))
-            addToBasket(selectedParts)
-            return
-          }
-          draggedNode = { type: 'part', data: part }
+      // Check for multi-select
+      if (draggedData.type === 'part' && selectedPartIds.has(draggedData.data.id) && selectedPartIds.size > 1) {
+        const selectedParts = project?.sections?.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).filter((p: any) => selectedPartIds.has(p.id))
+        addToBasket(selectedParts)
+        setSelectedPartIds(new Set())
+      } else {
+        const partsToAdd = collectParts(draggedData.type, draggedData.data)
+        if (partsToAdd.length > 0) {
+          addToBasket(partsToAdd)
         }
-      }
-
-      if (draggedNode) {
-        const partsToAdd = collectParts(draggedNode)
-        if (partsToAdd.length) addToBasket(partsToAdd)
       }
       return
     }
 
     // 2. TREE REORDERING
     if (activeId === overId) return
+    
+    // Check if over internal tree node (starts with section-, sub-, part-)
+    if (!overId.startsWith('section-') && !overId.startsWith('sub-') && !overId.startsWith('part-')) return
 
     // 2.1 Reordering Sections
     if (activeId.startsWith('section-') && overId.startsWith('section-')) {
@@ -489,7 +477,7 @@ const ProjectDetails = () => {
   return (
     <DndContext 
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={pointerWithin}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
@@ -636,6 +624,11 @@ const ProjectDetails = () => {
                       selectedPartIds={selectedPartIds}
                       onToggleSelectPart={handleSelectPart}
                       onToggleSelectAll={handleSelectAll}
+                      onAddSelectedToBasket={() => {
+                        const selectedParts = project?.sections?.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).filter((p: any) => selectedPartIds.has(p.id))
+                        addToBasket(selectedParts)
+                        setSelectedPartIds(new Set())
+                      }}
                     />
 
                     {/* Orphaned subsections */}

@@ -1,21 +1,6 @@
 import React, { useState } from 'react'
 import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragOverlay,
-  defaultDropAnimationSideEffects,
-  DragStartEvent,
-  DragOverEvent,
-  DragEndEvent,
-} from '@dnd-kit/core'
-import {
-  arrayMove,
   SortableContext,
-  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable'
@@ -31,11 +16,9 @@ import {
   Trash2,
   Copy,
   PlusCircle,
-  ImageIcon
+  ImageIcon,
+  Plus
 } from 'lucide-react'
-import { projectsApi } from '@/api/projects'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useToast } from '@/context/ToastContext'
 
 interface TreeItemProps {
   id: string | number
@@ -79,7 +62,13 @@ const TreeItem = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id })
+  } = useSortable({ 
+    id,
+    data: {
+      type,
+      data
+    }
+  })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -145,27 +134,27 @@ const TreeItem = ({
 
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pr-2">
           {onImageClick && (
-            <button onClick={onImageClick} className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-amber-500 shadow-sm border border-transparent hover:border-slate-100">
+            <button onClick={onImageClick} title="View Image" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-amber-500 shadow-sm border border-transparent hover:border-slate-100">
               <ImageIcon size={13} />
             </button>
           )}
           {onAddChild && (
-            <button onClick={onAddChild} className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600 shadow-sm border border-transparent hover:border-slate-100">
+            <button onClick={onAddChild} title="Add Child" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600 shadow-sm border border-transparent hover:border-slate-100">
               <PlusCircle size={13} />
             </button>
           )}
           {onCopy && (
-            <button onClick={onCopy} className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100">
+            <button onClick={onCopy} title="Copy Subsection" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100">
               <Copy size={13} />
             </button>
           )}
           {onEdit && (
-            <button onClick={onEdit} className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100">
+            <button onClick={onEdit} title="Edit" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100">
               <Edit2 size={13} />
             </button>
           )}
           {onDelete && (
-            <button onClick={onDelete} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 shadow-sm border border-transparent hover:border-red-100">
+            <button onClick={onDelete} title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 shadow-sm border border-transparent hover:border-red-100">
               <Trash2 size={13} />
             </button>
           )}
@@ -199,11 +188,12 @@ interface BOMTreeViewProps {
   selectedPartIds: Set<number>
   onToggleSelectPart: (id: number) => void
   onToggleSelectAll: (ids: number[]) => void
+  onAddSelectedToBasket?: () => void
 }
 
 export default function BOMTreeView({
   project,
-  projectId,
+  projectId: _projectId,
   onEditSection,
   onDeleteSection,
   onAddSubsection,
@@ -216,10 +206,9 @@ export default function BOMTreeView({
   onImageClick,
   selectedPartIds,
   onToggleSelectPart,
-  onToggleSelectAll
+  onToggleSelectAll,
+  onAddSelectedToBasket
 }: BOMTreeViewProps) {
-  const queryClient = useQueryClient()
-  const { showToast } = useToast()
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(project.sections?.map((s: any) => `section-${s.id}`)))
 
   const toggleNode = (nodeId: string) => {
@@ -231,158 +220,58 @@ export default function BOMTreeView({
     })
   }
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  )
-
-  const reorderSections = useMutation({
-    mutationFn: (ids: number[]) => projectsApi.reorderSections(projectId, ids),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
-  })
-
-  const moveSubsection = useMutation({
-    mutationFn: ({ subId, targetSectionId, newOrder }: { subId: number, targetSectionId: number, newOrder: number[] }) => 
-      projectsApi.reorderSubsections(targetSectionId, newOrder),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
-  })
-
-  const movePart = useMutation({
-    mutationFn: ({ partId, targetSubId, newOrder }: { partId: number, targetSubId: number, newOrder: number[] }) => 
-      projectsApi.reorderProjectParts(targetSubId, newOrder),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
-  })
-
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-
-    const activeId = active.id.toString()
-    const overId = over.id.toString()
-
-    // 1. Reordering Sections
-    if (activeId.startsWith('section-') && overId.startsWith('section-')) {
-      const activeDataId = parseInt(activeId.split('-')[1])
-      const overDataId = parseInt(overId.split('-')[1])
-      const oldIndex = project.sections.findIndex((s: any) => s.id === activeDataId)
-      const newIndex = project.sections.findIndex((s: any) => s.id === overDataId)
-      const newSections = arrayMove(project.sections, oldIndex, newIndex)
-      await reorderSections.mutateAsync(newSections.map((s: any) => s.id))
-      showToast('success', 'Section order updated')
-    }
-
-    // 2. Reordering/Moving Subsections
-    if (activeId.startsWith('sub-') && (overId.startsWith('sub-') || overId.startsWith('section-'))) {
-      const subId = parseInt(activeId.split('-')[1])
-      let targetSectionId: number
-      let newIndex: number
-
-      if (overId.startsWith('section-')) {
-        targetSectionId = parseInt(overId.split('-')[1])
-        newIndex = 0 // Drop at start of section
-      } else {
-        const overSubId = parseInt(overId.split('-')[1])
-        const targetSub = project.sections.flatMap((s: any) => s.subsections).find((s: any) => s.id === overSubId)
-        targetSectionId = targetSub.section_id
-        const section = project.sections.find((s: any) => s.id === targetSectionId)
-        newIndex = section.subsections.findIndex((s: any) => s.id === overSubId)
-      }
-
-      const currentSection = project.sections.find((s: any) => s.subsections.some((sub: any) => sub.id === subId))
-      const targetSection = project.sections.find((s: any) => s.id === targetSectionId)
-      
-      let newSubOrder = [...targetSection.subsections]
-      const oldIndex = newSubOrder.findIndex(s => s.id === subId)
-      
-      if (oldIndex !== -1) {
-        // Move within same section
-        newSubOrder = arrayMove(newSubOrder, oldIndex, newIndex)
-      } else {
-        // Move to different section
-        const subToMove = currentSection.subsections.find((s: any) => s.id === subId)
-        newSubOrder.splice(newIndex, 0, subToMove)
-      }
-
-      await moveSubsection.mutateAsync({ 
-        subId, 
-        targetSectionId, 
-        newOrder: newSubOrder.map(s => s.id) 
-      })
-      showToast('success', 'Subsection moved')
-    }
-
-    // 3. Reordering/Moving Parts
-    if (activeId.startsWith('part-') && (overId.startsWith('part-') || overId.startsWith('sub-'))) {
-      const partId = parseInt(activeId.split('-')[1])
-      let targetSubId: number
-      let newIndex: number
-
-      if (overId.startsWith('sub-')) {
-        targetSubId = parseInt(overId.split('-')[1])
-        newIndex = 0
-      } else {
-        const overPartId = parseInt(overId.split('-')[1])
-        const targetPart = project.sections.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).find((p: any) => p.id === overPartId)
-        targetSubId = targetPart.project_section_id
-        const subsection = project.sections.flatMap((s: any) => s.subsections).find((sub: any) => sub.id === targetSubId)
-        newIndex = subsection.parts.findIndex((p: any) => p.id === overPartId)
-      }
-
-      const currentSub = project.sections.flatMap((s: any) => s.subsections).find((sub: any) => sub.parts.some((p: any) => p.id === partId))
-      const targetSub = project.sections.flatMap((s: any) => s.subsections).find((sub: any) => sub.id === targetSubId)
-
-      let newPartOrder = [...targetSub.parts]
-      const oldIndex = newPartOrder.findIndex(p => p.id === partId)
-
-      if (oldIndex !== -1) {
-        newPartOrder = arrayMove(newPartOrder, oldIndex, newIndex)
-      } else {
-        const partToMove = currentSub.parts.find((p: any) => p.id === partId)
-        newPartOrder.splice(newIndex, 0, partToMove)
-      }
-
-      await movePart.mutateAsync({ 
-        partId, 
-        targetSubId, 
-        newOrder: newPartOrder.map(p => p.id) 
-      })
-      showToast('success', 'Part moved')
-    }
-  }
-
   return (
     <div className="bg-white rounded-3xl border border-slate-100 shadow-xl shadow-navy-900/5 overflow-hidden">
-      <div className="bg-slate-50/50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <h3 className="text-xs font-black text-navy-900 tracking-[0.2em] uppercase">BOM Registry Hierarchy</h3>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => {
-              const allIds = project.sections.flatMap((s: any) => [
-                `section-${s.id}`,
-                ...s.subsections.map((sub: any) => `sub-${sub.id}`)
-              ])
-              setExpandedNodes(new Set(allIds))
-            }}
-            className="text-[9px] font-black text-primary-600 uppercase tracking-widest hover:underline"
-          >
-            Expand All
-          </button>
-          <button 
-            onClick={() => setExpandedNodes(new Set())}
-            className="text-[9px] font-black text-slate-400 uppercase tracking-widest hover:underline"
-          >
-            Collapse All
-          </button>
+      <div className="bg-slate-50/50 px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <h3 className="text-xs font-black text-navy-900 tracking-[0.2em] uppercase">BOM Registry Hierarchy</h3>
+          
+          {selectedPartIds.size > 0 && onAddSelectedToBasket && (
+            <button
+              onClick={onAddSelectedToBasket}
+              className="btn h-7 bg-primary-600 hover:bg-primary-700 text-white border-none text-[10px] px-3 font-black uppercase tracking-wider shadow-sm animate-in zoom-in duration-200"
+            >
+              <Plus className="w-3 h-3 mr-1.5" />
+              Add Selected ({selectedPartIds.size})
+            </button>
+          )}
+        </div>
+
+        <div className="flex gap-4">
+          <div className="flex gap-3 pr-2 border-r border-slate-200">
+            <button 
+              onClick={() => {
+                const allIds = project.sections.flatMap((s: any) => [
+                  `section-${s.id}`,
+                  ...s.subsections.map((sub: any) => `sub-${sub.id}`)
+                ])
+                setExpandedNodes(new Set(allIds))
+              }}
+              className="text-[9px] font-black text-primary-600 uppercase tracking-widest hover:underline"
+            >
+              Expand All
+            </button>
+            <button 
+              onClick={() => setExpandedNodes(new Set())}
+              className="text-[9px] font-black text-slate-400 uppercase tracking-widest hover:underline"
+            >
+              Collapse All
+            </button>
+          </div>
+          
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+            {project.sections?.length || 0} SECTIONS
+          </p>
         </div>
       </div>
 
       <div className="p-6">
         <SortableContext 
-          items={project.sections.map((s: any) => `section-${s.id}`)} 
+          items={project.sections?.map((s: any) => `section-${s.id}`) || []} 
           strategy={verticalListSortingStrategy}
         >
           <div className="space-y-1">
-            {project.sections.map((section: any) => (
+            {project.sections?.map((section: any) => (
               <TreeItem
                 key={`section-${section.id}`}
                 id={`section-${section.id}`}
@@ -417,7 +306,7 @@ export default function BOMTreeView({
                         onCopy={() => onCopySubsection(sub)}
                         onAddChild={() => onAddPart(sub)}
                         onImageClick={() => onImageClick(sub, 'subsection')}
-                        isSelected={sub.parts.every((p: any) => selectedPartIds.has(p.id)) && sub.parts.length > 0}
+                        isSelected={sub.parts.length > 0 && sub.parts.every((p: any) => selectedPartIds.has(p.id))}
                         onSelect={(checked) => {
                           const ids = sub.parts.map((p: any) => p.id)
                           onToggleSelectAll(ids)

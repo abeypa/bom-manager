@@ -46,7 +46,7 @@ const POBasket = ({
   projectCurrency = '₹'
 }: POBasketProps) => {
   const { setNodeRef, isOver } = useDroppable({
-    id: 'po-basket-drop-zone',
+    id: 'po-basket',
   })
 
   const totalValue = useMemo(() => {
@@ -73,31 +73,36 @@ const POBasket = ({
       <div 
         ref={setNodeRef}
         className={`fixed inset-y-0 right-0 z-40 flex flex-col bg-slate-50 border-l border-slate-200 transition-all duration-300 ease-in-out shadow-2xl
-          ${isOpen ? 'translate-x-0 w-full sm:w-[400px]' : 'translate-x-[calc(100%-4px)] w-1'}
-          ${isOver ? 'ring-4 ring-primary-500/20 ring-inset' : ''}
+          ${isOpen ? 'translate-x-0 w-full sm:w-[400px]' : 'translate-x-[calc(100%-4px)] w-2'}
+          ${isOver ? 'ring-4 ring-primary-500 bg-primary-50/50' : ''}
         `}
-        id="po-basket-sidebar"
+        id="po-basket"
       >
         {/* Toggle Button (Chevron) */}
-        {!isOpen && items.length > 0 && (
+        {!isOpen && (
           <button 
             onClick={onClose}
-            className="absolute -left-10 top-1/2 -translate-y-1/2 bg-primary-600 text-white p-2 rounded-l-xl shadow-lg hover:bg-primary-700 transition-colors group"
+            className="absolute -left-10 top-1/2 -translate-y-1/2 bg-primary-600 text-white p-2 rounded-l-xl shadow-lg hover:bg-primary-700 transition-colors group flex items-center justify-center min-w-[40px] min-h-[50px] z-50 pointer-events-auto"
           >
-            <ChevronRight className="w-5 h-5" />
-            <div className="absolute -top-2 -right-2 bg-red-500 text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold border-2 border-white">
-              {items.length}
+            <div className="flex flex-col items-center">
+              <ChevronRight className="w-5 h-5" />
+              {items.length > 0 && (
+                <span className="text-[10px] font-black">{items.length}</span>
+              )}
             </div>
           </button>
         )}
 
         {/* Drop Zone Feedback Overlay */}
         {isOver && (
-          <div className="absolute inset-0 z-50 bg-primary-50/90 border-4 border-dashed border-primary-500 m-2 flex flex-col items-center justify-center text-center animate-in fade-in duration-200">
-            <div className="bg-primary-600 p-4 rounded-full shadow-xl mb-4 animate-bounce">
-              <ShoppingBag className="w-8 h-8 text-white" />
+          <div className="absolute inset-0 z-50 bg-primary-600/90 border-4 border-dashed border-white m-2 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-200 backdrop-blur-sm">
+            <div className="bg-white p-6 rounded-full shadow-2xl mb-6 animate-bounce">
+              <ShoppingBag className="w-12 h-12 text-primary-600" />
             </div>
-            <h3 className="text-xl font-black text-primary-900 uppercase tracking-tighter">Drop items here</h3>
+            <h3 className="text-2xl font-black text-white uppercase tracking-tighter drop-shadow-md">Drop here to add to PO</h3>
+            <p className="text-white/80 text-xs font-bold uppercase tracking-widest mt-2">Releasing BOM to PO</p>
+          </div>
+        )}
             <p className="text-sm font-bold text-primary-700 mt-2 px-6">Release to add parts to PO Basket</p>
           </div>
         )}
