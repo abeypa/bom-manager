@@ -117,7 +117,7 @@ const ProjectDetails = () => {
   }>({ open: false, entity: null, type: 'section' })
 
   // ── Procurement Basket state ────────────────────────────────
-  const [basketOpen, setBasketOpen] = useState(false)
+  const [basketOpen, setBasketOpen] = useState(true)
   const [basketItems, setBasketItems] = useState<any[]>([])
   const [activeDragItem, setActiveDragItem] = useState<any | null>(null)
 
