@@ -53,16 +53,11 @@ interface TreeItemProps {
   onSelect?: (selected: boolean) => void
 }
 
-/**
- * TreeItem Component
- * Renders a single row in the BOM Registry tree (Section, Subsection, or Part).
- * Handles drag-and-drop integration, status badges for parts, and hierarchical styling.
- */
 const TreeItem = ({ 
   id, 
   level, 
   children, 
-  label, 
+  label: _label, 
   type, 
   data, 
   isExpanded, 
@@ -91,78 +86,144 @@ const TreeItem = ({
     paddingLeft: `${level * 24}px`
   }
 
-  const getIcon = () => {
-    if (type === 'section') return <Layers className="w-4 h-4 text-primary-600 shadow-sm" />
-    if (type === 'subsection') return <Folder className="w-4 h-4 text-amber-500 fill-amber-500/10 shadow-sm" />
-    return <FileText className="w-3.5 h-3.5 text-slate-400" />
+  // CORRECT subsection name logic using requested fields
+  const getDisplayName = () => {
+    if (type === 'subsection') {
+      return data.name || data.title || data.section_name || 'UNTITLED SUBSECTION'
+    }
+    return data.name || data.description || 'Untitled'
   }
 
+  // Checkbox sub-component
+  const RenderCheckbox = () => onSelect ? (
+    <div className="flex items-center pr-1 scale-110">
+      <input
+        type="checkbox"
+        checked={isSelected}
+        onChange={(e) => onSelect(e.target.checked)}
+        className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-600 cursor-pointer shadow-sm"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  ) : null
+
+  // Action Tools sub-component
+  const RenderActions = () => (
+    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-300 pr-2">
+      {onImageClick && (
+        <button onClick={onImageClick} title="View Image" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-amber-500 shadow-sm border border-transparent hover:border-slate-100 transition-all">
+          <ImageIcon size={13} />
+        </button>
+      )}
+      {onAddChild && (
+        <button onClick={onAddChild} title="Add Child" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600 shadow-sm border border-transparent hover:border-slate-100 transition-all">
+          <PlusCircle size={13} />
+        </button>
+      )}
+      {onCopy && (
+        <button onClick={onCopy} title="Copy Subsection" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100 transition-all">
+          <Copy size={13} />
+        </button>
+      )}
+      {onEdit && (
+        <button onClick={onEdit} title="Edit" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100 transition-all">
+          <Edit2 size={13} />
+        </button>
+      )}
+      {onDelete && (
+        <button onClick={onDelete} title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 shadow-sm border border-transparent hover:border-red-100 transition-all">
+          <Trash2 size={13} />
+        </button>
+      )}
+    </div>
+  )
+
+  // ── SUBSECTION RENDER ─────────────────────────────────────
+  if (type === 'subsection') {
+    return (
+      <div ref={setNodeRef} style={style} className="group select-none">
+        <div 
+          className="subsection-header flex items-center gap-3 py-2 px-4 bg-gray-50 border-b hover:bg-slate-100/80 transition-all cursor-pointer mt-1 rounded-xl"
+          onClick={onToggle}
+        >
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div 
+              className="p-1 text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing"
+              {...attributes} 
+              {...listeners}
+            >
+              <GripVertical size={14} />
+            </div>
+            
+            <RenderCheckbox />
+            
+            <Folder className="h-5 w-5 text-amber-600" />
+            <span className="font-semibold text-base text-slate-900 truncate">
+              {getDisplayName()}
+            </span>
+            
+            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
+          </div>
+          
+          <RenderActions />
+        </div>
+        
+        {isExpanded && children && (
+          <div className="relative animate-in slide-in-from-top-2 duration-300 pl-4">
+            <div className="absolute left-[-4px] top-0 bottom-4 w-[1px] bg-slate-200/60 ml-[23px] rounded-full" />
+            {children}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── SECTION / PART RENDER ─────────────────────────────────────
   return (
     <div ref={setNodeRef} style={style} className="group select-none">
-      {/* Container for the row content */}
       <div className={`
         flex items-center gap-2 py-2 px-2 rounded-xl transition-all duration-300
         ${level === 0 ? 'mt-6 bg-slate-50/30' : 'mt-1'} 
-        ${type === 'subsection' ? 'bg-slate-50/40 border-l-2 border-amber-500/30 ml-[-2px]' : ''}
-        ${isSelected ? 'bg-primary-50/80 border-l-2 border-primary-500 ring-1 ring-primary-500/10' : 'hover:bg-slate-100/50'}
+        ${isSelected ? 'bg-primary-50/80 border-l-2 border-primary-500 shadow-sm' : 'hover:bg-slate-100/50'}
       `}>
-        {/* Drag Handle */}
         <div 
-          className="p-1 hover:bg-white rounded-lg text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing transition-colors"
+          className="p-1 hover:bg-white rounded-lg text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing"
           {...attributes} 
           {...listeners}
         >
           <GripVertical size={14} />
         </div>
 
-        {/* Expand/Collapse Toggle for containers */}
-        {type !== 'part' && (
+        {type === 'section' && (
           <button 
             onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
-            className="p-1 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600 transition-all duration-200"
+            className="p-1 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600"
           >
             {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           </button>
         )}
 
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          {/* Multi-select Checkbox */}
-          {onSelect && (
-            <div className="flex items-center pr-1 scale-110">
-              <input
-                type="checkbox"
-                checked={isSelected}
-                onChange={(e) => onSelect(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-600 cursor-pointer shadow-sm"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          )}
+          <RenderCheckbox />
           
-          {/* Icon representing the type */}
-          <div className="shrink-0 flex items-center justify-center w-6 h-6 bg-white rounded-lg shadow-sm">
-            {getIcon()}
+          <div className="shrink-0 flex items-center justify-center w-6 h-6 bg-white rounded-lg shadow-sm border border-slate-100">
+            {type === 'section' ? <Layers className="w-4 h-4 text-primary-600" /> : <FileText className="w-3.5 h-3.5 text-slate-400" />}
           </div>
 
           <div className="flex flex-col min-w-0 flex-1">
-            {/* Hierarchy Label with distinct styling per level */}
             <span className={`
-              text-sm tracking-tight
-              ${type === 'section' ? 'font-black text-navy-900 uppercase tracking-widest' : 
-                (type === 'subsection' ? 'font-black text-slate-900 uppercase tracking-wider block' : 
-                'font-bold text-slate-600 truncate')}
+              text-sm tracking-tight truncate 
+              ${type === 'section' ? 'font-black text-navy-900 uppercase tracking-widest' : 'font-bold text-slate-600'}
             `}>
-              {label || data.name || data.description || (type === 'subsection' ? 'Untitled Subsection' : 'Untitled')}
+              {getDisplayName()}
             </span>
 
-            {/* Part-specific details and Status badges */}
             {type === 'part' && (
               <div className="flex items-center gap-3 mt-1.5 overflow-x-auto no-scrollbar">
                 <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
                   {data.part_ref?.part_number || 'No PN'} • QTY: {data.quantity}
                 </span>
 
-                {/* ✅ TOOLTIP ISOLATION PATTERN (Context-Based) */}
                 {(() => {
                   const poInfo = data.po_info;
                   const hasPendingPO = poInfo && poInfo.status === 'Draft';
@@ -178,13 +239,13 @@ const TreeItem = ({
                       <TooltipTrigger asChild>
                         <div className="flex items-center gap-1.5 cursor-help shrink-0">
                           {hasPendingPO && (
-                            <Badge variant="secondary" className="bg-amber-500 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest shadow-sm">
+                            <Badge variant="secondary" className="bg-amber-500 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest">
                               <Clock size={8} className="mr-1.5" />
                               PENDING PO
                             </Badge>
                           )}
                           {isReleased && (
-                            <Badge variant="success" className="bg-emerald-600 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest shadow-sm">
+                            <Badge variant="success" className="bg-emerald-600 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest">
                               <CheckCircle2 size={8} className="mr-1.5" />
                               RELEASED
                             </Badge>
@@ -196,13 +257,13 @@ const TreeItem = ({
                             </Badge>
                           )}
                           {notArrived && (
-                            <Badge variant="destructive" className="text-[9px] px-2 py-0.5 font-black uppercase tracking-widest shadow-sm ring-1 ring-red-500/20">
+                            <Badge variant="destructive" className="text-[9px] px-2 py-0.5 font-black uppercase tracking-widest">
                               <AlertTriangle size={8} className="mr-1.5" />
                               NOT ARRIVED
                             </Badge>
                           )}
                           {!notArrived && (
-                            <Badge variant="success" className="bg-emerald-600 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest shadow-sm">
+                            <Badge variant="success" className="bg-emerald-600 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest">
                               <Package size={8} className="mr-1.5" />
                               ARRIVED
                             </Badge>
@@ -210,29 +271,22 @@ const TreeItem = ({
                         </div>
                       </TooltipTrigger>
 
-                      <TooltipContent 
-                        side="right" 
-                        className="max-w-xs bg-white border-slate-200 shadow-2xl p-4 rounded-2xl animate-in fade-in zoom-in-95 duration-300 z-50 overflow-hidden"
-                        avoidCollisions={true}
-                      >
+                      <TooltipContent side="right" className="max-w-xs bg-white border-slate-200 shadow-2xl p-4 rounded-2xl animate-in fade-in zoom-in-95 duration-300">
                         <div className="space-y-2.5 text-xs">
-                          <div className="border-b border-slate-100 pb-2 mb-1 flex items-center justify-between">
-                            <span className="text-[10px] font-black text-navy-900/40 uppercase tracking-[0.2em]">Procurement Intel</span>
-                            <div className="w-2 h-2 rounded-full bg-primary-500 animate-pulse" />
+                          <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+                            <span className="text-[10px] font-black text-navy-900/40 uppercase">Status Analysis</span>
                           </div>
-                          <div className="flex items-center justify-between gap-4">
-                            <strong className="text-navy-900/60 uppercase text-[9px] tracking-wider">PO Reference</strong> 
-                            <span className="font-black text-navy-600 bg-navy-50 px-2 py-0.5 rounded">#{poNumber}</span>
+                          <div className="flex justify-between">
+                            <strong className="text-navy-900/60 uppercase text-[9px]">PO REF</strong> 
+                            <span className="font-black text-navy-600 bg-navy-50 px-1.5 rounded">#{poNumber}</span>
                           </div>
-                          <div className="flex items-center justify-between gap-4">
-                            <strong className="text-navy-900/60 uppercase text-[9px] tracking-wider">Project Reception</strong> 
-                            <span className={`font-black px-2 py-0.5 rounded ${receivedQty >= requiredQty ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'}`}>
-                              {receivedQty} / {requiredQty}
-                            </span>
+                          <div className="flex justify-between">
+                            <strong className="text-navy-900/60 uppercase text-[9px]">Received</strong> 
+                            <span className="font-black text-slate-700">{receivedQty} / {requiredQty}</span>
                           </div>
-                          <div className="flex items-center justify-between gap-4">
-                            <strong className="text-navy-900/60 uppercase text-[9px] tracking-wider">Global Status</strong> 
-                            <span className="capitalize font-black text-slate-700 bg-slate-50 px-2 py-0.5 rounded">{systemStatus}</span>
+                          <div className="flex justify-between">
+                            <strong className="text-navy-900/60 uppercase text-[9px]">Status</strong> 
+                            <span className="capitalize font-black text-slate-700">{systemStatus}</span>
                           </div>
                         </div>
                       </TooltipContent>
@@ -244,40 +298,12 @@ const TreeItem = ({
           </div>
         </div>
 
-        {/* Global Action Tools (Visible on Hover) */}
-        <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-300 pr-2">
-          {onImageClick && (
-            <button onClick={onImageClick} title="View Image" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-amber-500 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-              <ImageIcon size={13} />
-            </button>
-          )}
-          {onAddChild && (
-            <button onClick={onAddChild} title="Add Child" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-              <PlusCircle size={13} />
-            </button>
-          )}
-          {onCopy && (
-            <button onClick={onCopy} title="Copy Subsection" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-              <Copy size={13} />
-            </button>
-          )}
-          {onEdit && (
-            <button onClick={onEdit} title="Edit" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-              <Edit2 size={13} />
-            </button>
-          )}
-          {onDelete && (
-            <button onClick={onDelete} title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 shadow-sm border border-transparent hover:border-red-100 transition-all">
-              <Trash2 size={13} />
-            </button>
-          )}
-        </div>
+        <RenderActions />
       </div>
 
-      {/* Recursive Render of Children */}
       {isExpanded && children && (
         <div className="relative animate-in slide-in-from-top-2 duration-300">
-          <div className="absolute left-[-12px] top-0 bottom-4 w-[1px] bg-slate-200/60 ml-[23px] rounded-full" style={{ left: `${level * 24}px` }} />
+          <div className="absolute left-[-12px] top-0 bottom-4 w-[1px] bg-slate-200/60 ml-[23px] rounded-full" />
           {children}
         </div>
       )}
@@ -304,11 +330,6 @@ interface BOMTreeViewProps {
   onAddSelectedToBasket?: () => void
 }
 
-/**
- * Main BOMTreeView Component
- * Orchestrates the hierarchical rendering of the project bill of materials.
- * Features: Multi-select, Expand/Collapse All controls, Drag-and-drop sortable interface.
- */
 export default function BOMTreeView({
   project,
   projectId: _projectId,
@@ -327,24 +348,17 @@ export default function BOMTreeView({
   onToggleSelectAll,
   onAddSelectedToBasket
 }: BOMTreeViewProps) {
-  // State for tracking which nodes are expanded
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(project.sections?.map((s: any) => `section-${s.id}`)))
 
-  // Derived list of all container IDs (Sections + Subsections) for Expand All functionality
   const allContainerIds = useMemo(() => {
     const ids: string[] = []
     project.sections?.forEach((s: any) => {
       ids.push(`section-${s.id}`)
-      s.subsections?.forEach((sub: any) => {
-        ids.push(`sub-${sub.id}`)
-      })
+      s.subsections?.forEach((sub: any) => ids.push(`sub-${sub.id}`))
     })
     return ids
   }, [project.sections])
 
-  /**
-   * Toggles a single node's expanded state
-   */
   const toggleNode = (nodeId: string) => {
     setExpandedNodes(prev => {
       const next = new Set(prev)
@@ -354,23 +368,11 @@ export default function BOMTreeView({
     })
   }
 
-  /**
-   * Expands every section and subsection header in the tree
-   */
-  const expandAll = () => {
-    setExpandedNodes(new Set(allContainerIds))
-  }
-
-  /**
-   * Retracts the entire hierarchy
-   */
-  const collapseAll = () => {
-    setExpandedNodes(new Set())
-  }
+  const expandAll = () => setExpandedNodes(new Set(allContainerIds))
+  const collapseAll = () => setExpandedNodes(new Set())
 
   return (
     <div className="bg-white rounded-[2rem] border border-slate-100 shadow-2xl shadow-navy-900/5 overflow-hidden">
-      {/* View Header with Global Controls */}
       <div className="bg-slate-50/80 px-8 py-5 border-b border-slate-200/60 flex items-center justify-between gap-6 flex-wrap backdrop-blur-md">
         <div className="flex items-center gap-6">
           <h3 className="text-xs font-black text-navy-900 tracking-[0.3em] uppercase flex items-center gap-3">
@@ -378,34 +380,22 @@ export default function BOMTreeView({
             BOM Registry Hierarchy
           </h3>
           
-          {/* Expand / Collapse All Buttons */}
           <div className="flex items-center bg-white p-1 rounded-xl shadow-sm border border-slate-200/50">
-            <button
-              onClick={expandAll}
-              className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all"
-              title="Expand all levels"
-            >
-              <Maximize2 size={12} />
-              Expand All
+            <button onClick={expandAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all">
+              <Maximize2 size={12} /> Expand All
             </button>
             <div className="w-px h-4 bg-slate-200 mx-1" />
-            <button
-              onClick={collapseAll}
-              className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-              title="Collapse all levels"
-            >
-              <Minimize2 size={12} />
-              Collapse All
+            <button onClick={collapseAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
+              <Minimize2 size={12} /> Collapse All
             </button>
           </div>
         </div>
 
-        {/* Multi-selection Action Trigger */}
         <div className="flex items-center gap-4">
           {selectedPartIds.size > 0 && onAddSelectedToBasket && (
             <button
               onClick={onAddSelectedToBasket}
-              className="btn h-9 bg-primary-600 hover:bg-primary-700 text-white border-none text-[10px] px-5 font-black uppercase tracking-widest shadow-lg shadow-primary-500/25 animate-in zoom-in duration-300"
+              className="btn h-9 bg-primary-600 hover:bg-primary-700 text-white border-none text-[10px] px-5 font-black uppercase tracking-widest shadow-lg shadow-primary-500/25 transition-all"
             >
               <ShoppingCart className="w-3.5 h-3.5 mr-2" />
               Add Selected ({selectedPartIds.size})
@@ -490,16 +480,6 @@ export default function BOMTreeView({
                   </SortableContext>
                 </TreeItem>
               ))}
-              
-              {/* Empty State visual if no sections exist */}
-              {(!project.sections || project.sections.length === 0) && (
-                <div className="flex flex-col items-center justify-center py-20 bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-200">
-                  <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mb-4">
-                    <Layers className="text-slate-300 w-8 h-8" />
-                  </div>
-                  <p className="text-sm font-black text-slate-400 uppercase tracking-widest">No sections defined in Registry</p>
-                </div>
-              )}
             </div>
           </SortableContext>
         </TooltipProvider>
