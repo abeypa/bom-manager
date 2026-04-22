@@ -23,6 +23,7 @@ import {
   Edit2,
   Trash2,
   ShoppingCart,
+  Copy,
 } from 'lucide-react'
 import {
   Tooltip,
