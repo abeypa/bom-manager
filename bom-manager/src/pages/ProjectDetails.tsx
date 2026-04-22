@@ -16,6 +16,7 @@ import {
   Calendar,
   Layers,
   ShoppingCart,
+  ShoppingBag,
   FileDown,
   Trash2,
   Edit2,
@@ -44,6 +45,7 @@ import { resolvePartType } from '@/utils/partTypeUtils'
 import { partsApi } from '@/api/parts'
 import BOMDraggableSection from '@/components/projects/BOMDraggableSection'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
+import POBasket from '@/components/projects/POBasket'
 import {
   DndContext,
   closestCenter,
@@ -51,6 +53,8 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  DragOverlay,
+  defaultDropAnimationSideEffects,
 } from '@dnd-kit/core'
 import {
   arrayMove,
@@ -110,6 +114,11 @@ const ProjectDetails = () => {
     entity: any | null
     type: 'section' | 'subsection' | 'part'
   }>({ open: false, entity: null, type: 'section' })
+
+  // ── Procurement Basket state ────────────────────────────────
+  const [basketOpen, setBasketOpen] = useState(false)
+  const [basketItems, setBasketItems] = useState<any[]>([])
+  const [activeDragItem, setActiveDragItem] = useState<any | null>(null)
 
   // ── Data ────────────────────────────────────────────────────
   const { data: project, isLoading, error: projectError } = useQuery<any>({
@@ -264,6 +273,66 @@ const ProjectDetails = () => {
     })
   }
 
+  // ── Basket Actions ──────────────────────────────────────────
+  const addToBasket = (partsToAdd: any[]) => {
+    setBasketItems(prev => {
+      const next = [...prev]
+      partsToAdd.forEach(p => {
+        if (!next.find(item => item.id === p.id)) {
+          next.push({
+            ...p,
+            part_number: p.part_ref?.part_number || p.part_ref || 'N/A',
+            description: p.description || p.part_ref?.description || 'N/A'
+          })
+        }
+      })
+      return next
+    })
+    setBasketOpen(true)
+    showToast('success', `${partsToAdd.length} items added to PO Basket`)
+  }
+
+  const removeFromBasket = (id: number) => {
+    setBasketItems(prev => prev.filter(item => item.id !== id))
+  }
+
+  const updateBasketItem = (id: number, updates: any) => {
+    setBasketItems(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item))
+  }
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event
+    setActiveDragItem(null)
+
+    if (over && (over.id === 'po-basket-drop-zone' || over.id === 'po-basket-sidebar')) {
+      // Find the dragged part in the project data
+      let draggedPart = null
+      project?.sections?.forEach((s: any) => {
+        s.subsections?.forEach((sub: any) => {
+          const p = sub.parts?.find((part: any) => `part-${part.id}` === active.id)
+          if (p) draggedPart = p
+        })
+      })
+
+      if (draggedPart) {
+        addToBasket([draggedPart])
+      }
+    }
+  }
+
+  const handleDragStart = (event: any) => {
+    const { active } = event
+    // Extract part ID and find it
+    let draggedPart = null
+    project?.sections?.forEach((s: any) => {
+      s.subsections?.forEach((sub: any) => {
+        const p = sub.parts?.find((part: any) => `part-${part.id}` === active.id)
+        if (p) draggedPart = p
+      })
+    })
+    setActiveDragItem(draggedPart)
+  }
+
   // ── Loading / Error ─────────────────────────────────────────
   if (isLoading) {
     return (
@@ -315,13 +384,36 @@ const ProjectDetails = () => {
         <div className="flex gap-2">
           {selectedPartIds.size > 0 && isAdmin && (
             <button
-              onClick={() => setPoModal(true)}
-              className="btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20 px-6 animate-in slide-in-from-right duration-300"
+              onClick={() => {
+                const parts = []
+                project?.sections?.forEach((s: any) => {
+                  s.subsections?.forEach((sub: any) => {
+                    sub.parts?.forEach((p: any) => {
+                      if (selectedPartIds.has(p.id)) parts.push(p)
+                    })
+                  })
+                })
+                addToBasket(parts)
+                setSelectedPartIds(new Set())
+              }}
+              className="btn bg-navy-900 hover:bg-black text-white shadow-lg shadow-navy-900/20 px-6 animate-in slide-in-from-right duration-300"
             >
               <ShoppingCart className="h-4 w-4 mr-2" />
-              RELEASE PO ({selectedPartIds.size})
+              ADD TO BASKET ({selectedPartIds.size})
             </button>
           )}
+          <button 
+            onClick={() => setBasketOpen(!basketOpen)}
+            className={`btn ${basketItems.length > 0 ? 'bg-primary-500 text-white shadow-primary-500/20' : 'btn-secondary'} relative`}
+          >
+            <ShoppingBag className="h-4 w-4 mr-2" />
+            PO BASKET
+            {basketItems.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
+                {basketItems.length}
+              </span>
+            )}
+          </button>
           <button 
             onClick={handleExport}
             className="btn btn-secondary border-navy-100 text-navy-900"
@@ -519,6 +611,40 @@ const ProjectDetails = () => {
         </div>
       </div>
 
+      <DndContext 
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        {/* Actual Drag Overlay for better UX */}
+        <DragOverlay>
+          {activeDragItem ? (
+            <div className="bg-white border-2 border-navy-500 rounded-2xl p-4 shadow-2xl opacity-80 scale-95 pointer-events-none flex items-center gap-3">
+              <div className="bg-navy-900 p-2 rounded-xl">
+                 <Package className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <p className="text-xs font-black text-navy-900">{activeDragItem.part_ref?.part_number || activeDragItem.part_ref}</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[150px]">
+                  {activeDragItem.description || activeDragItem.part_ref?.description}
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </DragOverlay>
+
+        <POBasket 
+          isOpen={basketOpen}
+          onClose={() => setBasketOpen(false)}
+          items={basketItems}
+          onRemoveItem={removeFromBasket}
+          onUpdateItem={updateBasketItem}
+          onClearBasket={() => setBasketItems([])}
+          onReleasePO={() => setPoModal(true)}
+        />
+      </DndContext>
+
       {/* ── Modals ────────────────────────────────────────── */}
       <ProjectSectionModal
         isOpen={sectionModal.open}
@@ -560,10 +686,11 @@ const ProjectDetails = () => {
           isOpen={poModal}
           onClose={() => {
             setPoModal(false)
+            setBasketItems([]) // Clear basket on success (or keep if desired)
             setSelectedPartIds(new Set())
           }}
           project={project}
-          selectedPartIds={Array.from(selectedPartIds)}
+          selectedPartIds={basketItems.map(item => item.id)}
         />
       )}
 

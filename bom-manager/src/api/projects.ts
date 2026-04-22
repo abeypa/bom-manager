@@ -210,7 +210,27 @@ export const projectsApi = {
       }))
     }
 
-    // 5. Build hierarchy in JS
+    // 5. PO Status Integration (NEW)
+    const { data: poItems, error: poItemsErr } = await supabase
+      .from('purchase_order_items')
+      .select('id, project_part_id, purchase_orders(po_number, status)')
+      .in('project_part_id', parts.map(p => p.id))
+
+    if (!poItemsErr && poItems) {
+      // Map PO info to parts
+      parts = parts.map(p => {
+        const item = (poItems as any[]).find(i => i.project_part_id === p.id)
+        return {
+          ...p,
+          po_info: item ? {
+            po_number: item.purchase_orders?.po_number,
+            status: item.purchase_orders?.status
+          } : null
+        }
+      })
+    }
+
+    // 6. Build hierarchy in JS
     const subsectionsWithParts = (subsections || []).map((sub: any) => ({
       ...sub,
       parts: parts
