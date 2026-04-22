@@ -144,15 +144,15 @@ const TreeItem = ({
             {getIcon()}
           </div>
 
-          <div className="flex flex-col min-w-0">
+          <div className="flex flex-col min-w-0 flex-1">
             {/* Hierarchy Label with distinct styling per level */}
             <span className={`
-              text-sm tracking-tight truncate 
+              text-sm tracking-tight
               ${type === 'section' ? 'font-black text-navy-900 uppercase tracking-widest' : 
-                (type === 'subsection' ? 'font-black text-slate-800 uppercase tracking-wider' : 
-                'font-bold text-slate-600')}
+                (type === 'subsection' ? 'font-black text-slate-900 uppercase tracking-wider block' : 
+                'font-bold text-slate-600 truncate')}
             `}>
-              {label || 'Untitled'}
+              {label || data.name || data.description || (type === 'subsection' ? 'Untitled Subsection' : 'Untitled')}
             </span>
 
             {/* Part-specific details and Status badges */}
