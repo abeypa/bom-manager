@@ -103,10 +103,6 @@ const POBasket = ({
             <p className="text-white/80 text-xs font-bold uppercase tracking-widest mt-2">Releasing BOM to PO</p>
           </div>
         )}
-            <p className="text-sm font-bold text-primary-700 mt-2 px-6">Release to add parts to PO Basket</p>
-          </div>
-        )}
-
         {/* Header */}
         <div className="shrink-0 p-6 bg-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
