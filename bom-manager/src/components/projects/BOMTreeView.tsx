@@ -135,6 +135,9 @@ const TreeItem = ({
     return data.name || data.description || _label || 'Untitled';
   }
 
+  // Get ERP ID for display/search
+  const erpId = data.beperp_part_no || data.part_ref?.beperp_part_no || '';
+
   // Checkbox sub-component
   const RenderCheckbox = () => onSelect ? (
     <div className="flex items-center pr-1 scale-110">
@@ -260,12 +263,20 @@ const TreeItem = ({
             </span>
 
             {type === 'part' && (
-              <div className="flex items-center gap-3 mt-1.5 overflow-x-auto no-scrollbar">
-                <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
-                  <Highlight text={data.part_ref?.part_number} query={searchQuery} />
-                  {data.part_ref?.part_number && ' • '}
-                  QTY: {data.quantity}
-                </span>
+              <div className="flex flex-col gap-1.5 mt-1.5">
+                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
+                  <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
+                    <Highlight text={data.part_ref?.part_number} query={searchQuery} />
+                    {data.part_ref?.part_number && ' • '}
+                    QTY: {data.quantity}
+                  </span>
+
+                  {erpId && (
+                    <span className="text-[10px] font-mono text-navy-400 bg-navy-50/50 px-1.5 py-0.5 rounded border border-navy-100 shrink-0">
+                      ERP ID: <Highlight text={erpId} query={searchQuery} />
+                    </span>
+                  )}
+                </div>
 
                 {(() => {
                   const poInfo = data.po_info;
@@ -394,6 +405,8 @@ export default function BOMTreeView({
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(project.sections?.map((s: any) => `section-${s.id}`)))
   const [tempSearch, setTempSearch] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [tempErpSearch, setTempErpSearch] = useState('')
+  const [erpSearchQuery, setErpSearchQuery] = useState('')
 
   // Debounced search logic
   React.useEffect(() => {
@@ -402,6 +415,81 @@ export default function BOMTreeView({
     }, 300)
     return () => clearTimeout(timer)
   }, [tempSearch])
+
+  // Debounced ERP search logic
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setErpSearchQuery(tempErpSearch)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [tempErpSearch])
+
+  /**
+   * Filtered Data Logic
+   * Hierarchical filter: If a part matches, its subsection and section must remain visible.
+   */
+  const filteredSections = useMemo(() => {
+    if (!searchQuery && !erpSearchQuery) return project.sections || [];
+
+    const sQuery = searchQuery.toLowerCase();
+    const eQuery = erpSearchQuery.toLowerCase();
+
+    return (project.sections || []).map((section: any) => {
+      const filteredSubsections = (section.subsections || []).map((sub: any) => {
+        const filteredParts = (sub.parts || []).filter((part: any) => {
+          const partErpId = String(part.beperp_part_no || part.part_ref?.beperp_part_no || '').toLowerCase();
+          const partPbo = String(part.part_ref?.part_number || '').toLowerCase();
+          const partDesc = String(part.description || part.part_ref?.description || '').toLowerCase();
+          const partName = String(part.name || '').toLowerCase();
+
+          // ERP Query must match ERP ID specifically if present
+          const matchesErp = !erpSearchQuery || partErpId.includes(eQuery);
+          
+          // Global Query matches multiple fields
+          const matchesGlobal = !searchQuery || 
+            partDesc.includes(sQuery) || 
+            partPbo.includes(sQuery) || 
+            partName.includes(sQuery) ||
+            partErpId.includes(sQuery);
+
+          return matchesErp && matchesGlobal;
+        });
+
+        // Subsection matches if its name matches QR if it has matching parts
+        const subNameMatches = !searchQuery || (sub.name || '').toLowerCase().includes(sQuery);
+        const shouldShowSub = filteredParts.length > 0 || subNameMatches;
+
+        if (shouldShowSub) {
+          return { ...sub, parts: filteredParts };
+        }
+        return null;
+      }).filter(Boolean);
+
+      const sectionNameMatches = !searchQuery || (section.name || '').toLowerCase().includes(sQuery);
+      const shouldShowSection = filteredSubsections.length > 0 || sectionNameMatches;
+
+      if (shouldShowSection) {
+        return { ...section, subsections: filteredSubsections };
+      }
+      return null;
+    }).filter(Boolean);
+  }, [project.sections, searchQuery, erpSearchQuery]);
+
+  // Auto-expand nodes when searching
+  React.useEffect(() => {
+    if (searchQuery || erpSearchQuery) {
+      const newExpanded = new Set<string>();
+      filteredSections.forEach((s: any) => {
+        newExpanded.add(`section-${s.id}`);
+        s.subsections?.forEach((sub: any) => {
+          if (sub.parts.length > 0) {
+            newExpanded.add(`sub-${sub.id}`);
+          }
+        });
+      });
+      setExpandedNodes(newExpanded);
+    }
+  }, [searchQuery, erpSearchQuery, filteredSections]);
 
   const allContainerIds = useMemo(() => {
     const ids: string[] = []
@@ -433,7 +521,7 @@ export default function BOMTreeView({
             BOM Registry Hierarchy
           </h3>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-6">
             {/* Global Tree Controls */}
             <div className="flex items-center bg-white p-1 rounded-xl shadow-sm border border-slate-200/50">
               <button onClick={expandAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all">
@@ -446,25 +534,38 @@ export default function BOMTreeView({
             </div>
 
             {/* Global Search Input */}
-            <div className="relative group">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-500 transition-colors">
-                <Search size={14} />
+            <div className="flex items-center gap-3">
+              <div className="relative group">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-500 transition-colors">
+                  <Search size={14} />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Global search..."
+                  value={tempSearch}
+                  onChange={(e) => setTempSearch(e.target.value)}
+                  className="h-9 pl-9 pr-8 bg-white border border-slate-200 rounded-xl text-xs font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all w-48 shadow-sm"
+                />
+                {tempSearch && (
+                  <button onClick={() => setTempSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500"><CloseIcon size={12} /></button>
+                )}
               </div>
-              <input
-                type="text"
-                placeholder="Search registry..."
-                value={tempSearch}
-                onChange={(e) => setTempSearch(e.target.value)}
-                className="h-9 pl-9 pr-8 bg-white border border-slate-200 rounded-xl text-xs font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all w-64 shadow-sm"
-              />
-              {tempSearch && (
-                <button 
-                  onClick={() => setTempSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500 transition-colors"
-                >
-                  <CloseIcon size={12} />
-                </button>
-              )}
+
+              <div className="relative group">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400 group-focus-within:text-navy-600 transition-colors">
+                  <Layers size={14} />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search by ERP ID..."
+                  value={tempErpSearch}
+                  onChange={(e) => setTempErpSearch(e.target.value)}
+                  className="h-9 pl-9 pr-8 bg-navy-50/30 border border-navy-100 rounded-xl text-xs font-bold placeholder:text-navy-300 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 transition-all w-56 shadow-sm"
+                />
+                {tempErpSearch && (
+                  <button onClick={() => setTempErpSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500"><CloseIcon size={12} /></button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -483,87 +584,105 @@ export default function BOMTreeView({
       </div>
 
       <div className="p-8 lg:p-12">
-        <TooltipProvider delayDuration={0}>
-          <SortableContext 
-            items={project.sections?.map((s: any) => `section-${s.id}`) || []} 
-            strategy={verticalListSortingStrategy}
-          >
-            <div className="space-y-4">
-              {project.sections?.map((section: any) => (
-                <TreeItem
-                  key={`section-${section.id}`}
-                  id={`section-${section.id}`}
-                  level={0}
-                  label={section.name}
-                  type="section"
-                  data={section}
-                  searchQuery={searchQuery}
-                  isExpanded={expandedNodes.has(`section-${section.id}`)}
-                  onToggle={() => toggleNode(`section-${section.id}`)}
-                  onEdit={() => onEditSection(section)}
-                  onDelete={() => onDeleteSection(section.id)}
-                  onAddChild={() => onAddSubsection(section.id)}
-                  onImageClick={() => onImageClick(section, 'section')}
-                >
-                  <SortableContext 
-                    items={section.subsections?.map((sub: any) => `sub-${sub.id}`) || []} 
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div className="mt-2 space-y-1">
-                      {section.subsections?.map((sub: any) => (
-                        <TreeItem
-                          key={`sub-${sub.id}`}
-                          id={`sub-${sub.id}`}
-                          level={1}
-                          label={sub.name}
-                          type="subsection"
-                          data={sub}
-                          searchQuery={searchQuery}
-                          isExpanded={expandedNodes.has(`sub-${sub.id}`)}
-                          onToggle={() => toggleNode(`sub-${sub.id}`)}
-                          onEdit={() => onEditSubsection(sub)}
-                          onDelete={() => onDeleteSubsection(sub.id)}
-                          onCopy={() => onCopySubsection(sub)}
-                          onAddChild={() => onAddPart(sub)}
-                          onImageClick={() => onImageClick(sub, 'subsection')}
-                          isSelected={sub.parts.length > 0 && sub.parts.every((p: any) => selectedPartIds.has(p.id))}
-                          onSelect={(_checked) => {
-                            const ids = sub.parts.map((p: any) => p.id)
-                            onToggleSelectAll(ids)
-                          }}
-                        >
-                          <SortableContext 
-                            items={sub.parts.map((part: any) => `part-${part.id}`) || []} 
-                            strategy={verticalListSortingStrategy}
-                          >
-                            <div className="mt-2 space-y-1">
-                              {sub.parts.map((part: any) => (
-                                <TreeItem
-                                  key={`part-${part.id}`}
-                                  id={`part-${part.id}`}
-                                  level={2}
-                                  label={part.description || part.part_ref?.description || 'Unnamed Part'}
-                                  type="part"
-                                  data={part}
-                                  searchQuery={searchQuery}
-                                  onEdit={() => onEditPart(part)}
-                                  onDelete={() => onDeletePart(part.id)}
-                                  onImageClick={() => onImageClick(part, 'part')}
-                                  isSelected={selectedPartIds.has(part.id)}
-                                  onSelect={() => onToggleSelectPart(part.id)}
-                                />
-                              ))}
-                            </div>
-                          </SortableContext>
-                        </TreeItem>
-                      ))}
-                    </div>
-                  </SortableContext>
-                </TreeItem>
-              ))}
+        {filteredSections.length === 0 && (searchQuery || erpSearchQuery) ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in zoom-in duration-500">
+            <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-slate-100">
+              <Search className="w-10 h-10 text-slate-200" />
             </div>
-          </SortableContext>
-        </TooltipProvider>
+            <h4 className="text-lg font-black text-navy-900 uppercase tracking-widest mb-2">No Parts Found</h4>
+            <p className="text-slate-400 text-sm max-w-xs font-medium">
+              We couldn't find any items matching "{erpSearchQuery || searchQuery}". Try a different term.
+            </p>
+            <button 
+              onClick={() => { setTempErpSearch(''); setTempSearch(''); }}
+              className="mt-8 text-xs font-black uppercase tracking-[0.2em] text-primary-600 hover:text-primary-700 bg-primary-50 px-6 py-3 rounded-xl transition-all"
+            >
+              Clear All Filters
+            </button>
+          </div>
+        ) : (
+          <TooltipProvider delayDuration={0}>
+            <SortableContext 
+              items={filteredSections.map((s: any) => `section-${s.id}`) || []} 
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-4">
+                {filteredSections.map((section: any) => (
+                  <TreeItem
+                    key={`section-${section.id}`}
+                    id={`section-${section.id}`}
+                    level={0}
+                    label={section.name}
+                    type="section"
+                    data={section}
+                    searchQuery={erpSearchQuery || searchQuery}
+                    isExpanded={expandedNodes.has(`section-${section.id}`)}
+                    onToggle={() => toggleNode(`section-${section.id}`)}
+                    onEdit={() => onEditSection(section)}
+                    onDelete={() => onDeleteSection(section.id)}
+                    onAddChild={() => onAddSubsection(section.id)}
+                    onImageClick={() => onImageClick(section, 'section')}
+                  >
+                    <SortableContext 
+                      items={section.subsections?.map((sub: any) => `sub-${sub.id}`) || []} 
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="mt-2 space-y-1">
+                        {section.subsections?.map((sub: any) => (
+                          <TreeItem
+                            key={`sub-${sub.id}`}
+                            id={`sub-${sub.id}`}
+                            level={1}
+                            label={sub.name}
+                            type="subsection"
+                            data={sub}
+                            searchQuery={erpSearchQuery || searchQuery}
+                            isExpanded={expandedNodes.has(`sub-${sub.id}`)}
+                            onToggle={() => toggleNode(`sub-${sub.id}`)}
+                            onEdit={() => onEditSubsection(sub)}
+                            onDelete={() => onDeleteSubsection(sub.id)}
+                            onCopy={() => onCopySubsection(sub)}
+                            onAddChild={() => onAddPart(sub)}
+                            onImageClick={() => onImageClick(sub, 'subsection')}
+                            isSelected={sub.parts.length > 0 && sub.parts.every((p: any) => selectedPartIds.has(p.id))}
+                            onSelect={(_checked) => {
+                              const ids = sub.parts.map((p: any) => p.id)
+                              onToggleSelectAll(ids)
+                            }}
+                          >
+                            <SortableContext 
+                              items={sub.parts.map((part: any) => `part-${part.id}`) || []} 
+                              strategy={verticalListSortingStrategy}
+                            >
+                              <div className="mt-2 space-y-1">
+                                {sub.parts.map((part: any) => (
+                                  <TreeItem
+                                    key={`part-${part.id}`}
+                                    id={`part-${part.id}`}
+                                    level={2}
+                                    label={part.description || part.part_ref?.description || 'Unnamed Part'}
+                                    type="part"
+                                    data={part}
+                                    searchQuery={erpSearchQuery || searchQuery}
+                                    onEdit={() => onEditPart(part)}
+                                    onDelete={() => onDeletePart(part.id)}
+                                    onImageClick={() => onImageClick(part, 'part')}
+                                    isSelected={selectedPartIds.has(part.id)}
+                                    onSelect={() => onToggleSelectPart(part.id)}
+                                  />
+                                ))}
+                              </div>
+                            </SortableContext>
+                          </TreeItem>
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </TreeItem>
+                ))}
+              </div>
+            </SortableContext>
+          </TooltipProvider>
+        )}
       </div>
     </div>
   )
