@@ -58,7 +58,7 @@ const TreeItem = ({
   children, 
   label, 
   type, 
-  data,
+  data, 
   isExpanded, 
   onToggle,
   onEdit,
@@ -75,47 +75,39 @@ const TreeItem = ({
     setNodeRef,
     transform,
     transition,
-    isDragging,
-  } = useSortable({ 
-    id,
-    data: {
-      type,
-      data
-    }
-  })
+    isDragging
+  } = useSortable({ id: id.toString() })
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    marginLeft: `${level * 24}px`,
+    paddingLeft: `${level * 24}px`
   }
 
   const getIcon = () => {
-    switch (type) {
-      case 'section': return <Layers className="h-4 w-4 text-navy-600" />
-      case 'subsection': return <Package className="h-4 w-4 text-emerald-600" />
-      case 'part': return <Puzzle className="h-4 w-4 text-amber-600" />
-    }
+    if (type === 'section') return <Layers className="w-4 h-4 text-primary-600" />
+    if (type === 'subsection') return <Folder className="w-4 h-4 text-amber-500" />
+    return <FileText className="w-4 h-4 text-slate-400" />
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="group relative">
-      <div className="flex items-center gap-2 py-2 px-3 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100 mb-1">
+    <div ref={setNodeRef} style={style} className="group select-none">
+      <div className={`flex items-center gap-2 py-2 px-1 hover:bg-slate-50/80 rounded-xl transition-all duration-200 ${level === 0 ? 'mt-4' : 'mt-1'} ${isSelected ? 'bg-primary-50/50' : ''}`}>
         <div 
+          className="p-1 hover:bg-white rounded-lg text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing transition-colors"
           {...attributes} 
-          {...listeners} 
-          className="p-1 text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity"
+          {...listeners}
         >
           <GripVertical size={14} />
         </div>
 
         {type !== 'part' && (
           <button 
-            onClick={onToggle}
-            className="p-1 hover:bg-slate-200 rounded text-slate-400 transition-colors"
+            onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
+            className="p-1 hover:bg-white rounded-lg text-slate-400 transition-colors"
           >
-            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           </button>
         )}
 
@@ -143,70 +135,81 @@ const TreeItem = ({
                 <span className="text-[10px] font-mono text-slate-400">
                   {data.part_ref?.part_number || 'No PN'} • QTY: {data.quantity}
                 </span>
-                
-                <div className="flex items-center gap-2">
-                  <TooltipProvider delayDuration={0}>
-                    {/* PO Status Badge */}
-                    {data.po_info ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-2 cursor-help">
+                      {/* PO Badge */}
+                      {data.po_info ? (
+                        <Badge 
+                          variant={data.po_info.status === 'Draft' ? 'warning' : 'success'}
+                          className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase"
+                        >
+                          {data.po_info.status === 'Draft' ? <Clock size={8} /> : <CheckCircle2 size={8} />}
+                          {data.po_info.status === 'Draft' ? 'Pending' : 'Released'}
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase opacity-40">
+                          <ShoppingBag size={8} />
+                          Ordered
+                        </Badge>
+                      )}
+
+                      {/* Stock Badge */}
+                      {(() => {
+                        const isInStock = (data.po_info && data.po_info.received_qty >= data.quantity) || 
+                                       (!data.po_info && (data.part_ref?.stock_quantity || 0) >= data.quantity);
+                        return (
                           <Badge 
-                            variant={data.po_info.status === 'Draft' ? 'warning' : 'success'}
-                            className="gap-1.5 px-2 cursor-help text-[9px] font-black uppercase tracking-wider"
+                            variant={isInStock ? 'success' : 'destructive'}
+                            className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase"
                           >
-                            {data.po_info.status === 'Draft' ? <Clock size={10} /> : <CheckCircle2 size={10} />}
-                            {data.po_info.status === 'Draft' ? 'Pending PO' : 'Released'}
+                            {isInStock ? <Package size={8} /> : <AlertTriangle size={8} />}
+                            {isInStock ? 'In Stock' : 'Arrival'}
                           </Badge>
-                        </TooltipTrigger>
-                        <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
-                          <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Purchase Order Info</p>
-                          <p className="text-xs font-bold text-slate-600">PO Number: <span className="text-navy-600">#{data.po_info.po_number}</span></p>
-                          <p className="text-xs font-bold text-slate-600">Status: <span className="capitalize">{data.po_info.status}</span></p>
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      <Badge variant="secondary" className="gap-1.5 px-2 text-[9px] font-black uppercase tracking-wider opacity-40">
-                        <ShoppingBag size={10} />
-                        Not Ordered
-                      </Badge>
-                    )}
-
-                    {/* Stock / Arrival Status Badge */}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        {(() => {
-                           const isFullyReceived = data.po_info && data.po_info.received_qty >= data.quantity;
-                           const isMasterAvailable = !data.po_info && (data.part_ref?.stock_quantity || 0) >= data.quantity;
-                           const isInStock = isFullyReceived || isMasterAvailable;
-
-                           return (
-                             <Badge 
-                               variant={isInStock ? 'success' : 'destructive'}
-                               className="gap-1.5 px-2 cursor-help text-[9px] font-black uppercase tracking-wider"
-                             >
-                               {isInStock ? <Package size={10} /> : <AlertTriangle size={10} />}
-                               {isInStock ? 'In Stock' : 'Not Arrived'}
-                             </Badge>
-                           )
-                        })()}
-                      </TooltipTrigger>
-                      <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
-                        <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Inventory Context</p>
+                        )
+                      })()}
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-[9px] font-black text-navy-900 uppercase tracking-widest mb-1 opacity-50">Procurement</p>
+                        {data.po_info ? (
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-bold text-slate-700">PO #{data.po_info.po_number}</p>
+                            <p className="text-[10px] text-slate-400 capitalize">{data.po_info.status} Status</p>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] font-medium text-slate-400">Not currently linked to a project PO.</p>
+                        )}
+                      </div>
+                      
+                      <div className="pt-2 border-t border-slate-100">
+                        <p className="text-[9px] font-black text-navy-900 uppercase tracking-widest mb-1 opacity-50">Logistics</p>
                         {data.po_info ? (
                           <>
-                            <p className="text-xs font-bold text-slate-600">Received for Project: <span className={data.po_info.received_qty >= data.quantity ? 'text-emerald-600' : 'text-red-600'}>{data.po_info.received_qty} / {data.quantity}</span></p>
-                            <p className="text-xs font-medium text-slate-400 mt-1">Status tracks arrival against official PO release.</p>
+                            <p className="text-xs font-bold text-slate-700">
+                              Received: <span className={data.po_info.received_qty >= data.quantity ? 'text-emerald-600' : 'text-red-500'}>
+                                {data.po_info.received_qty} / {data.quantity}
+                              </span>
+                            </p>
+                            <p className="text-[10px] text-slate-400">Project-specific receipt tracking.</p>
                           </>
                         ) : (
                           <>
-                            <p className="text-xs font-bold text-slate-600">Master Stock: <span className={(data.part_ref?.stock_quantity || 0) >= data.quantity ? 'text-emerald-600' : 'text-red-600'}>{data.part_ref?.stock_quantity || 0} units</span></p>
-                            <p className="text-xs font-medium text-slate-400 mt-1">Showing general availability in master inventory.</p>
+                            <p className="text-xs font-bold text-slate-700">
+                              Master Stock: <span className={(data.part_ref?.stock_quantity || 0) >= data.quantity ? 'text-emerald-600' : 'text-red-500'}>
+                                {data.part_ref?.stock_quantity || 0} units
+                              </span>
+                            </p>
+                            <p className="text-[10px] text-slate-400">Available in general inventory.</p>
                           </>
                         )}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
               </div>
             )}
           </div>
@@ -243,7 +246,6 @@ const TreeItem = ({
 
       {isExpanded && children && (
         <div className="relative">
-          {/* Vertical connection line */}
           <div className="absolute left-[-12px] top-0 bottom-4 w-[1px] bg-slate-100 ml-[23px]" style={{ left: `${level * 24}px` }} />
           {children}
         </div>
@@ -316,112 +318,87 @@ export default function BOMTreeView({
             </button>
           )}
         </div>
-
-        <div className="flex gap-4">
-          <div className="flex gap-3 pr-2 border-r border-slate-200">
-            <button 
-              onClick={() => {
-                const allIds = project.sections.flatMap((s: any) => [
-                  `section-${s.id}`,
-                  ...s.subsections.map((sub: any) => `sub-${sub.id}`)
-                ])
-                setExpandedNodes(new Set(allIds))
-              }}
-              className="text-[9px] font-black text-primary-600 uppercase tracking-widest hover:underline"
-            >
-              Expand All
-            </button>
-            <button 
-              onClick={() => setExpandedNodes(new Set())}
-              className="text-[9px] font-black text-slate-400 uppercase tracking-widest hover:underline"
-            >
-              Collapse All
-            </button>
-          </div>
-          
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            {project.sections?.length || 0} SECTIONS
-          </p>
-        </div>
       </div>
 
-      <div className="p-6">
-        <SortableContext 
-          items={project.sections?.map((s: any) => `section-${s.id}`) || []} 
-          strategy={verticalListSortingStrategy}
-        >
-          <div className="space-y-1">
-            {project.sections?.map((section: any) => (
-              <TreeItem
-                key={`section-${section.id}`}
-                id={`section-${section.id}`}
-                level={0}
-                label={section.name}
-                type="section"
-                data={section}
-                isExpanded={expandedNodes.has(`section-${section.id}`)}
-                onToggle={() => toggleNode(`section-${section.id}`)}
-                onEdit={() => onEditSection(section)}
-                onDelete={() => onDeleteSection(section.id)}
-                onAddChild={() => onAddSubsection(section.id)}
-                onImageClick={() => onImageClick(section, 'section')}
-              >
-                <SortableContext 
-                  items={section.subsections.map((sub: any) => `sub-${sub.id}`)} 
-                  strategy={verticalListSortingStrategy}
+      <div className="p-8">
+        <TooltipProvider delayDuration={0}>
+          <SortableContext 
+            items={project.sections?.map((s: any) => `section-${s.id}`) || []} 
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="space-y-4">
+              {project.sections?.map((section: any) => (
+                <TreeItem
+                  key={`section-${section.id}`}
+                  id={`section-${section.id}`}
+                  level={0}
+                  label={section.name}
+                  type="section"
+                  data={section}
+                  isExpanded={expandedNodes.has(`section-${section.id}`)}
+                  onToggle={() => toggleNode(`section-${section.id}`)}
+                  onEdit={() => onEditSection(section)}
+                  onDelete={() => onDeleteSection(section.id)}
+                  onAddChild={() => onAddSubsection(section.id)}
+                  onImageClick={() => onImageClick(section, 'section')}
                 >
-                  <div className="mt-1">
-                    {section.subsections.map((sub: any) => (
-                      <TreeItem
-                        key={`sub-${sub.id}`}
-                        id={`sub-${sub.id}`}
-                        level={1}
-                        label={sub.name || sub.section_name}
-                        type="subsection"
-                        data={sub}
-                        isExpanded={expandedNodes.has(`sub-${sub.id}`)}
-                        onToggle={() => toggleNode(`sub-${sub.id}`)}
-                        onEdit={() => onEditSubsection(sub)}
-                        onDelete={() => onDeleteSubsection(sub.id)}
-                        onCopy={() => onCopySubsection(sub)}
-                        onAddChild={() => onAddPart(sub)}
-                        onImageClick={() => onImageClick(sub, 'subsection')}
-                        isSelected={sub.parts.length > 0 && sub.parts.every((p: any) => selectedPartIds.has(p.id))}
-                        onSelect={(checked) => {
-                          const ids = sub.parts.map((p: any) => p.id)
-                          onToggleSelectAll(ids)
-                        }}
-                      >
-                        <SortableContext 
-                          items={sub.parts.map((part: any) => `part-${part.id}`)} 
-                          strategy={verticalListSortingStrategy}
+                  <SortableContext 
+                    items={section.subsections?.map((sub: any) => `sub-${sub.id}`) || []} 
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="mt-1">
+                      {section.subsections?.map((sub: any) => (
+                        <TreeItem
+                          key={`sub-${sub.id}`}
+                          id={`sub-${sub.id}`}
+                          level={1}
+                          label={sub.name}
+                          type="subsection"
+                          data={sub}
+                          isExpanded={expandedNodes.has(`sub-${sub.id}`)}
+                          onToggle={() => toggleNode(`sub-${sub.id}`)}
+                          onEdit={() => onEditSubsection(sub)}
+                          onDelete={() => onDeleteSubsection(sub.id)}
+                          onCopy={() => onCopySubsection(sub)}
+                          onAddChild={() => onAddPart(sub)}
+                          onImageClick={() => onImageClick(sub, 'subsection')}
+                          isSelected={sub.parts.length > 0 && sub.parts.every((p: any) => selectedPartIds.has(p.id))}
+                          onSelect={(checked) => {
+                            const ids = sub.parts.map((p: any) => p.id)
+                            onToggleSelectAll(ids)
+                          }}
                         >
-                          <div className="mt-1">
-                            {sub.parts.map((part: any) => (
-                              <TreeItem
-                                key={`part-${part.id}`}
-                                id={`part-${part.id}`}
-                                level={2}
-                                label={part.description || part.part_ref?.description || 'Unnamed Part'}
-                                type="part"
-                                data={part}
-                                onEdit={() => onEditPart(part)}
-                                onDelete={() => onDeletePart(part.id)}
-                                onImageClick={() => onImageClick(part, 'part')}
-                                isSelected={selectedPartIds.has(part.id)}
-                                onSelect={() => onToggleSelectPart(part.id)}
-                              />
-                            ))}
-                          </div>
-                        </SortableContext>
-                      </TreeItem>
-                    ))}
-                  </div>
-                </SortableContext>
-              </TreeItem>
-            ))}
-          </div>
-        </SortableContext>
+                          <SortableContext 
+                            items={sub.parts.map((part: any) => `part-${part.id}`) || []} 
+                            strategy={verticalListSortingStrategy}
+                          >
+                            <div className="mt-1">
+                              {sub.parts.map((part: any) => (
+                                <TreeItem
+                                  key={`part-${part.id}`}
+                                  id={`part-${part.id}`}
+                                  level={2}
+                                  label={part.description || part.part_ref?.description || 'Unnamed Part'}
+                                  type="part"
+                                  data={part}
+                                  onEdit={() => onEditPart(part)}
+                                  onDelete={() => onDeletePart(part.id)}
+                                  onImageClick={() => onImageClick(part, 'part')}
+                                  isSelected={selectedPartIds.has(part.id)}
+                                  onSelect={() => onToggleSelectPart(part.id)}
+                                />
+                              ))}
+                            </div>
+                          </SortableContext>
+                        </TreeItem>
+                      ))}
+                    </div>
+                  </SortableContext>
+                </TreeItem>
+              ))}
+            </div>
+          </SortableContext>
+        </TooltipProvider>
       </div>
     </div>
   )

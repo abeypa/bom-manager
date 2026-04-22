@@ -475,7 +475,7 @@ const ProjectDetails = () => {
             {selectedPartIds.size > 0 && isAdmin && (
               <button
                 onClick={() => {
-                  const parts = []
+                  const parts: any[] = []
                   project?.sections?.forEach((s: any) => {
                     s.subsections?.forEach((sub: any) => {
                       sub.parts?.forEach((p: any) => {
