@@ -127,7 +127,7 @@ const TreeItem = ({
             {getIcon()}
           </div>
           <div className="flex flex-col min-w-0">
-            <span className={`text-sm tracking-tight truncate ${type === 'section' ? 'font-black text-navy-900 uppercase' : 'font-bold text-slate-700'}`}>
+            <span className={`text-sm tracking-tight truncate ${type === 'section' ? 'font-black text-navy-900 uppercase' : (type === 'subsection' ? 'font-black text-slate-900 uppercase text-[11px] tracking-wider' : 'font-bold text-slate-700')}`}>
               {label}
             </span>
             {type === 'part' && (
@@ -136,10 +136,10 @@ const TreeItem = ({
                   {data.part_ref?.part_number || 'No PN'} • QTY: {data.quantity}
                 </span>
 
+                {/* SINGLE TOOLTIP WRAPPER FOR STATUS */}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div className="flex items-center gap-2 cursor-help">
-                      {/* PO Badge */}
                       {data.po_info ? (
                         <Badge 
                           variant={data.po_info.status === 'Draft' ? 'warning' : 'success'}
@@ -151,11 +151,10 @@ const TreeItem = ({
                       ) : (
                         <Badge variant="secondary" className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase opacity-40">
                           <ShoppingBag size={8} />
-                          Ordered
+                          Not Ordered
                         </Badge>
                       )}
 
-                      {/* Stock Badge */}
                       {(() => {
                         const isInStock = (data.po_info && data.po_info.received_qty >= data.quantity) || 
                                        (!data.po_info && (data.part_ref?.stock_quantity || 0) >= data.quantity);
@@ -165,7 +164,7 @@ const TreeItem = ({
                             className="gap-1 px-1.5 h-4 text-[8px] font-black uppercase"
                           >
                             {isInStock ? <Package size={8} /> : <AlertTriangle size={8} />}
-                            {isInStock ? 'In Stock' : 'Arrival'}
+                            {isInStock ? 'In Stock' : 'Arrived'}
                           </Badge>
                         )
                       })()}
@@ -178,10 +177,10 @@ const TreeItem = ({
                         {data.po_info ? (
                           <div className="space-y-0.5">
                             <p className="text-xs font-bold text-slate-700">PO #{data.po_info.po_number}</p>
-                            <p className="text-[10px] text-slate-400 capitalize">{data.po_info.status} Status</p>
+                            <p className="text-[10px] text-slate-400 capitalize">{data.po_info.status}</p>
                           </div>
                         ) : (
-                          <p className="text-[10px] font-medium text-slate-400">Not currently linked to a project PO.</p>
+                          <p className="text-[10px] font-medium text-slate-400">No linked PO</p>
                         )}
                       </div>
                       
@@ -194,16 +193,14 @@ const TreeItem = ({
                                 {data.po_info.received_qty} / {data.quantity}
                               </span>
                             </p>
-                            <p className="text-[10px] text-slate-400">Project-specific receipt tracking.</p>
                           </>
                         ) : (
                           <>
                             <p className="text-xs font-bold text-slate-700">
                               Master Stock: <span className={(data.part_ref?.stock_quantity || 0) >= data.quantity ? 'text-emerald-600' : 'text-red-500'}>
-                                {data.part_ref?.stock_quantity || 0} units
+                                {data.part_ref?.stock_quantity || 0}
                               </span>
                             </p>
-                            <p className="text-[10px] text-slate-400">Available in general inventory.</p>
                           </>
                         )}
                       </div>
