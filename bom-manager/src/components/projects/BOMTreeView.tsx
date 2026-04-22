@@ -26,6 +26,8 @@ import {
   Copy,
   Maximize2,
   Minimize2,
+  Search,
+  X as CloseIcon
 } from 'lucide-react'
 import {
   Tooltip,
@@ -35,6 +37,28 @@ import {
 } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
 
+/**
+ * Highlight Utility
+ * Wraps matching parts of string in a yellow mark tag for search visibility.
+ */
+const Highlight = ({ text, query }: { text: any, query: string }) => {
+  const str = String(text || '');
+  if (!query || !str) return <>{str}</>;
+  
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = str.split(regex);
+  
+  return (
+    <>
+      {parts.map((part, i) => 
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} className="bg-yellow-300 text-black px-0.5 rounded font-bold shadow-sm">{part}</mark>
+        ) : part
+      )}
+    </>
+  );
+};
+
 interface TreeItemProps {
   id: string | number
   level: number
@@ -42,6 +66,7 @@ interface TreeItemProps {
   label: string
   type: 'section' | 'subsection' | 'part'
   data: any
+  searchQuery?: string
   isExpanded?: boolean
   onToggle?: () => void
   onEdit?: () => void
@@ -60,6 +85,7 @@ const TreeItem = ({
   label: _label, 
   type, 
   data, 
+  searchQuery = '',
   isExpanded, 
   onToggle,
   onEdit,
@@ -174,7 +200,7 @@ const TreeItem = ({
             
             <Folder className="h-5 w-5 text-amber-600" />
             <span className="font-semibold text-base text-slate-900 truncate">
-              {getDisplayName()}
+              <Highlight text={getDisplayName()} query={searchQuery} />
             </span>
             
             <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
@@ -230,13 +256,15 @@ const TreeItem = ({
               text-sm tracking-tight truncate 
               ${type === 'section' ? 'font-black text-navy-900 uppercase tracking-widest' : 'font-bold text-slate-600'}
             `}>
-              {getDisplayName()}
+              <Highlight text={getDisplayName()} query={searchQuery} />
             </span>
 
             {type === 'part' && (
               <div className="flex items-center gap-3 mt-1.5 overflow-x-auto no-scrollbar">
                 <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
-                  {data.part_ref?.part_number || 'No PN'} • QTY: {data.quantity}
+                  <Highlight text={data.part_ref?.part_number} query={searchQuery} />
+                  {data.part_ref?.part_number && ' • '}
+                  QTY: {data.quantity}
                 </span>
 
                 {(() => {
@@ -364,6 +392,16 @@ export default function BOMTreeView({
   onAddSelectedToBasket
 }: BOMTreeViewProps) {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(project.sections?.map((s: any) => `section-${s.id}`)))
+  const [tempSearch, setTempSearch] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Debounced search logic
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(tempSearch)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [tempSearch])
 
   const allContainerIds = useMemo(() => {
     const ids: string[] = []
@@ -395,14 +433,39 @@ export default function BOMTreeView({
             BOM Registry Hierarchy
           </h3>
           
-          <div className="flex items-center bg-white p-1 rounded-xl shadow-sm border border-slate-200/50">
-            <button onClick={expandAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all">
-              <Maximize2 size={12} /> Expand All
-            </button>
-            <div className="w-px h-4 bg-slate-200 mx-1" />
-            <button onClick={collapseAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
-              <Minimize2 size={12} /> Collapse All
-            </button>
+          <div className="flex items-center gap-4">
+            {/* Global Tree Controls */}
+            <div className="flex items-center bg-white p-1 rounded-xl shadow-sm border border-slate-200/50">
+              <button onClick={expandAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all">
+                <Maximize2 size={12} /> Expand All
+              </button>
+              <div className="w-px h-4 bg-slate-200 mx-1" />
+              <button onClick={collapseAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
+                <Minimize2 size={12} /> Collapse All
+              </button>
+            </div>
+
+            {/* Global Search Input */}
+            <div className="relative group">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-500 transition-colors">
+                <Search size={14} />
+              </div>
+              <input
+                type="text"
+                placeholder="Search registry..."
+                value={tempSearch}
+                onChange={(e) => setTempSearch(e.target.value)}
+                className="h-9 pl-9 pr-8 bg-white border border-slate-200 rounded-xl text-xs font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all w-64 shadow-sm"
+              />
+              {tempSearch && (
+                <button 
+                  onClick={() => setTempSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500 transition-colors"
+                >
+                  <CloseIcon size={12} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -434,6 +497,7 @@ export default function BOMTreeView({
                   label={section.name}
                   type="section"
                   data={section}
+                  searchQuery={searchQuery}
                   isExpanded={expandedNodes.has(`section-${section.id}`)}
                   onToggle={() => toggleNode(`section-${section.id}`)}
                   onEdit={() => onEditSection(section)}
@@ -454,6 +518,7 @@ export default function BOMTreeView({
                           label={sub.name}
                           type="subsection"
                           data={sub}
+                          searchQuery={searchQuery}
                           isExpanded={expandedNodes.has(`sub-${sub.id}`)}
                           onToggle={() => toggleNode(`sub-${sub.id}`)}
                           onEdit={() => onEditSubsection(sub)}
@@ -480,6 +545,7 @@ export default function BOMTreeView({
                                   label={part.description || part.part_ref?.description || 'Unnamed Part'}
                                   type="part"
                                   data={part}
+                                  searchQuery={searchQuery}
                                   onEdit={() => onEditPart(part)}
                                   onDelete={() => onDeletePart(part.id)}
                                   onImageClick={() => onImageClick(part, 'part')}
