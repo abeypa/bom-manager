@@ -48,7 +48,7 @@ export const purchaseOrdersApi = {
       .select(`
         *,
         suppliers (*),
-        project:projects (project_name),
+        project:projects (id, project_name, project_number),
         purchase_order_items (*)
       `)
       .eq('id', poId)
@@ -71,6 +71,8 @@ export const purchaseOrdersApi = {
             project_subsection:project_subsections (
               section:project_sections (
                 project:projects (
+                  id,
+                  project_name,
                   project_number
                 )
               )
@@ -434,7 +436,7 @@ export const purchaseOrdersApi = {
 
     const orderedIds = new Set((orderedItems as any[])?.map(i => i.project_part_id))
 
-    return partsWithDetails.filter(p => !orderedIds.has(p.id))
+    return partsWithDetails.filter((p: any) => !orderedIds.has(p.id))
   },
 
   // Delete single PO line item

@@ -77,6 +77,26 @@ export default function PODetailModal({
     notes: '',
   });
 
+  const uniqueProjects = React.useMemo(() => {
+    if (!po?.purchase_order_items) return [];
+    
+    const projectsMap = new Map();
+    // primary project attached directly
+    if (po.project) {
+       projectsMap.set(po.project_id, { id: po.project_id, name: po.project.project_name, projectCode: po.project.project_number });
+    }
+    
+    // projects from parts
+    po.purchase_order_items.forEach((item: any) => {
+      const proj = item.project_part?.project_subsection?.section?.project;
+      if (proj && proj.id) {
+         projectsMap.set(proj.id, { id: proj.id, name: proj.project_name, projectCode: proj.project_number });
+      }
+    });
+    
+    return Array.from(projectsMap.values());
+  }, [po]);
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -388,6 +408,19 @@ export default function PODetailModal({
               <Calendar className="w-4 h-4" />
               {po?.po_date && new Date(po.po_date).toLocaleDateString('en-IN')}
             </p>
+            
+            {uniqueProjects.length > 0 && (
+              <div className="flex items-center gap-2 mt-4">
+                <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Released for Project(s):</span>
+                <div className="flex flex-wrap gap-2">
+                  {uniqueProjects.map(project => (
+                    <span key={project.id} className="px-2 py-0.5 bg-gray-100 text-gray-700 text-[10px] font-black uppercase tracking-widest rounded-full border border-gray-200 shadow-sm">
+                      {project.name || project.projectCode} ({project.projectCode})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <button onClick={onClose} className="p-3 hover:bg-white rounded-2xl transition-all">
             <X className="w-6 h-6 text-gray-400" />
