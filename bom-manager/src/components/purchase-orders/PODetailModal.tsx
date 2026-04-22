@@ -47,6 +47,7 @@ export default function PODetailModal({
   const { showToast } = useToast();
   const [po, setPo] = useState<any>(null);
   const [payments, setPayments] = useState<POPayment[]>([]);
+  const [receipts, setReceipts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [isUpdating, setIsUpdating] = useState(false);
@@ -190,12 +191,14 @@ export default function PODetailModal({
   const loadData = async () => {
     try {
       setLoading(true);
-      const [poData, paymentsData] = await Promise.all([
+      const [poData, paymentsData, receiptsData] = await Promise.all([
         purchaseOrdersApi.getById(poId) as Promise<any>,
         poPaymentsApi.getByPO(poId),
+        poPaymentsApi.getReceiptsByPO(poId),
       ]);
       setPo(poData);
       setPayments(paymentsData);
+      setReceipts(receiptsData);
       setPoNumberInput(poData.po_number || '');
 
       // ── Resolve a usable view URL from the stored value ──
@@ -677,7 +680,7 @@ export default function PODetailModal({
                     <table className="w-full text-left">
                       <thead className="bg-gray-50">
                         <tr>
-                          {['Part', 'Description', 'Unit Price', 'Disc. %', 'Ordered', 'Received', 'Pending', 'Value', 'Actions'].map(h => (
+                          {['Part', 'Description', 'Unit Price', 'Disc. %', 'Ordered', 'Received', 'Pending', 'Actions'].map(h => (
                             <th key={h} className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
                           ))}
                         </tr>
@@ -710,9 +713,6 @@ export default function PODetailModal({
                             <td className="px-6 py-4 font-bold text-sm tabular-nums text-gray-500">
                               {Math.max(0, item.quantity - (item.received_qty || 0))}
                             </td>
-                            <td className="px-6 py-4 font-black text-sm tabular-nums">
-                              ₹{item.total_amount?.toLocaleString('en-IN')}
-                            </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex items-center gap-2">
                                 <button
@@ -737,7 +737,58 @@ export default function PODetailModal({
                   </div>
                   <div className="bg-gray-50 rounded-2xl p-4 flex justify-between items-center">
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">{po?.purchase_order_items?.length || 0} line items</span>
-                    <span className="text-lg font-black text-gray-900">Total: ₹{po?.grand_total?.toLocaleString('en-IN')}</span>
+                    <span className="text-lg font-black text-gray-900">PO Total: ₹{po?.grand_total?.toLocaleString('en-IN')}</span>
+                  </div>
+
+                  {/* ── Receipt History (Audit Trail) ── */}
+                  <div className="mt-8 space-y-4">
+                    <div className="flex items-center justify-between px-2">
+                       <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                         <Package className="w-4 h-4" /> Receipt History Audit trail
+                       </h3>
+                       <span className="text-[10px] font-bold text-gray-400">{receipts.length} transactions</span>
+                    </div>
+                    
+                    {receipts.length > 0 ? (
+                      <div className="border border-gray-100 rounded-3xl overflow-hidden bg-white">
+                        <table className="w-full text-left">
+                          <thead className="bg-gray-50/50">
+                            <tr>
+                              {['Date', 'Part', 'Quantity', 'Notes', 'RecordedBy'].map(h => (
+                                <th key={h} className="px-6 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {receipts.map((r, idx) => (
+                              <tr key={r.id || idx} className="hover:bg-gray-50/30">
+                                <td className="px-6 py-4 text-xs font-bold text-gray-600">
+                                  {new Date(r.receipt_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="text-xs font-black text-gray-900 font-mono">{r.purchase_order_items?.part_number || 'N/A'}</div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <span className="bg-green-50 text-green-700 px-3 py-1 rounded-full text-xs font-black">
+                                    +{r.quantity}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-xs text-gray-500 italic max-w-[200px] truncate">
+                                  {r.notes || '—'}
+                                </td>
+                                <td className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                  {r.created_by_email || 'System'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="p-10 border-2 border-dashed border-gray-100 rounded-[2rem] text-center">
+                        <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest">No receipt history recorded yet</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

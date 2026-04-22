@@ -119,6 +119,13 @@ export const poPaymentsApi = {
           .from('purchase_order_items')
           .update({ received_qty: ((poItem as any).received_qty || 0) + item.received_qty })
           .eq('id', item.id),
+        (supabase as any).from('po_receipts').insert({
+          po_line_item_id: item.id,
+          quantity: item.received_qty,
+          receipt_date: new Date().toISOString(),
+          notes: 'Batch receipt from Delivery tab',
+          created_by: (await supabase.auth.getUser()).data.user?.id || null
+        })
       ]);
     }
 
@@ -145,6 +152,29 @@ export const poPaymentsApi = {
     }
 
     return { success: true };
+  },
+
+  getReceiptsByPO: async (poId: number): Promise<any[]> => {
+    const { data, error } = await supabase
+      .from('po_receipts')
+      .select('*, purchase_order_items(part_number, description)')
+      .innerJoin('purchase_order_items', 'po_receipts.po_line_item_id', 'purchase_order_items.id')
+      .eq('purchase_order_items.purchase_order_id', poId)
+      .order('receipt_date', { ascending: false });
+    
+    // Fallback if JOIN syntax is not supported by current postgrest version in this environment
+    if (error) {
+       const { data: lineItems } = await supabase.from('purchase_order_items').select('id, part_number, description').eq('purchase_order_id', poId);
+       if (!lineItems) return [];
+       const ids = lineItems.map(i => i.id);
+       const { data: receipts, error: recErr } = await supabase.from('po_receipts').select('*').in('po_line_item_id', ids).order('receipt_date', { ascending: false });
+       if (recErr) throw recErr;
+       return (receipts || []).map(r => ({
+         ...r,
+         purchase_order_items: lineItems.find(li => li.id === r.po_line_item_id)
+       }));
+    }
+    return data || [];
   },
 };
 
