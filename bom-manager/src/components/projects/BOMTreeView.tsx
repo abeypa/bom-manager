@@ -10,10 +10,10 @@ import {
   ChevronRight, 
   ChevronDown, 
   Layers, 
-  Package, 
-  Puzzle,
-  Edit2,
-  Trash2,
+  Folder, 
+  FileText, 
+  MoreHorizontal, 
+  Settings, 
   Copy,
   PlusCircle,
   ImageIcon,
@@ -21,7 +21,10 @@ import {
   Clock,
   CheckCircle2,
   AlertTriangle,
-  ShoppingBag
+  ShoppingBag,
+  Package,
+  Edit2,
+  Trash2,
 } from 'lucide-react'
 import {
   Tooltip,
@@ -29,6 +32,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Badge } from '@/components/ui/badge'
 
 interface TreeItemProps {
   id: string | number
@@ -46,31 +50,6 @@ interface TreeItemProps {
   onImageClick?: () => void
   isSelected?: boolean
   onSelect?: (selected: boolean) => void
-}
-
-const StatusBadge = ({ 
-  label, 
-  icon: Icon, 
-  variant = 'default' 
-}: { 
-  label: string, 
-  icon: any, 
-  variant?: 'success' | 'warning' | 'destructive' | 'secondary' 
-}) => {
-  const variants = {
-    success: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    warning: 'bg-amber-50 text-amber-700 border-amber-100',
-    destructive: 'bg-red-50 text-red-700 border-red-100',
-    secondary: 'bg-slate-50 text-slate-500 border-slate-100',
-    default: 'bg-slate-50 text-slate-500 border-slate-100'
-  }
-
-  return (
-    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider ${variants[variant]}`}>
-      <Icon size={10} className="shrink-0" />
-      <span>{label}</span>
-    </div>
-  )
 }
 
 const TreeItem = ({ 
@@ -170,12 +149,14 @@ const TreeItem = ({
                     {/* PO Status Badge */}
                     {data.po_info ? (
                       <Tooltip>
-                        <TooltipTrigger>
-                          <StatusBadge 
-                            label={data.po_info.status === 'Draft' ? 'Pending PO' : 'Released'}
-                            icon={data.po_info.status === 'Draft' ? Clock : CheckCircle2}
+                        <TooltipTrigger asChild>
+                          <Badge 
                             variant={data.po_info.status === 'Draft' ? 'warning' : 'success'}
-                          />
+                            className="gap-1.5 px-2 cursor-help text-[9px] font-black uppercase tracking-wider"
+                          >
+                            {data.po_info.status === 'Draft' ? <Clock size={10} /> : <CheckCircle2 size={10} />}
+                            {data.po_info.status === 'Draft' ? 'Pending PO' : 'Released'}
+                          </Badge>
                         </TooltipTrigger>
                         <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
                           <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Purchase Order Info</p>
@@ -184,23 +165,28 @@ const TreeItem = ({
                         </TooltipContent>
                       </Tooltip>
                     ) : (
-                      <StatusBadge label="Not Ordered" icon={ShoppingBag} variant="secondary" />
+                      <Badge variant="secondary" className="gap-1.5 px-2 text-[9px] font-black uppercase tracking-wider opacity-40">
+                        <ShoppingBag size={10} />
+                        Not Ordered
+                      </Badge>
                     )}
 
                     {/* Stock / Arrival Status Badge */}
                     <Tooltip>
-                      <TooltipTrigger>
+                      <TooltipTrigger asChild>
                         {(() => {
                            const isFullyReceived = data.po_info && data.po_info.received_qty >= data.quantity;
                            const isMasterAvailable = !data.po_info && (data.part_ref?.stock_quantity || 0) >= data.quantity;
                            const isInStock = isFullyReceived || isMasterAvailable;
 
                            return (
-                             <StatusBadge 
-                               label={isInStock ? 'In Stock' : 'Not Arrived'}
-                               icon={isInStock ? Package : AlertTriangle}
+                             <Badge 
                                variant={isInStock ? 'success' : 'destructive'}
-                             />
+                               className="gap-1.5 px-2 cursor-help text-[9px] font-black uppercase tracking-wider"
+                             >
+                               {isInStock ? <Package size={10} /> : <AlertTriangle size={10} />}
+                               {isInStock ? 'In Stock' : 'Not Arrived'}
+                             </Badge>
                            )
                         })()}
                       </TooltipTrigger>

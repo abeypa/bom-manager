@@ -5,6 +5,7 @@ import { Trash2, Edit2, Check, X, ImageIcon, ArrowUpDown, Clock, CheckCircle2, P
 import { projectsApi } from '@/api/projects'
 import { useToast } from '@/context/ToastContext'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Badge } from '@/components/ui/badge'
 import { useDraggable } from '@dnd-kit/core'
 
 interface BOMPartsTableProps {
@@ -257,14 +258,13 @@ const BOMPartsTable = ({
           {poInfo ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider cursor-help w-fit ${
-                  poInfo.status === 'Draft' 
-                    ? 'bg-amber-50 text-amber-700 border-amber-100' 
-                    : 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                }`}>
+                <Badge 
+                  variant={poInfo.status === 'Draft' ? 'warning' : 'success'}
+                  className="gap-1.5 px-2 cursor-help text-[9px] font-black uppercase tracking-wider w-fit"
+                >
                   {poInfo.status === 'Draft' ? <Clock size={10} /> : <CheckCircle2 size={10} />}
                   <span>{poInfo.status === 'Draft' ? 'Pending PO' : 'Released'}</span>
-                </div>
+                </Badge>
               </TooltipTrigger>
               <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
                 <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Purchase Order Info</p>
@@ -273,10 +273,10 @@ const BOMPartsTable = ({
               </TooltipContent>
             </Tooltip>
           ) : (
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider bg-slate-50 text-slate-400 border-slate-100 w-fit">
+            <Badge variant="secondary" className="gap-1.5 px-2 text-[9px] font-black uppercase tracking-wider w-fit opacity-40">
               <ShoppingBag size={10} />
               <span>Not Ordered</span>
-            </div>
+            </Badge>
           )}
 
           {/* Stock / Arrival Status Badge */}
@@ -289,14 +289,13 @@ const BOMPartsTable = ({
             return (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider cursor-help w-fit ${
-                    isInStock 
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
-                      : 'bg-red-50 text-red-700 border-red-100'
-                  }`}>
+                  <Badge 
+                    variant={isInStock ? 'success' : 'destructive'}
+                    className="gap-1.5 px-2 cursor-help text-[9px] font-black uppercase tracking-wider w-fit"
+                  >
                     {isInStock ? <Package size={10} /> : <AlertTriangle size={10} />}
                     <span>{isInStock ? 'In Stock' : 'Not Arrived'}</span>
-                  </div>
+                  </Badge>
                 </TooltipTrigger>
                 <TooltipContent className="bg-white border-slate-200 shadow-xl p-3 rounded-2xl">
                   <p className="text-[10px] font-black text-navy-900 uppercase tracking-widest mb-1">Inventory Context</p>
