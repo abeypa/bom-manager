@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, CheckCircle2, ShoppingCart, Info, DollarSign, Calendar, FileText, Package } from 'lucide-react'
 import { suppliersApi } from '@/api/suppliers'
 import { purchaseOrdersApi } from '@/api/purchase-orders'
+import { usePOBasketStore } from '@/store/usePOBasketStore'
+import { useToast } from '@/context/ToastContext'
 
 interface Props {
   isOpen: boolean
@@ -13,6 +15,8 @@ interface Props {
 
 const CreatePOFromBOMModal = ({ isOpen, onClose, projectId, items }: Props) => {
   const queryClient = useQueryClient()
+  const { showToast } = useToast()
+  const { clearBasket } = usePOBasketStore()
   const [supplierId, setSupplierId] = useState<string>('')
   const [currency, setCurrency] = useState<string>('INR')
   const [notes, setNotes] = useState('')
@@ -54,7 +58,7 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, projectId, items }: Props) => {
         grand_total: totalAmount,
         total_items: selectedParts.length,
         total_quantity: selectedParts.reduce((acc, p) => acc + (p.quantity || 0), 0),
-        status: 'Draft',
+        status: bepPoPdfUrl ? 'Released' : 'Draft',
         expected_delivery_date: expectedDeliveryDate || null,
         bep_po_pdf_url: bepPoPdfUrl || null,
         notes: notes,
@@ -82,7 +86,9 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, projectId, items }: Props) => {
       queryClient.invalidateQueries({ queryKey: ['project-pos', projectId] })
       queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
-      alert('Purchase Order created successfully in Draft status!')
+      
+      clearBasket()
+      showToast('success', bepPoPdfUrl ? 'Purchase Order Released' : 'Draft PO Created Successfully')
       onClose()
     },
     onError: (error: any) => {
@@ -224,7 +230,7 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, projectId, items }: Props) => {
                 {mutation.isPending ? 'Staging...' : (
                   <>
                     <ShoppingCart className="w-5 h-5 mr-3" />
-                    Create Draft PO
+                    {bepPoPdfUrl ? 'Process PO Release' : 'Create Draft PO'}
                   </>
                 )}
               </button>

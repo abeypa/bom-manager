@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   X, Truck, IndianRupee, Calendar, Upload, FileText,
   ExternalLink, Package, CheckCircle2, PlusCircle,
@@ -42,6 +43,7 @@ export default function PODetailModal({
   poId,
   onStatusUpdated,
 }: PODetailModalProps) {
+  const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [po, setPo] = useState<any>(null);
   const [payments, setPayments] = useState<POPayment[]>([]);
@@ -141,6 +143,13 @@ export default function PODetailModal({
       }
       await purchaseOrdersApi.updateStatus(poId, newStatus as any);
       showToast('success', `Status → ${newStatus}`);
+      
+      // Invalidate project queries to refresh BOM tree status badges
+      if (po?.project_id) {
+        queryClient.invalidateQueries({ queryKey: ['project', po.project_id] });
+        queryClient.invalidateQueries({ queryKey: ['project-pos', po.project_id] });
+      }
+
       await loadData();
       onStatusUpdated?.();
     } catch (err: any) {
