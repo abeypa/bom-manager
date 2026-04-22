@@ -377,88 +377,82 @@ export default function BOMTreeView({
       </div>
 
       <div className="p-6">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
+        <SortableContext 
+          items={project.sections.map((s: any) => `section-${s.id}`)} 
+          strategy={verticalListSortingStrategy}
         >
-          <SortableContext 
-            items={project.sections.map((s: any) => `section-${s.id}`)} 
-            strategy={verticalListSortingStrategy}
-          >
-            <div className="space-y-1">
-              {project.sections.map((section: any) => (
-                <TreeItem
-                  key={`section-${section.id}`}
-                  id={`section-${section.id}`}
-                  level={0}
-                  label={section.name}
-                  type="section"
-                  data={section}
-                  isExpanded={expandedNodes.has(`section-${section.id}`)}
-                  onToggle={() => toggleNode(`section-${section.id}`)}
-                  onEdit={() => onEditSection(section)}
-                  onDelete={() => onDeleteSection(section.id)}
-                  onAddChild={() => onAddSubsection(section.id)}
-                  onImageClick={() => onImageClick(section, 'section')}
+          <div className="space-y-1">
+            {project.sections.map((section: any) => (
+              <TreeItem
+                key={`section-${section.id}`}
+                id={`section-${section.id}`}
+                level={0}
+                label={section.name}
+                type="section"
+                data={section}
+                isExpanded={expandedNodes.has(`section-${section.id}`)}
+                onToggle={() => toggleNode(`section-${section.id}`)}
+                onEdit={() => onEditSection(section)}
+                onDelete={() => onDeleteSection(section.id)}
+                onAddChild={() => onAddSubsection(section.id)}
+                onImageClick={() => onImageClick(section, 'section')}
+              >
+                <SortableContext 
+                  items={section.subsections.map((sub: any) => `sub-${sub.id}`)} 
+                  strategy={verticalListSortingStrategy}
                 >
-                  <SortableContext 
-                    items={section.subsections.map((sub: any) => `sub-${sub.id}`)} 
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div className="mt-1">
-                      {section.subsections.map((sub: any) => (
-                        <TreeItem
-                          key={`sub-${sub.id}`}
-                          id={`sub-${sub.id}`}
-                          level={1}
-                          label={sub.name || sub.section_name}
-                          type="subsection"
-                          data={sub}
-                          isExpanded={expandedNodes.has(`sub-${sub.id}`)}
-                          onToggle={() => toggleNode(`sub-${sub.id}`)}
-                          onEdit={() => onEditSubsection(sub)}
-                          onDelete={() => onDeleteSubsection(sub.id)}
-                          onCopy={() => onCopySubsection(sub)}
-                          onAddChild={() => onAddPart(sub)}
-                          onImageClick={() => onImageClick(sub, 'subsection')}
-                          isSelected={sub.parts.every((p: any) => selectedPartIds.has(p.id)) && sub.parts.length > 0}
-                          onSelect={(checked) => {
-                            const ids = sub.parts.map((p: any) => p.id)
-                            onToggleSelectAll(ids)
-                          }}
+                  <div className="mt-1">
+                    {section.subsections.map((sub: any) => (
+                      <TreeItem
+                        key={`sub-${sub.id}`}
+                        id={`sub-${sub.id}`}
+                        level={1}
+                        label={sub.name || sub.section_name}
+                        type="subsection"
+                        data={sub}
+                        isExpanded={expandedNodes.has(`sub-${sub.id}`)}
+                        onToggle={() => toggleNode(`sub-${sub.id}`)}
+                        onEdit={() => onEditSubsection(sub)}
+                        onDelete={() => onDeleteSubsection(sub.id)}
+                        onCopy={() => onCopySubsection(sub)}
+                        onAddChild={() => onAddPart(sub)}
+                        onImageClick={() => onImageClick(sub, 'subsection')}
+                        isSelected={sub.parts.every((p: any) => selectedPartIds.has(p.id)) && sub.parts.length > 0}
+                        onSelect={(checked) => {
+                          const ids = sub.parts.map((p: any) => p.id)
+                          onToggleSelectAll(ids)
+                        }}
+                      >
+                        <SortableContext 
+                          items={sub.parts.map((part: any) => `part-${part.id}`)} 
+                          strategy={verticalListSortingStrategy}
                         >
-                          <SortableContext 
-                            items={sub.parts.map((part: any) => `part-${part.id}`)} 
-                            strategy={verticalListSortingStrategy}
-                          >
-                            <div className="mt-1">
-                              {sub.parts.map((part: any) => (
-                                <TreeItem
-                                  key={`part-${part.id}`}
-                                  id={`part-${part.id}`}
-                                  level={2}
-                                  label={part.description || part.part_ref?.description || 'Unnamed Part'}
-                                  type="part"
-                                  data={part}
-                                  onEdit={() => onEditPart(part)}
-                                  onDelete={() => onDeletePart(part.id)}
-                                  onImageClick={() => onImageClick(part, 'part')}
-                                  isSelected={selectedPartIds.has(part.id)}
-                                  onSelect={() => onToggleSelectPart(part.id)}
-                                />
-                              ))}
-                            </div>
-                          </SortableContext>
-                        </TreeItem>
-                      ))}
-                    </div>
-                  </SortableContext>
-                </TreeItem>
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
+                          <div className="mt-1">
+                            {sub.parts.map((part: any) => (
+                              <TreeItem
+                                key={`part-${part.id}`}
+                                id={`part-${part.id}`}
+                                level={2}
+                                label={part.description || part.part_ref?.description || 'Unnamed Part'}
+                                type="part"
+                                data={part}
+                                onEdit={() => onEditPart(part)}
+                                onDelete={() => onDeletePart(part.id)}
+                                onImageClick={() => onImageClick(part, 'part')}
+                                isSelected={selectedPartIds.has(part.id)}
+                                onSelect={() => onToggleSelectPart(part.id)}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </TreeItem>
+                    ))}
+                  </div>
+                </SortableContext>
+              </TreeItem>
+            ))}
+          </div>
+        </SortableContext>
       </div>
     </div>
   )

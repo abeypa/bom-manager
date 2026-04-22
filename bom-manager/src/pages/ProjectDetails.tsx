@@ -141,16 +141,24 @@ const ProjectDetails = () => {
 
   // ── DND & Actions ───────────────────────────────────────────
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 5,
-      },
-    }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  const updateSectionOrder = useMutation({
-    mutationFn: (newOrder: number[]) => projectsApi.reorderSections(projectId, newOrder),
+  const reorderSections = useMutation({
+    mutationFn: (ids: number[]) => projectsApi.reorderSections(projectId, ids),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
+  const moveSubsection = useMutation({
+    mutationFn: ({ targetSectionId, newOrder }: { subId: number, targetSectionId: number, newOrder: number[] }) => 
+      projectsApi.reorderSubsections(targetSectionId, newOrder),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
+  const movePart = useMutation({
+    mutationFn: ({ targetSubId, newOrder }: { partId: number, targetSubId: number, newOrder: number[] }) => 
+      projectsApi.reorderProjectParts(targetSubId, newOrder),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
@@ -278,18 +286,31 @@ const ProjectDetails = () => {
     setBasketItems(prev => {
       const next = [...prev]
       partsToAdd.forEach(p => {
-        if (!next.find(item => item.id === p.id)) {
+        const existing = next.find(item => item.id === p.id)
+        if (existing) {
+          existing.quantity = (existing.quantity || 1) + 1
+        } else {
           next.push({
             ...p,
+            id: p.id,
+            project_part_id: p.id,
             part_number: p.part_ref?.part_number || p.part_ref || 'N/A',
-            description: p.description || p.part_ref?.description || 'N/A'
+            description: p.description || p.part_ref?.description || 'N/A',
+            quantity: 1, // Default quantity
+            unit_price: p.unit_price || 0,
+            discount_percent: p.discount_percent || 0
           })
         }
       })
       return next
     })
-    setBasketOpen(true)
-    showToast('success', `${partsToAdd.length} items added to PO Basket`)
+    
+    // Auto-open on first addition
+    if (basketItems.length === 0 && partsToAdd.length > 0) {
+      setBasketOpen(true)
+    }
+    
+    showToast('success', `${partsToAdd.length} item(s) processed in PO Basket`)
   }
 
   const removeFromBasket = (id: number) => {
@@ -300,29 +321,8 @@ const ProjectDetails = () => {
     setBasketItems(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item))
   }
 
-  const handleDragEnd = (event: any) => {
-    const { active, over } = event
-    setActiveDragItem(null)
-
-    if (over && (over.id === 'po-basket-drop-zone' || over.id === 'po-basket-sidebar')) {
-      // Find the dragged part in the project data
-      let draggedPart = null
-      project?.sections?.forEach((s: any) => {
-        s.subsections?.forEach((sub: any) => {
-          const p = sub.parts?.find((part: any) => `part-${part.id}` === active.id)
-          if (p) draggedPart = p
-        })
-      })
-
-      if (draggedPart) {
-        addToBasket([draggedPart])
-      }
-    }
-  }
-
   const handleDragStart = (event: any) => {
     const { active } = event
-    // Extract part ID and find it
     let draggedPart = null
     project?.sections?.forEach((s: any) => {
       s.subsections?.forEach((sub: any) => {
@@ -331,6 +331,126 @@ const ProjectDetails = () => {
       })
     })
     setActiveDragItem(draggedPart)
+  }
+
+  const handleDragEnd = async (event: any) => {
+    const { active, over } = event
+    setActiveDragItem(null)
+    if (!over) return
+
+    const activeId = active.id.toString()
+    const overId = over.id.toString()
+
+    // 1. DROP INTO PO BASKET
+    if (overId === 'po-basket-drop-zone' || overId === 'po-basket-sidebar') {
+      const collectParts = (node: any): any[] => {
+        if (!node) return []
+        if (node.type === 'part') return [node.data]
+        if (node.type === 'subsection') return node.data.parts || []
+        if (node.type === 'section') {
+          return (node.data.subsections || []).flatMap((sub: any) => sub.parts || [])
+        }
+        return []
+      }
+
+      let draggedNode: any = null
+      if (activeId.startsWith('section-')) {
+        const secId = parseInt(activeId.split('-')[1])
+        const sec = project?.sections?.find((s: any) => s.id === secId)
+        if (sec) draggedNode = { type: 'section', data: sec }
+      } else if (activeId.startsWith('sub-')) {
+        const subId = parseInt(activeId.split('-')[1])
+        const sub = project?.sections?.flatMap((s: any) => s.subsections).find((sub: any) => sub.id === subId)
+        if (sub) draggedNode = { type: 'subsection', data: sub }
+      } else if (activeId.startsWith('part-')) {
+        const partId = parseInt(activeId.split('-')[1])
+        const part = project?.sections?.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).find((p: any) => p.id === partId)
+        if (part) {
+          if (selectedPartIds && selectedPartIds.size > 1 && selectedPartIds.has(part.id)) {
+            const selectedParts = project?.sections?.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).filter((p: any) => selectedPartIds.has(p.id))
+            addToBasket(selectedParts)
+            return
+          }
+          draggedNode = { type: 'part', data: part }
+        }
+      }
+
+      if (draggedNode) {
+        const partsToAdd = collectParts(draggedNode)
+        if (partsToAdd.length) addToBasket(partsToAdd)
+      }
+      return
+    }
+
+    // 2. TREE REORDERING
+    if (activeId === overId) return
+
+    // 2.1 Reordering Sections
+    if (activeId.startsWith('section-') && overId.startsWith('section-')) {
+      const activeDataId = parseInt(activeId.split('-')[1])
+      const overDataId = parseInt(overId.split('-')[1])
+      const oldIndex = project.sections.findIndex((s: any) => s.id === activeDataId)
+      const newIndex = project.sections.findIndex((s: any) => s.id === overDataId)
+      const newSections = arrayMove(project.sections, oldIndex, newIndex)
+      await reorderSections.mutateAsync(newSections.map((s: any) => s.id))
+      showToast('success', 'Section order updated')
+    }
+
+    // 2.2 Reordering/Moving Subsections
+    if (activeId.startsWith('sub-') && (overId.startsWith('sub-') || overId.startsWith('section-'))) {
+      const subId = parseInt(activeId.split('-')[1])
+      let targetSectionId: number
+      let newIndex: number
+
+      if (overId.startsWith('section-')) {
+        targetSectionId = parseInt(overId.split('-')[1])
+        newIndex = 0
+      } else {
+        const overSubId = parseInt(overId.split('-')[1])
+        const targetSub = project.sections.flatMap((s: any) => s.subsections).find((s: any) => s.id === overSubId)
+        targetSectionId = targetSub.section_id
+        const section = project.sections.find((s: any) => s.id === targetSectionId)
+        newIndex = section.subsections.findIndex((s: any) => s.id === overSubId)
+      }
+
+      const currentSection = project.sections.find((s: any) => s.subsections.some((sub: any) => sub.id === subId))
+      const targetSection = project.sections.find((s: any) => s.id === targetSectionId)
+      let newSubOrder = [...targetSection.subsections]
+      const oldIndex = newSubOrder.findIndex(s => s.id === subId)
+      if (oldIndex !== -1) newSubOrder = arrayMove(newSubOrder, oldIndex, newIndex)
+      else newSubOrder.splice(newIndex, 0, currentSection.subsections.find((s: any) => s.id === subId))
+
+      await moveSubsection.mutateAsync({ subId, targetSectionId, newOrder: newSubOrder.map(s => s.id) })
+      showToast('success', 'Subsection moved')
+    }
+
+    // 2.3 Reordering/Moving Parts
+    if (activeId.startsWith('part-') && (overId.startsWith('part-') || overId.startsWith('sub-'))) {
+      const partId = parseInt(activeId.split('-')[1])
+      let targetSubId: number
+      let newIndex: number
+
+      if (overId.startsWith('sub-')) {
+        targetSubId = parseInt(overId.split('-')[1])
+        newIndex = 0
+      } else {
+        const overPartId = parseInt(overId.split('-')[1])
+        const targetPart = project.sections.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).find((p: any) => p.id === overPartId)
+        targetSubId = targetPart.project_section_id
+        const subsection = project.sections.flatMap((s: any) => s.subsections).find((sub: any) => sub.id === targetSubId)
+        newIndex = subsection.parts.findIndex((p: any) => p.id === overPartId)
+      }
+
+      const currentSub = project.sections.flatMap((s: any) => s.subsections).find((sub: any) => sub.parts.some((p: any) => p.id === partId))
+      const targetSub = project.sections.flatMap((s: any) => s.subsections).find((sub: any) => sub.id === targetSubId)
+      let newPartOrder = [...targetSub.parts]
+      const oldIndex = newPartOrder.findIndex(p => p.id === partId)
+      if (oldIndex !== -1) newPartOrder = arrayMove(newPartOrder, oldIndex, newIndex)
+      else newPartOrder.splice(newIndex, 0, currentSub.parts.find((p: any) => p.id === partId))
+
+      await movePart.mutateAsync({ partId, targetSubId, newOrder: newPartOrder.map(p => p.id) })
+      showToast('success', 'Part moved')
+    }
   }
 
   // ── Loading / Error ─────────────────────────────────────────
@@ -367,261 +487,272 @@ const ProjectDetails = () => {
   }
 
   return (
-    <div className="page-container page-enter">
-      {/* Header */}
-      <header className="page-header">
-        <div className="flex items-center gap-4">
-          <Link to="/projects" className="btn btn-secondary flex items-center gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Back to Projects
-          </Link>
-          <div>
-            <h1 className="page-title">{project.name}</h1>
-            <p className="text-sm text-tertiary font-mono italic">REF #{project.project_number} • {project.status || 'DESIGN'}</p>
+    <DndContext 
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="page-container page-enter relative overflow-x-hidden min-h-screen">
+        {/* Header */}
+        <header className="page-header sticky top-0 bg-white/80 backdrop-blur-md z-30 py-4 mb-6">
+          <div className="flex items-center gap-4">
+            <Link to="/projects" className="btn btn-secondary flex items-center gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back to Projects
+            </Link>
+            <div>
+              <h1 className="page-title">{project.name}</h1>
+              <p className="text-sm text-tertiary font-mono italic">REF #{project.project_number} • {project.status || 'DESIGN'}</p>
+            </div>
           </div>
-        </div>
 
-        <div className="flex gap-2">
-          {selectedPartIds.size > 0 && isAdmin && (
-            <button
-              onClick={() => {
-                const parts = []
-                project?.sections?.forEach((s: any) => {
-                  s.subsections?.forEach((sub: any) => {
-                    sub.parts?.forEach((p: any) => {
-                      if (selectedPartIds.has(p.id)) parts.push(p)
+          <div className="flex gap-2">
+            {selectedPartIds.size > 0 && isAdmin && (
+              <button
+                onClick={() => {
+                  const parts = []
+                  project?.sections?.forEach((s: any) => {
+                    s.subsections?.forEach((sub: any) => {
+                      sub.parts?.forEach((p: any) => {
+                        if (selectedPartIds.has(p.id)) parts.push(p)
+                      })
                     })
                   })
-                })
-                addToBasket(parts)
-                setSelectedPartIds(new Set())
-              }}
-              className="btn bg-navy-900 hover:bg-black text-white shadow-lg shadow-navy-900/20 px-6 animate-in slide-in-from-right duration-300"
-            >
-              <ShoppingCart className="h-4 w-4 mr-2" />
-              ADD TO BASKET ({selectedPartIds.size})
-            </button>
-          )}
-          <button 
-            onClick={() => setBasketOpen(!basketOpen)}
-            className={`btn ${basketItems.length > 0 ? 'bg-primary-500 text-white shadow-primary-500/20' : 'btn-secondary'} relative`}
-          >
-            <ShoppingBag className="h-4 w-4 mr-2" />
-            PO BASKET
-            {basketItems.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
-                {basketItems.length}
-              </span>
+                  addToBasket(parts)
+                  setSelectedPartIds(new Set())
+                }}
+                className="btn bg-navy-900 hover:bg-black text-white shadow-lg shadow-navy-900/20 px-6 animate-in slide-in-from-right duration-300"
+              >
+                <ShoppingCart className="h-4 w-4 mr-2" />
+                ADD TO BASKET ({selectedPartIds.size})
+              </button>
             )}
-          </button>
-          <button 
-            onClick={handleExport}
-            className="btn btn-secondary border-navy-100 text-navy-900"
+            <button 
+              onClick={() => setBasketOpen(!basketOpen)}
+              className={`btn ${basketItems.length > 0 ? 'bg-primary-500 text-white' : 'btn-secondary'} relative`}
+            >
+              <ShoppingBag className="h-4 w-4 mr-2" />
+              PO BASKET
+              {basketItems.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
+                  {basketItems.length}
+                </span>
+              )}
+            </button>
+            <button 
+              onClick={handleExport}
+              className="btn btn-secondary border-navy-100 text-navy-900"
+            >
+              <FileDown className="h-4 w-4 mr-2" />
+              EXPORT BOM
+            </button>
+            <button 
+              onClick={() => setSectionModal({ open: true, editing: null })}
+              className="btn btn-primary shadow-lg shadow-primary-600/20"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              ADD SECTION
+            </button>
+          </div>
+        </header>
+
+        {/* Tab Bar */}
+        <div className="tab-bar mb-8 px-6">
+          <button
+            onClick={() => setActiveTab('bom')}
+            className={`tab-item ${activeTab === 'bom' ? 'active' : ''}`}
           >
-            <FileDown className="h-4 w-4 mr-2" />
-            EXPORT BOM
+            📋 BOM Hierarchy
           </button>
-          <button 
-            onClick={() => setSectionModal({ open: true, editing: null })}
-            className="btn btn-primary shadow-lg shadow-primary-600/20"
+          <button
+            onClick={() => setActiveTab('documents')}
+            className={`tab-item ${activeTab === 'documents' ? 'active' : ''}`}
           >
-            <Plus className="h-4 w-4 mr-2" />
-            ADD SECTION
+            <FileText className="h-4 w-4 inline mr-1" />
+            Documents
+          </button>
+          <button
+            onClick={() => setActiveTab('jo')}
+            className={`tab-item ${activeTab === 'jo' ? 'active' : ''}`}
+          >
+            <ClipboardList className="h-4 w-4 inline mr-1" />
+            Job Orders
+          </button>
+          <button
+            onClick={() => setActiveTab('pos')}
+            className={`tab-item ${activeTab === 'pos' ? 'active' : ''}`}
+          >
+            <ShoppingCart className="h-4 w-4 inline mr-1" />
+            Purchase Orders
           </button>
         </div>
-      </header>
 
-      {/* Tab Bar */}
-      <div className="tab-bar mb-8">
-        <button
-          onClick={() => setActiveTab('bom')}
-          className={`tab-item ${activeTab === 'bom' ? 'active' : ''}`}
-        >
-          📋 BOM Hierarchy
-        </button>
-        <button
-          onClick={() => setActiveTab('documents')}
-          className={`tab-item ${activeTab === 'documents' ? 'active' : ''}`}
-        >
-          <FileText className="h-4 w-4 inline mr-1" />
-          Documents
-        </button>
-        <button
-          onClick={() => setActiveTab('jo')}
-          className={`tab-item ${activeTab === 'jo' ? 'active' : ''}`}
-        >
-          <ClipboardList className="h-4 w-4 inline mr-1" />
-          Job Orders
-        </button>
-        <button
-          onClick={() => setActiveTab('pos')}
-          className={`tab-item ${activeTab === 'pos' ? 'active' : ''}`}
-        >
-          <ShoppingCart className="h-4 w-4 inline mr-1" />
-          Purchase Orders
-        </button>
-      </div>
+        <div className="flex flex-col lg:flex-row gap-8 items-start px-6 pb-20">
+          {/* Sidebar */}
+          <ProjectSidebar 
+            project={project} 
+            projectPOs={projectPOs || []}
+            onCreatePO={() => setPoModal(true)}
+          />
 
-      <div className="flex flex-col lg:flex-row gap-8 items-start">
-        {/* Sidebar */}
-        <ProjectSidebar 
-          project={project} 
-          projectPOs={projectPOs || []}
-          onCreatePO={() => setPoModal(true)}
-        />
-
-        {/* Content Area */}
-        <div className="flex-1 w-full min-w-0">
-          {activeTab === 'bom' && (
-            <div className="space-y-6">
-              <AdvancedFilterBar onFilterChange={(filters) => console.log('Filters', filters)} />
-              
-              {!project.sections?.length ? (
-                <div className="empty-state">
-                  <div className="bg-white w-20 h-20 rounded-full flex items-center justify-center mb-6 shadow-sm border border-slate-100">
-                    <Layers className="h-10 w-10 text-navy-400" />
-                  </div>
-                  <h3 className="section-title mb-2">No sections defined</h3>
-                  <p className="text-secondary max-w-sm mb-8">
-                    Start building your bill of materials by adding your first project section.
-                  </p>
-                  <button
-                    onClick={() => setSectionModal({ open: true, editing: null })}
-                    className="btn btn-primary px-8"
-                  >
-                    ADD FIRST SECTION
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-8">
-                  <BOMTreeView
-                    project={project}
-                    projectId={projectId}
-                    onEditSection={handleEditSection}
-                    onDeleteSection={handleDeleteSection}
-                    onAddSubsection={handleAddSubsection}
-                    onEditSubsection={handleEditSubsection}
-                    onDeleteSubsection={handleDeleteSubsection}
-                    onCopySubsection={handleCopySubsection}
-                    onAddPart={handleAddPart}
-                    onEditPart={handleEditPart}
-                    onDeletePart={handleDeletePart}
-                    onImageClick={handleImageClick}
-                    selectedPartIds={selectedPartIds}
-                    onToggleSelectPart={handleSelectPart}
-                    onToggleSelectAll={handleSelectAll}
-                  />
-
-                  {/* Orphaned subsections */}
-                  {project.orphaned_subsections && project.orphaned_subsections.length > 0 && (
-                    <div className="card bg-amber-50/50 border-amber-200 p-8">
-                      <div className="flex items-center gap-3 mb-4">
-                        <Package className="h-5 w-5 text-amber-600" />
-                        <h3 className="font-black text-amber-800 uppercase tracking-widest text-xs">
-                          Unassigned Subsections ({project.orphaned_subsections.length})
-                        </h3>
-                      </div>
-                      <p className="text-sm text-amber-700/80 mb-6 font-medium">
-                        These subsections exist but are not assigned to any Section. Please create a Section and edit these subsections to assign them.
-                      </p>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {project.orphaned_subsections.map((sub: any) => (
-                          <div key={sub.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-100 shadow-sm">
-                            <span className="text-sm font-bold text-navy-900">{sub.name || sub.section_name}</span>
-                            <span className="badge badge-amber">{sub.parts?.length || 0} parts</span>
-                          </div>
-                        ))}
-                      </div>
+          {/* Content Area */}
+          <div className="flex-1 w-full min-w-0">
+            {activeTab === 'bom' && (
+              <div className="space-y-6">
+                <AdvancedFilterBar onFilterChange={(filters) => console.log('Filters', filters)} />
+                
+                {!project.sections?.length ? (
+                  <div className="empty-state">
+                    <div className="bg-white w-20 h-20 rounded-full flex items-center justify-center mb-6 shadow-sm border border-slate-100">
+                      <Layers className="h-10 w-10 text-navy-400" />
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+                    <h3 className="section-title mb-2">No sections defined</h3>
+                    <p className="text-secondary max-w-sm mb-8">
+                      Start building your bill of materials by adding your first project section.
+                    </p>
+                    <button
+                      onClick={() => setSectionModal({ open: true, editing: null })}
+                      className="btn btn-primary px-8"
+                    >
+                      ADD FIRST SECTION
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    <BOMTreeView
+                      project={project}
+                      projectId={projectId}
+                      onEditSection={handleEditSection}
+                      onDeleteSection={handleDeleteSection}
+                      onAddSubsection={handleAddSubsection}
+                      onEditSubsection={handleEditSubsection}
+                      onDeleteSubsection={handleDeleteSubsection}
+                      onCopySubsection={handleCopySubsection}
+                      onAddPart={handleAddPart}
+                      onEditPart={handleEditPart}
+                      onDeletePart={handleDeletePart}
+                      onImageClick={handleImageClick}
+                      selectedPartIds={selectedPartIds}
+                      onToggleSelectPart={handleSelectPart}
+                      onToggleSelectAll={handleSelectAll}
+                    />
 
-          {/* ── Documents Tab ───────────────────────────────────── */}
-          {activeTab === 'documents' && (
-            <ProjectDocumentsTab projectId={projectId} />
-          )}
-
-          {/* ── Job Order Tab ───────────────────────────────────── */}
-          {activeTab === 'jo' && (
-            <JobOrderTab 
-              projectId={projectId} 
-              projectNumber={project.project_number} 
-            />
-          )}
-
-          {/* ── POs Tab ───────────────────────────────────── */}
-          {activeTab === 'pos' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-bold text-gray-900 flex items-center pt-2">
-                <ShoppingCart className="h-5 w-5 mr-2 text-primary-600" />
-                Project Purchase Orders
-              </h2>
-              {!projectPOs || projectPOs.length === 0 ? (
-                <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
-                  <ShoppingCart className="mx-auto h-12 w-12 text-gray-300 mb-3" />
-                  <h3 className="text-sm font-bold text-gray-900">No POs Generated</h3>
-                  <p className="text-sm text-gray-500 mt-1 max-w-xs mx-auto">
-                    Select parts from the BOM to generate Purchase Orders.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {projectPOs.map((po: any) => (
-                    <div key={po.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 hover:border-primary-200 transition-all">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className="bg-primary-50 p-3 rounded-xl">
-                            <FileText className="h-5 w-5 text-primary-600" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-black text-primary-600 font-mono">
-                                {po.po_number}
-                              </span>
-                              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                                po.status === 'Received' ? 'bg-green-50 text-green-700 border-green-200' :
-                                'bg-gray-50 text-gray-600 border-gray-200'
-                              }`}>
-                                {po.status}
-                              </span>
+                    {/* Orphaned subsections */}
+                    {project.orphaned_subsections && project.orphaned_subsections.length > 0 && (
+                      <div className="card bg-amber-50/50 border-amber-200 p-8">
+                        <div className="flex items-center gap-3 mb-4">
+                          <Package className="h-5 w-5 text-amber-600" />
+                          <h3 className="font-black text-amber-800 uppercase tracking-widest text-xs">
+                            Unassigned Subsections ({project.orphaned_subsections.length})
+                          </h3>
+                        </div>
+                        <p className="text-sm text-amber-700/80 mb-6 font-medium">
+                          These subsections exist but are not assigned to any Section. Please create a Section and edit these subsections to assign them.
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {project.orphaned_subsections.map((sub: any) => (
+                            <div key={sub.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-100 shadow-sm">
+                              <span className="text-sm font-bold text-navy-900">{sub.name || sub.section_name}</span>
+                              <span className="badge badge-amber">{sub.parts?.length || 0} parts</span>
                             </div>
-                            <p className="text-sm font-bold text-gray-900 mt-0.5">
-                              {(po as any).suppliers?.name || '—'}
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Documents Tab ───────────────────────────────────── */}
+            {activeTab === 'documents' && (
+              <ProjectDocumentsTab projectId={projectId} />
+            )}
+
+            {/* ── Job Order Tab ───────────────────────────────────── */}
+            {activeTab === 'jo' && (
+              <JobOrderTab 
+                projectId={projectId} 
+                projectNumber={project.project_number} 
+              />
+            )}
+
+            {/* ── POs Tab ───────────────────────────────────── */}
+            {activeTab === 'pos' && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-gray-900 flex items-center pt-2">
+                  <ShoppingCart className="h-5 w-5 mr-2 text-primary-600" />
+                  Project Purchase Orders
+                </h2>
+                {!projectPOs || projectPOs.length === 0 ? (
+                  <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
+                    <ShoppingCart className="mx-auto h-12 w-12 text-gray-300 mb-3" />
+                    <h3 className="text-sm font-bold text-gray-900">No POs Generated</h3>
+                    <p className="text-sm text-gray-500 mt-1 max-w-xs mx-auto">
+                      Select parts from the BOM to generate Purchase Orders.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {projectPOs.map((po: any) => (
+                      <div key={po.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 hover:border-primary-200 transition-all">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="bg-primary-50 p-3 rounded-xl">
+                              <FileText className="h-5 w-5 text-primary-600" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-black text-primary-600 font-mono">
+                                  {po.po_number}
+                                </span>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                                  po.status === 'Received' ? 'bg-green-50 text-green-700 border-green-200' :
+                                  'bg-gray-50 text-gray-600 border-gray-200'
+                                }`}>
+                                  {po.status}
+                                </span>
+                              </div>
+                              <p className="text-sm font-bold text-gray-900 mt-0.5">
+                                {(po as any).suppliers?.name || '—'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-black text-gray-900 tabular-nums">
+                              ₹{po.grand_total?.toLocaleString()}
+                            </p>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase">
+                              {po.total_items} items
                             </p>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-lg font-black text-gray-900 tabular-nums">
-                            ₹{po.grand_total?.toLocaleString()}
-                          </p>
-                          <p className="text-[10px] text-gray-400 font-bold uppercase">
-                            {po.total_items} items
-                          </p>
-                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      <DndContext 
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-      >
+        {/* PO Basket Sidebar (Fixed position, handled internally) */}
+        <POBasket 
+          isOpen={basketOpen}
+          onClose={() => setBasketOpen(false)}
+          items={basketItems}
+          onRemoveItem={removeFromBasket}
+          onUpdateItem={updateBasketItem}
+          onClearBasket={() => setBasketItems([])}
+          onReleasePO={() => setPoModal(true)}
+        />
+
         {/* Actual Drag Overlay for better UX */}
         <DragOverlay>
           {activeDragItem ? (
-            <div className="bg-white border-2 border-navy-500 rounded-2xl p-4 shadow-2xl opacity-80 scale-95 pointer-events-none flex items-center gap-3">
-              <div className="bg-navy-900 p-2 rounded-xl">
+            <div className="bg-white border-2 border-primary-500 rounded-lg p-4 shadow-2xl opacity-90 scale-95 pointer-events-none flex items-center gap-3 ring-4 ring-primary-500/10">
+              <div className="bg-primary-600 p-2 rounded-lg">
                  <Package className="w-4 h-4 text-white" />
               </div>
               <div>
@@ -633,17 +764,8 @@ const ProjectDetails = () => {
             </div>
           ) : null}
         </DragOverlay>
-
-        <POBasket 
-          isOpen={basketOpen}
-          onClose={() => setBasketOpen(false)}
-          items={basketItems}
-          onRemoveItem={removeFromBasket}
-          onUpdateItem={updateBasketItem}
-          onClearBasket={() => setBasketItems([])}
-          onReleasePO={() => setPoModal(true)}
-        />
-      </DndContext>
+      </div>
+    </DndContext>
 
       {/* ── Modals ────────────────────────────────────────── */}
       <ProjectSectionModal
