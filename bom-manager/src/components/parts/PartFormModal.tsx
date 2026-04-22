@@ -172,6 +172,28 @@ const PartFormModal = ({ isOpen, onClose, activeTab, partToEdit }: PartFormModal
     return cleaned
   }
 
+  const categoryPrefixMap: Record<string, string> = {
+    'electrical_bought_out': 'EBO-',
+    'pneumatic_bought_out': 'PBO-',
+    'mechanical_bought_out': 'MBO-',
+    'mechanical_manufacture': 'MM-',
+    'electrical_manufacture': 'EM-',
+    'RAW MATERIAL': 'RMO-',
+    'SOFTWARE': 'SBO-',
+    'SERVICE': 'SVC-',
+    'DEFAULT': ''
+  }
+
+  const getPrefix = (cat: string) => {
+    const key = cat.toLowerCase();
+    if (key.includes('electrical') && key.includes('bought')) return 'EBO-';
+    if (key.includes('pneumatic') && key.includes('bought')) return 'PBO-';
+    if (key.includes('mechanical') && key.includes('bought')) return 'MBO-';
+    if (key.includes('mechanical') && key.includes('manufacture')) return 'MM-';
+    if (key.includes('electrical') && key.includes('manufacture')) return 'EM-';
+    return categoryPrefixMap[cat] || '';
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const payload = cleanPayload(formData)
@@ -185,10 +207,26 @@ const PartFormModal = ({ isOpen, onClose, activeTab, partToEdit }: PartFormModal
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
-    setFormData((prev: any) => ({
-      ...prev,
-      [name]: type === 'number' ? parseFloat(value) : (value === '' ? null : value)
-    }))
+    const processedValue = type === 'number' ? parseFloat(value) : (value === '' ? null : value)
+    
+    setFormData((prev: any) => {
+      const nextData = { ...prev, [name]: processedValue }
+      
+      // Real-time sync: Auto-update part_number when beperp_part_no changes
+      if (name === 'beperp_part_no' && value) {
+        const prefix = getPrefix(activeTab)
+        const erpValue = value.trim()
+        // Only update if it doesn't already have the correct prefix or if it's purely the ERP ID
+        if (prefix && !prev.part_number?.startsWith(prefix)) {
+          nextData.part_number = `${prefix}${erpValue}`
+        } else if (prefix && prev.part_number?.startsWith(prefix) && prev.part_number.replace(prefix, '') === (prev.beperp_part_no || '')) {
+          // If the part number was already synced with the old ERP ID, update it with the new one
+          nextData.part_number = `${prefix}${erpValue}`
+        }
+      }
+      
+      return nextData
+    })
   }
 
   const handleFileUpload = (key: string, url: any) => {
@@ -233,9 +271,9 @@ const PartFormModal = ({ isOpen, onClose, activeTab, partToEdit }: PartFormModal
                   <button
                     type="button"
                     onClick={() => {
-                      const prefix = activeTab.split('_').map(w => w[0].toUpperCase()).join('');
+                      const prefix = getPrefix(activeTab);
                       const uniqueId = Date.now().toString().slice(-6);
-                      setFormData((prev: any) => ({ ...prev, part_number: `${prefix}-${uniqueId}` }));
+                      setFormData((prev: any) => ({ ...prev, part_number: `${prefix}${uniqueId}` }));
                     }}
                     className="text-[9px] font-black uppercase tracking-widest text-emerald-600 hover:text-emerald-800 transition-colors"
                   >
