@@ -82,10 +82,11 @@ const CreatePOFromBOMModal = ({ isOpen, onClose, projectId, items }: Props) => {
       return (purchaseOrdersApi as any).createPurchaseOrderWithItems(poData as any, items)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
-      queryClient.invalidateQueries({ queryKey: ['project-pos', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       queryClient.invalidateQueries({ queryKey: ['bom-tree', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['project-pos', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['po-line-items', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       
       clearBasket()

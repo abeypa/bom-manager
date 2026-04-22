@@ -146,9 +146,12 @@ export default function PODetailModal({
       
       // Invalidate project queries to refresh BOM tree status badges
       if (po?.project_id) {
+        queryClient.invalidateQueries({ queryKey: ['bom-tree', po.project_id] });
         queryClient.invalidateQueries({ queryKey: ['project', po.project_id] });
         queryClient.invalidateQueries({ queryKey: ['project-pos', po.project_id] });
-        queryClient.invalidateQueries({ queryKey: ['bom-tree', po.project_id] });
+        queryClient.invalidateQueries({ queryKey: ['po-line-items', po.project_id] });
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       }
 
       await loadData();
