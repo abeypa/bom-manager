@@ -602,9 +602,18 @@ const ProjectDetails = () => {
                       onToggleSelectPart={handleSelectPart}
                       onToggleSelectAll={handleSelectAll}
                       onAddSelectedToBasket={() => {
-                        const selectedParts = project?.sections?.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).filter((p: any) => selectedPartIds.has(p.id))
-                        addToBasket(selectedParts)
-                        setSelectedPartIds(new Set())
+                        const allParts = (project?.sections || [])
+                          .flatMap((s: any) => s.subsections || [])
+                          .flatMap((sub: any) => sub.parts || [])
+                        const selectedParts = allParts.filter((p: any) => selectedPartIds.has(p.id))
+                        
+                        if (selectedParts.length > 0) {
+                          addToBasket(selectedParts)
+                          setSelectedPartIds(new Set())
+                          showToast('success', `${selectedParts.length} parts added to basket`)
+                        } else {
+                          showToast('error', 'No selected parts found to add')
+                        }
                       }}
                     />
 

@@ -3,11 +3,18 @@ import { create } from 'zustand'
 export interface BasketItem {
   id: number
   project_part_id: number
+  bomItemId?: number
   part_number: string
+  partRef?: string
   description: string
+  globalDescription?: string
+  manufacturerPartNo?: string
   quantity: number
   unit_price: number
+  unitPrice?: number
   discount_percent: number
+  snapshotDiscount?: number
+  currency?: string
   part_type?: string
   part_id?: number
   po_info?: any
@@ -43,6 +50,7 @@ export const usePOBasketStore = create<POBasketStore>((set, get) => ({
     set(state => {
       const next = [...state.basketItems]
       partsToAdd.forEach(p => {
+        if (!p) return
         const existing = next.find(item => item.id === p.id)
         if (existing) {
           existing.quantity = (existing.quantity || 1) + (p.quantity || 1)
@@ -51,11 +59,18 @@ export const usePOBasketStore = create<POBasketStore>((set, get) => ({
             ...p,
             id: p.id,
             project_part_id: p.id,
+            bomItemId: p.id,
             part_number: p.part_ref?.part_number || p.part_ref || 'N/A',
+            partRef: p.part_ref?.part_number || p.part_ref || 'N/A',
             description: p.description || p.part_ref?.description || 'N/A',
+            globalDescription: p.globalDescription || p.description || p.part_ref?.description || 'N/A',
+            manufacturerPartNo: p.manufacturerPartNo || p.part_ref?.manufacturer_part_number || '',
             quantity: p.quantity || 1,
             unit_price: p.unit_price || 0,
-            discount_percent: p.discount_percent || 0
+            unitPrice: p.unit_price || 0,
+            discount_percent: p.discount_percent || 0,
+            snapshotDiscount: p.snapshotDiscount || p.discount_percent || 0,
+            currency: p.currency || 'INR'
           })
         }
       })
