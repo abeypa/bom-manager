@@ -68,6 +68,7 @@ import { purchaseOrdersApi } from '@/api/purchase-orders'
 import { useRole } from '@/hooks/useRole'
 import { useToast } from '@/context/ToastContext'
 import exportUtils from '@/utils/export'
+import { usePOBasketStore } from '@/store/usePOBasketStore'
 
 const ProjectDetails = () => {
   const { id } = useParams()
@@ -116,9 +117,18 @@ const ProjectDetails = () => {
     type: 'section' | 'subsection' | 'part'
   }>({ open: false, entity: null, type: 'section' })
 
-  // ── Procurement Basket state ────────────────────────────────
-  const [basketOpen, setBasketOpen] = useState(true)
-  const [basketItems, setBasketItems] = useState<any[]>([])
+  // ── Procurement Basket store ───────────────────────────────
+  const { 
+    basketItems, 
+    basketOpen, 
+    setBasketOpen, 
+    addToBasket, 
+    removeFromBasket, 
+    updateItem: updateBasketItem,
+    clearBasket,
+    setProjectId
+  } = usePOBasketStore()
+
   const [activeDragItem, setActiveDragItem] = useState<any | null>(null)
 
   // ── Data ────────────────────────────────────────────────────
@@ -132,7 +142,8 @@ const ProjectDetails = () => {
     if (project?.name) {
       document.title = `${project.name} | Project Registry`
     }
-  }, [project?.name])
+    setProjectId(projectId)
+  }, [project?.name, projectId, setProjectId])
 
   const { data: projectPOs } = useQuery({
     queryKey: ['project-pos', projectId],
@@ -282,42 +293,7 @@ const ProjectDetails = () => {
     })
   }
 
-  // ── Basket Actions ──────────────────────────────────────────
-  const addToBasket = (partsToAdd: any[]) => {
-    setBasketItems(prev => {
-      const next = [...prev]
-      partsToAdd.forEach(p => {
-        const existing = next.find(item => item.id === p.id)
-        if (existing) {
-          existing.quantity = (existing.quantity || 1) + (p.quantity || 1)
-        } else {
-          next.push({
-            ...p,
-            id: p.id,
-            project_part_id: p.id,
-            part_number: p.part_ref?.part_number || p.part_ref || 'N/A',
-            description: p.description || p.part_ref?.description || 'N/A',
-            quantity: p.quantity || 1,
-            unit_price: p.unit_price || 0,
-            discount_percent: p.discount_percent || 0
-          })
-        }
-      })
-      return next
-    })
-    
-    // Auto-open on first addition
-    setBasketOpen(true)
-    showToast('success', `${partsToAdd.length} item(s) processed in PO Basket`)
-  }
-
-  const removeFromBasket = (id: number) => {
-    setBasketItems(prev => prev.filter(item => item.id !== id))
-  }
-
-  const updateBasketItem = (id: number, updates: any) => {
-    setBasketItems(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item))
-  }
+  // Basket state handled by Zustand store
 
   const handleDragStart = (event: any) => {
     const { active } = event
@@ -737,7 +713,7 @@ const ProjectDetails = () => {
           items={basketItems}
           onRemoveItem={removeFromBasket}
           onUpdateItem={updateBasketItem}
-          onClearBasket={() => setBasketItems([])}
+          onClearBasket={clearBasket}
           onReleasePO={() => setPoModal(true)}
         />
 
@@ -799,7 +775,7 @@ const ProjectDetails = () => {
             isOpen={poModal}
             onClose={() => {
               setPoModal(false)
-              setBasketItems([])
+              clearBasket()
               setSelectedPartIds(new Set())
             }}
             project={project}
