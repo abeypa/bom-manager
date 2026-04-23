@@ -1,61 +1,89 @@
-# Master BOM Manager (Registry v3)
+# BEP BOM Manager V3 (Cinematic)
 
-A professional-grade engineering BOM (Bill of Materials) Management system. Designed for precision part registration, real-time inventory tracking, and seamless engineering asset management.
+A high-performance, professional Bill of Materials (BOM) & Procurement management system built for BEP India. Features a "Cinematic" UI design with real-time Supabase integration.
 
-## 🌟 Core Modules
+![BOM Manager Dashboard](https://raw.githubusercontent.com/abeypa/bom-manager/master/public/screenshot.png) *(Placeholder URL)*
 
-- **Master Registry:** Unified database for Mechanical, Electrical, and Pneumatic components.
-- **Inventory Management:** Full stock in/out tracking with detailed audit logs.
-- **Project Control:** Build and track project-specific BOMs with cost estimations.
-- **Asset Integration:** Integrated image paste, CAD file (.STEP) storage, and PDF drawings.
-- **Admin Command Center:** robust user management, role-based access, and system diagnostics.
+## 🚀 Key Features
 
-## 🛠️ Performance Architecture
+- **Full BOM Lifecycle**: Manage sections, subsections, and multi-category parts (Mechanical, Electrical, Pneumatic).
+- **Pro Procurement**: Track Purchase Orders (PO), delivery status, and receiving workflows.
+- **Cinematic UI**: Modern design with glassmorphism, hover previews, and interactive tree views.
+- **Reporting**: Professional HTML/PDF exports with MPN and delivery tracking.
+- **Scalable Backend**: Powered by Supabase with parallel polymorphic data fetching.
 
-- **Engine:** Vite + React 18 + TypeScript 5
-- **Intelligence:** Supabase Postgres + RLS Security
-- **Assets:** Supabase Unified Storage (One Bucket Model)
-- **Deployment:** Cloudflare Workers (High-availability CDN distribution)
+## 🛠 Tech Stack
 
-## 📁 Documentation Hub
+- **Frontend**: React 18, Vite, TypeScript
+- **Styling**: Tailwind CSS, Lucide React
+- **State Management**: React Query (TanStack), Zustand
+- **Backend & DB**: Supabase (PostgreSQL, Auth, Storage)
+- **Deployment**: Cloudflare Pages / Wrangler
 
-Detailed guides are located in the `docs/` directory:
+## 📂 Project Structure
 
-| Document | Purpose |
-| :--- | :--- |
-| **[PROJECT_STRUCTURE.md](./docs/PROJECT_STRUCTURE.md)** | Directory maps and codebase overview |
-| **[SUPABASE_SETUP.md](./docs/SUPABASE_SETUP.md)** | Database, RLS, and Auth configuration |
-| **[PRODUCTION_SETUP.md](./docs/PRODUCTION_SETUP.md)** | Full production deployment walkthrough |
-| **[ADMIN_GUIDE.md](./docs/ADMIN_GUIDE.md)** | User management and security maintenance |
-| **[DEPLOYMENT.md](./docs/DEPLOYMENT.md)** | Cloudflare Workers deployment instructions |
+```text
+├── docs/               # System documentation & archive
+├── public/             # Static assets & Excel templates
+├── scripts/            # Deployment and maintenance scripts
+├── sql/                # DB Schema and Migrations
+└── src/
+    ├── api/           # Domain-driven API service layer
+    ├── components/    # Reusable UI components (Atomic design)
+    ├── context/       # React Context providers (Auth, Toast)
+    ├── hooks/         # Custom reusable React hooks
+    ├── lib/           # Third-party library configurations
+    ├── pages/         # Route-level view components
+    ├── store/         # Global state management
+    ├── types/         # TypeScript interfaces & Database types
+    └── utils/         # Pure helper functions
+```
+
+## 🛠 Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- npm or yarn
+
+### Installation
+
+1.  **Clone the Repo**
+    ```bash
+    git clone https://github.com/abeypa/bom-manager.git
+    cd bom-manager
+    ```
+
+2.  **Install Dependencies**
+    ```bash
+    npm install
+    ```
+
+3.  **Environment Setup**
+    Create a `.env` file from the example:
+    ```bash
+    cp .env.example .env
+    ```
+    Enter your Supabase URL and Anon Key.
+
+4.  **Run Locally**
+    ```bash
+    npm run dev
+    ```
+
+## 📜 Available Scripts
+
+- `npm run dev`: Start local development server.
+- `npm run build`: Build production bundle.
+- `npm run lint`: Run ESLint check.
+- `npm run preview`: Preview production build locally.
 
 ---
 
-## ⚡ Quick Start
+## 🤝 Contributing
 
-### 1. Environment Configuration
-Create a `.env` file in the root directory:
-```env
-VITE_SUPABASE_URL=https://your-project-url.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-```
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
-### 2. Dependency Setup
-```bash
-npm install
-```
+## 📄 License
 
-### 3. Launch Development
-```bash
-npm run dev
-```
-
-## 🚀 Production Pipeline
-The project uses a custom automation script for Cloudflare deployment:
-```powershell
-./deploy.ps1 "commit message"
-```
-
----
-
-*Maintained as the core engineering registry for the Bep India ecosystem.*
+Internal Project - All Rights Reserved by BEP India.

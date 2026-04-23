@@ -1,51 +1,55 @@
 # Dependencies
 node_modules/
-.pnpm-store/
+.pnp
+.pnp.js
 
-# Build outputs
+# Build
 dist/
 build/
-*.exe
-*.dll
-*.so
-*.dylib
+.next/
+out/
+.vercel
 
-# Runtime data
-*.log
-logs/
-
-# Environment variables
+# Environment
 .env
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
 .env.production
+.env.stage
+.env.dev
 
-# IDE files
-.vscode/
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# System
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+*.log
+
+# Editor Settings
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
 .idea/
 *.swp
 *.swo
 
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Coverage directory used by tools like istanbul
-coverage/
-
-# Debug log from npm
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Temporary files
-*.tmp
-*.temp
-
-# Supabase local development
-.supabase/
+# Project Specific
+docs/archive/
+public/templates/!Part Input.xlsm
+!public/templates/Part Input.xlsm
+wrangler.toml.bak
+wrangler-dist/
+.wrangler/
+.python-version
+__pycache__/
+*.py[cod]
+*$py.class
