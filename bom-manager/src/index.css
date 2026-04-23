@@ -874,10 +874,10 @@
   }
 
   /* Badge variants for part types */
-  .badge-mech-mfg { @apply bg-amber-100 text-amber-700 px-2.5 py-0.5 rounded-full text-xs font-medium; }
-  .badge-mech-bop { @apply bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full text-xs font-medium; }
-  .badge-electrical { @apply bg-purple-100 text-purple-700 px-2.5 py-0.5 rounded-full text-xs font-medium; }
-  .badge-pneumatic { @apply bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-xs font-medium; }
+  .badge-mech-mfg { display: inline-flex; align-items: center; background-color: #fef3c7; color: #b45309; padding: 0.125rem 0.625rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
+  .badge-mech-bop { display: inline-flex; align-items: center; background-color: #dbeafe; color: #1d4ed8; padding: 0.125rem 0.625rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
+  .badge-electrical { display: inline-flex; align-items: center; background-color: #f3e8ff; color: #7e22ce; padding: 0.125rem 0.625rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
+  .badge-pneumatic { display: inline-flex; align-items: center; background-color: #d1fae5; color: #047857; padding: 0.125rem 0.625rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
 }
 
 /* ═══════════════════════════════════════════════════════════
