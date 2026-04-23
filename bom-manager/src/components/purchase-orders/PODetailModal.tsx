@@ -436,7 +436,7 @@ export default function PODetailModal({
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'overview', label: 'Overview', icon: <FileText className="w-4 h-4" /> },
-    { id: 'items',    label: 'Line Items', icon: <Package className="w-4 h-4" /> },
+    { id: 'items',    label: 'Items (v3.1)', icon: <Package className="w-4 h-4" /> },
     { id: 'delivery', label: 'Delivery', icon: <Truck className="w-4 h-4" /> },
     { id: 'payments', label: 'Payments', icon: <CreditCard className="w-4 h-4" /> },
   ];
@@ -484,6 +484,9 @@ export default function PODetailModal({
               )}
               <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${STATUS_COLORS[po?.status] || ''}`}>
                 {po?.status}
+              </span>
+              <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black rounded-lg uppercase tracking-[2px] animate-pulse whitespace-nowrap">
+                v3.1 LIVE
               </span>
               {po?.payment_status && (
                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
