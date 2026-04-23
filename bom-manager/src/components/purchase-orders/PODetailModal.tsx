@@ -443,7 +443,7 @@ export default function PODetailModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-[2.5rem] w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col shadow-2xl">
+      <div className="bg-white rounded-[2.5rem] w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col shadow-2xl">
 
         {/* ── Header ── */}
         <div className="px-10 py-7 border-b flex items-center justify-between bg-gray-50/50 shrink-0">
