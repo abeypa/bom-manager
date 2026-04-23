@@ -680,7 +680,7 @@ export default function PODetailModal({
                     <table className="w-full text-left">
                       <thead className="bg-gray-50 pb-2">
                         <tr>
-                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Part</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">PART-DEBUG</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Description</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Unit Price</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Disc. %</th>
