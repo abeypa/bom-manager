@@ -436,7 +436,7 @@ export default function PODetailModal({
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'overview', label: 'Overview', icon: <FileText className="w-4 h-4" /> },
-    { id: 'items',    label: 'Items (v3.3)', icon: <Package className="w-4 h-4" /> },
+    { id: 'items',    label: 'Items', icon: <Package className="w-4 h-4" /> },
     { id: 'delivery', label: 'Delivery', icon: <Truck className="w-4 h-4" /> },
     { id: 'payments', label: 'Payments', icon: <CreditCard className="w-4 h-4" /> },
   ];
@@ -485,9 +485,7 @@ export default function PODetailModal({
               <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${STATUS_COLORS[po?.status] || ''}`}>
                 {po?.status}
               </span>
-              <span className="px-3 py-1 bg-green-600 text-white text-[10px] font-black rounded-lg uppercase tracking-[2px] animate-pulse whitespace-nowrap">
-                v3.3 LIVE
-              </span>
+
               {po?.payment_status && (
                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
                   po.payment_status === 'Paid' ? 'bg-green-50 text-green-700 border-green-200' :
@@ -676,12 +674,11 @@ export default function PODetailModal({
                 </div>
               )}
 
-              {/* ════════════ ITEMS TAB ════════════ */}
               {activeTab === 'items' && (
                 <div className="space-y-5">
                   <div className="border border-gray-100 rounded-3xl overflow-x-auto">
                     <table className="w-full text-left">
-                      <thead className="bg-gray-50">
+                      <thead className="bg-gray-50 pb-2">
                         <tr>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Part</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Description</th>
@@ -690,7 +687,7 @@ export default function PODetailModal({
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Ordered</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Received</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Pending</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Actions</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap text-blue-600 bg-blue-50/50">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
@@ -721,7 +718,7 @@ export default function PODetailModal({
                             <td className="px-6 py-4 font-bold text-sm tabular-nums text-gray-500">
                               {Math.max(0, item.quantity - (item.received_qty || 0))}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium bg-blue-50/20">
                               <div className="flex items-center gap-2">
                                 <button
                                   onClick={() => handleOpenReceiveModal(item)}
