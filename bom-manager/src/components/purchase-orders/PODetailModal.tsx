@@ -683,9 +683,14 @@ export default function PODetailModal({
                     <table className="w-full text-left">
                       <thead className="bg-gray-50">
                         <tr>
-                          {['Part', 'Description', 'Unit Price', 'Disc. %', 'Ordered', 'Received', 'Pending', 'TEST1', 'Actions'].map(h => (
-                            <th key={h} className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">{h}</th>
-                          ))}
+                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Part</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Description</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Unit Price</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Disc. %</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Ordered</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Received</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Pending</th>
+                          <th id="COL-ACTIONS-V4" className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
@@ -716,10 +721,10 @@ export default function PODetailModal({
                             <td className="px-6 py-4 font-bold text-sm tabular-nums text-gray-500">
                               {Math.max(0, item.quantity - (item.received_qty || 0))}
                             </td>
-                            <td className="px-6 py-4 bg-red-50 text-red-600 font-black">TEST2</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex items-center gap-2">
                                 <button
+                                  id="RECEIVE-BUTTON-V4"
                                   onClick={() => handleOpenReceiveModal(item)}
                                   className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black rounded-lg uppercase tracking-widest shadow-md shadow-blue-200 transition-all transform active:scale-95"
                                 >
