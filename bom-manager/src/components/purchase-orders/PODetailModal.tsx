@@ -436,7 +436,7 @@ export default function PODetailModal({
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'overview', label: 'Overview', icon: <FileText className="w-4 h-4" /> },
-    { id: 'items',    label: 'Items (v3.2)', icon: <Package className="w-4 h-4" /> },
+    { id: 'items',    label: 'Items (v3.3)', icon: <Package className="w-4 h-4" /> },
     { id: 'delivery', label: 'Delivery', icon: <Truck className="w-4 h-4" /> },
     { id: 'payments', label: 'Payments', icon: <CreditCard className="w-4 h-4" /> },
   ];
@@ -485,8 +485,8 @@ export default function PODetailModal({
               <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${STATUS_COLORS[po?.status] || ''}`}>
                 {po?.status}
               </span>
-              <span className="px-3 py-1 bg-red-600 text-white text-[10px] font-black rounded-lg uppercase tracking-[2px] animate-pulse whitespace-nowrap">
-                v3.2 LIVE
+              <span className="px-3 py-1 bg-green-600 text-white text-[10px] font-black rounded-lg uppercase tracking-[2px] animate-pulse whitespace-nowrap">
+                v3.3 LIVE
               </span>
               {po?.payment_status && (
                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
@@ -684,13 +684,13 @@ export default function PODetailModal({
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Part</th>
+                          <th id="COL-ACTIONS-V5" className="px-6 py-4 text-[10px] font-black text-white bg-green-600 uppercase tracking-widest">Actions</th>
                           <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Description</th>
                           <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Unit Price</th>
                           <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Disc. %</th>
                           <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Ordered</th>
                           <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Received</th>
                           <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Pending</th>
-                          <th id="COL-ACTIONS-V4" className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
@@ -703,6 +703,17 @@ export default function PODetailModal({
                                   MPN: {item.manufacturer_part_number}
                                 </div>
                               )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  id="RECEIVE-BUTTON-V5"
+                                  onClick={() => handleOpenReceiveModal(item)}
+                                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black rounded-lg uppercase tracking-widest shadow-md shadow-blue-200 transition-all transform active:scale-95"
+                                >
+                                  Data IN
+                                </button>
+                              </div>
                             </td>
                             <td className="px-6 py-4 text-xs text-gray-500 max-w-[200px] truncate">{item.description || '—'}</td>
                             <td className="px-6 py-4 font-bold text-sm tabular-nums text-gray-500">
