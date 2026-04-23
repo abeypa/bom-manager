@@ -564,33 +564,59 @@ export const projectsApi = {
   },
 
   removePartFromSection: async (id: number) => {
+    // 1. Fetch the part link and check for PO associations
     const { data: link, error: linkErr } = await (supabase as any)
       .from('project_parts')
-      .select('*')
+      .select('*, po_items:purchase_order_items(id, purchase_orders(status))')
       .eq('id', id)
       .single()
 
     if (linkErr || !link) throw new Error('Part record not found')
 
+    // 2. Security Check: Prevent deleting parts that are already "in flight" on released POs
+    const poItems = (link as any).po_items || []
+    const releasedItems = poItems.filter((i: any) => i.purchase_orders?.status && i.purchase_orders.status !== 'Draft' && i.purchase_orders.status !== 'Cancelled')
+    
+    if (releasedItems.length > 0) {
+      const status = releasedItems[0].purchase_orders.status
+      throw new Error(`Cannot remove part: It is linked to a PO that is already "${status}". You must cancel the PO or receive the items first.`)
+    }
+
+    // 3. Cleanup: If the part is on a Draft/Cancelled PO, remove it from the PO first to clear FK constraint
+    if (poItems.length > 0) {
+      const { error: delPoErr } = await (supabase as any)
+        .from('purchase_order_items')
+        .delete()
+        .in('id', poItems.map((i: any) => i.id))
+      
+      if (delPoErr) throw new Error('Failed to clear PO associations: ' + delPoErr.message)
+    }
+
     const partTable = link.part_type as PartCategory
     const partId = link.part_id
 
+    // Check if master part still exists
     const { data: part } = await (supabase as any)
       .from(partTable)
       .select('stock_quantity, part_number')
       .eq('id', partId)
       .single()
 
-    if (!part) throw new Error('Master part not found')
+    if (part) {
+      // Restore stock and log movement if master part exists
+      const stockBefore = part.stock_quantity || 0
+      const newStock = stockBefore + (link.quantity || 0)
 
-    const stockBefore = part.stock_quantity || 0
-    const newStock = stockBefore + (link.quantity || 0)
+      await Promise.all([
+        (supabase as any).from(partTable).update({ stock_quantity: newStock }).eq('id', partId),
+        logStockMovement('RESTORE', partTable, partId, part.part_number, link.quantity, stockBefore, newStock),
+      ])
+    } else {
+      console.warn(`Master part (table: ${partTable}, id: ${partId}) not found. Skipping stock restoration for project part link ${id}.`)
+    }
 
-    await Promise.all([
-      (supabase as any).from(partTable).update({ stock_quantity: newStock }).eq('id', partId),
-      logStockMovement('RESTORE', partTable, partId, part.part_number, link.quantity, stockBefore, newStock),
-      (supabase as any).from('project_parts').delete().eq('id', id),
-    ])
+    // 4. Delete project part link (always allowed)
+    await (supabase as any).from('project_parts').delete().eq('id', id)
   },
 
   updatePartInSection: async (id: number, payload: any) => {
