@@ -679,18 +679,18 @@ export default function PODetailModal({
               {/* ════════════ ITEMS TAB ════════════ */}
               {activeTab === 'items' && (
                 <div className="space-y-5">
-                  <div className="border border-gray-100 rounded-3xl overflow-hidden">
+                  <div className="border border-gray-100 rounded-3xl overflow-x-auto">
                     <table className="w-full text-left">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Part</th>
-                          <th id="COL-ACTIONS-V5" className="px-6 py-4 text-[10px] font-black text-white bg-green-600 uppercase tracking-widest">Actions</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Description</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Unit Price</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Disc. %</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Ordered</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Received</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-white bg-red-600 uppercase tracking-widest">Pending</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Part</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Description</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Unit Price</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Disc. %</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Ordered</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Received</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Pending</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
@@ -703,17 +703,6 @@ export default function PODetailModal({
                                   MPN: {item.manufacturer_part_number}
                                 </div>
                               )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  id="RECEIVE-BUTTON-V5"
-                                  onClick={() => handleOpenReceiveModal(item)}
-                                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black rounded-lg uppercase tracking-widest shadow-md shadow-blue-200 transition-all transform active:scale-95"
-                                >
-                                  Data IN
-                                </button>
-                              </div>
                             </td>
                             <td className="px-6 py-4 text-xs text-gray-500 max-w-[200px] truncate">{item.description || '—'}</td>
                             <td className="px-6 py-4 font-bold text-sm tabular-nums text-gray-500">
@@ -735,7 +724,6 @@ export default function PODetailModal({
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex items-center gap-2">
                                 <button
-                                  id="RECEIVE-BUTTON-V4"
                                   onClick={() => handleOpenReceiveModal(item)}
                                   className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black rounded-lg uppercase tracking-widest shadow-md shadow-blue-200 transition-all transform active:scale-95"
                                 >
