@@ -39,7 +39,7 @@ interface POBasketStore {
 
 export const usePOBasketStore = create<POBasketStore>((set, get) => ({
   basketItems: [],
-  basketOpen: true, // Default to true as per recent requirement
+  basketOpen: false, // Default to hidden
   poModalOpen: false,
   projectId: null,
 
@@ -74,7 +74,8 @@ export const usePOBasketStore = create<POBasketStore>((set, get) => ({
           })
         }
       })
-      return { basketItems: next, basketOpen: true }
+      // Keep basket status as is (do not auto-open)
+      return { basketItems: next }
     })
   },
 
