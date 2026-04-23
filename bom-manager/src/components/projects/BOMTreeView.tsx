@@ -177,7 +177,7 @@ const TreeItem = ({
             const imageUrl = type === 'part' ? data.part_ref?.image_path : data.image_path;
             if (!imageUrl) return null;
             return (
-              <TooltipContent side="right" className="p-0 border-0 bg-transparent shadow-none" sideOffset={10}>
+              <TooltipContent side="right" className="p-0 border-0 bg-transparent shadow-none">
                 <div className="bg-white p-2 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-slate-100 animate-in zoom-in-95 duration-200">
                   <img 
                     src={imageUrl} 
