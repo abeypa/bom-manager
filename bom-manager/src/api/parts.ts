@@ -85,6 +85,7 @@ export const partsApi = {
     'LeadTime': 'lead_time',
     'Specifications': 'specifications',
     'Manufacturer': 'manufacturer',
+    'Make': 'make',
     'ManufacturerPartNumber': 'manufacturer_part_number',
     'Material': 'material',
     'Finish': 'finish',

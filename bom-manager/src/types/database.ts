@@ -434,6 +434,7 @@ export interface Database {
           total_stock: number
           specifications: string | null
           manufacturer: string | null
+          make: string | null
           manufacturer_part_number: string | null
           material: string | null
           finish: string | null

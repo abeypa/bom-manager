@@ -26,6 +26,7 @@ const PartFormModal = ({ isOpen, onClose, activeTab, partToEdit }: PartFormModal
     currency: 'INR',
     discount_percent: 0,
     manufacturer: '',
+    make: '',
     manufacturer_part_number: '',
     supplier_id: null,
     beperp_part_no: '',
@@ -68,6 +69,7 @@ const PartFormModal = ({ isOpen, onClose, activeTab, partToEdit }: PartFormModal
         currency: 'INR',
         discount_percent: 0,
         manufacturer: '',
+        make: '',
         manufacturer_part_number: '',
         supplier_id: null,
         beperp_part_no: '',
@@ -306,6 +308,19 @@ const PartFormModal = ({ isOpen, onClose, activeTab, partToEdit }: PartFormModal
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div className="p-4 bg-gray-50/50 rounded-3xl border border-gray-100 focus-within:border-gray-900 transition-all">
+                <label htmlFor="make" className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-1">Make</label>
+                <input
+                  id="make"
+                  type="text"
+                  name="make"
+                  value={formData.make || ''}
+                  onChange={handleChange}
+                  className="block w-full bg-transparent text-sm font-bold outline-none"
+                  placeholder="Brand / Manufacturer"
+                />
               </div>
 
               {!isManufacture && (
