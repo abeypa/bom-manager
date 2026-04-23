@@ -17,6 +17,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -32,5 +33,7 @@ export default defineConfig({
   define: {
     // Forces a unique build hash every time — prevents Cloudflare build cache reuse
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __CACHE_BUST__: JSON.stringify('v3.2_2026-04-23_0649'),
   },
 })
+// cache-bust: 2026-04-23_0650
