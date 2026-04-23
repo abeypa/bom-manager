@@ -271,16 +271,42 @@ export const exportUtils = {
             font-family: "DM Mono", monospace;
             font-weight: 700;
             color: #1a3f7c;
+            white-space: nowrap;
+        }
+
+        .mpn {
+            font-family: "DM Mono", monospace;
+            font-weight: 600;
+            color: #666;
+            font-size: 11px;
         }
 
         .desc {
             color: #666;
-            max-width: 300px;
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .qty {
             font-weight: 900;
             text-align: right;
+        }
+
+        .po-status {
+            font-weight: 900;
+            font-size: 9px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: inline-block;
+        }
+
+        .delivery {
+            font-weight: 700;
+            font-size: 11px;
+            white-space: nowrap;
         }
 
         .price, .total {
@@ -336,8 +362,11 @@ export const exportUtils = {
                             <tr>
                                 <th style="width: 50px;">IMG</th>
                                 <th>Part Number</th>
+                                <th>Manufacturer Part No</th>
                                 <th>Description</th>
                                 <th style="text-align: right;">Quantity</th>
+                                <th>PO Status</th>
+                                <th>Delivery</th>
                                 <th style="text-align: right;">Unit Price</th>
                                 <th style="text-align: right;">Subtotal</th>
                             </tr>
@@ -345,7 +374,14 @@ export const exportUtils = {
                         <tbody>
                             ${(sub.parts || []).map((p: any) => {
                                 const details = p.part_ref || {};
+                                const poInfo = p.po_info;
+                                const mpn = details.manufacturer_part_number || details.manufacturer_part_no || '-';
+                                const poStatus = poInfo ? (poInfo.status === 'Draft' ? 'PENDING PO' : poInfo.status.toUpperCase()) : 'NOT ORDERED';
+                                const received = poInfo?.received_qty || 0;
+                                const pending = Math.max(0, p.quantity - received);
+                                const delivery = `${received} REC / ${pending} PEND`;
                                 const total = (p.unit_price || 0) * (p.quantity || 0);
+                                
                                 return `
                                     <tr>
                                         <td>
@@ -355,14 +391,27 @@ export const exportUtils = {
                                             }
                                         </td>
                                         <td><span class="part-no">${details.part_number || '-'}</span></td>
+                                        <td><span class="mpn">${mpn}</span></td>
                                         <td><div class="desc">${details.description || '-'}</div></td>
                                         <td class="qty">${p.quantity}</td>
+                                        <td>
+                                            <span class="po-status" style="${
+                                                poStatus === 'NOT ORDERED' ? 'background: #f1f5f9; color: #64748b;' :
+                                                poStatus === 'PENDING PO' ? 'background: #fff7ed; color: #c2410c;' :
+                                                'background: #f0fdf4; color: #15803d;'
+                                            }">
+                                                ${poStatus}
+                                            </span>
+                                        </td>
+                                        <td class="delivery" style="color: ${pending > 0 ? '#b45309' : '#15803d'};">
+                                            ${delivery}
+                                        </td>
                                         <td class="price">₹${(p.unit_price || 0).toLocaleString()}</td>
                                         <td class="total">₹${total.toLocaleString()}</td>
                                     </tr>
                                 `;
                             }).join('')}
-                            ${(sub.parts || []).length === 0 ? `<tr><td colspan="6" style="text-align: center; color: #ccc; font-style: italic; padding: 30px;">No parts mapped to this compartment</td></tr>` : ''}
+                            ${(sub.parts || []).length === 0 ? `<tr><td colspan="9" style="text-align: center; color: #ccc; font-style: italic; padding: 30px;">No parts mapped to this compartment</td></tr>` : ''}
                         </tbody>
                     </table>
                 </div>
