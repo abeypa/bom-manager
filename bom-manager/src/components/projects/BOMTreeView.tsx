@@ -167,9 +167,31 @@ const TreeItem = ({
   const RenderActions = () => (
     <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-300 pr-2">
       {onImageClick && (
-        <button onClick={onImageClick} title="View Image" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-amber-500 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-          <ImageIcon size={13} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button onClick={onImageClick} className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-amber-500 shadow-sm border border-transparent hover:border-slate-100 transition-all">
+              <ImageIcon size={13} />
+            </button>
+          </TooltipTrigger>
+          {(() => {
+            const imageUrl = type === 'part' ? data.part_ref?.image_path : data.image_path;
+            if (!imageUrl) return null;
+            return (
+              <TooltipContent side="right" className="p-0 border-0 bg-transparent shadow-none" sideOffset={10}>
+                <div className="bg-white p-2 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-slate-100 animate-in zoom-in-95 duration-200">
+                  <img 
+                    src={imageUrl} 
+                    alt="Preview" 
+                    className="w-56 h-56 object-contain rounded-[1.5rem]" 
+                  />
+                  <div className="mt-2 mb-1 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 text-center">
+                    Image Preview
+                  </div>
+                </div>
+              </TooltipContent>
+            );
+          })()}
+        </Tooltip>
       )}
       {onAddChild && (
         <button onClick={onAddChild} title="Add Child" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600 shadow-sm border border-transparent hover:border-slate-100 transition-all">
