@@ -155,26 +155,29 @@ export const poPaymentsApi = {
   },
 
   getReceiptsByPO: async (poId: number): Promise<any[]> => {
-    const { data, error } = await supabase
-      .from('po_receipts')
-      .select('*, purchase_order_items(part_number, description)')
-      .innerJoin('purchase_order_items', 'po_receipts.po_line_item_id', 'purchase_order_items.id')
-      .eq('purchase_order_items.purchase_order_id', poId)
-      .order('receipt_date', { ascending: false });
-    
-    // Fallback if JOIN syntax is not supported by current postgrest version in this environment
-    if (error) {
-       const { data: lineItems } = await supabase.from('purchase_order_items').select('id, part_number, description').eq('purchase_order_id', poId);
-       if (!lineItems) return [];
-       const ids = lineItems.map(i => i.id);
-       const { data: receipts, error: recErr } = await supabase.from('po_receipts').select('*').in('po_line_item_id', ids).order('receipt_date', { ascending: false });
-       if (recErr) throw recErr;
-       return (receipts || []).map(r => ({
-         ...r,
-         purchase_order_items: lineItems.find(li => li.id === r.po_line_item_id)
-       }));
+    try {
+      const { data, error } = await supabase
+        .from('po_receipts')
+        .select(`
+          *,
+          purchase_order_items!inner(
+            part_number,
+            description,
+            purchase_order_id
+          )
+        `)
+        .eq('purchase_order_items.purchase_order_id', poId)
+        .order('receipt_date', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching receipts:', error);
+        return [];
+      }
+      return data || [];
+    } catch (e) {
+      console.error('Receipts fetch crash:', e);
+      return [];
     }
-    return data || [];
   },
 };
 
