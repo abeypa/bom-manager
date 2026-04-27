@@ -3,7 +3,7 @@ import { PendingPart, pendingPartsApi } from '@/api/pending-parts';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRole } from '@/hooks/useRole';
 import { useToast } from '@/context/ToastContext';
-import { Clock, CheckCircle2, XCircle, Link2, MessageSquare, ShieldCheck } from 'lucide-react';
+import { Clock, CheckCircle2, XCircle, Link2, MessageSquare, ShieldCheck, UserCircle2 } from 'lucide-react';
 import DiscussionThread from './DiscussionThread.tsx';
 
 export default function PendingPartCard({ part }: { part: PendingPart }) {
@@ -50,7 +50,20 @@ export default function PendingPartCard({ part }: { part: PendingPart }) {
             <h3 className="text-xl font-bold text-navy-900 group-hover:text-primary-600 transition-colors">
               {part.name}
             </h3>
-            <p className="text-xs font-bold text-slate-400 mt-1">Requested by {part.author_email || 'Unknown'}</p>
+            
+            <div className="flex items-center gap-2 mt-2">
+              {part.author_avatar ? (
+                <img src={part.author_avatar} alt="Avatar" className="w-5 h-5 rounded-full object-cover border border-slate-200" />
+              ) : (
+                <UserCircle2 className="w-5 h-5 text-slate-400" />
+              )}
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-slate-700">{part.author_name || part.author_email || 'Unknown Integrator'}</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400" title={new Date(part.created_at).toLocaleString()}>
+                  Requested {new Date(part.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            </div>
           </div>
           {isAdmin && part.status === 'Pending' && !isRejecting && (
             <div className="flex flex-col items-end gap-2 shrink-0">
@@ -96,6 +109,20 @@ export default function PendingPartCard({ part }: { part: PendingPart }) {
               <div className="bg-red-50 border border-red-100 p-4 rounded-xl mb-6">
                 <span className="text-[10px] uppercase font-black tracking-widest text-red-500 mb-1 block">Admin Feedback</span>
                 <p className="text-sm font-bold text-red-700">{part.rejection_reason}</p>
+              </div>
+            )}
+
+            {part.approved_at && part.status !== 'Pending' && (
+              <div className={`p-3 rounded-xl mb-6 border flex items-start gap-3 ${part.status === 'Approved' ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-red-50/50 border-red-100 text-red-800'}`}>
+                {part.status === 'Approved' ? <CheckCircle2 size={16} className="text-emerald-500 mt-0.5" /> : <XCircle size={16} className="text-red-500 mt-0.5" />}
+                <div>
+                  <span className={`text-[10px] uppercase font-black tracking-widest block mb-0.5 ${part.status === 'Approved' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {part.status} Evaluation
+                  </span>
+                  <span className="text-xs font-medium">
+                    Processed by <span className="font-bold">{part.approver_name || 'Admin'}</span> on <span className="font-bold">{new Date(part.approved_at).toLocaleString()}</span>
+                  </span>
+                </div>
               </div>
             )}
 
