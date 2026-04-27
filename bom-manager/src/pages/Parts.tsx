@@ -11,6 +11,7 @@ import PartImportModal from '@/components/parts/PartImportModal'
 import PriceHistoryModal from '@/components/parts/PriceHistoryModal'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
 import PartDetailModal from '@/components/parts/PartDetailModal'
+import FastScrollSlider from '@/components/ui/FastScrollSlider.tsx'
 
 const TABS: { id: PartCategory; name: string }[] = [
   { id: 'electrical_bought_out', name: 'Elec Bought-Out' },
@@ -121,8 +122,9 @@ const Parts = () => {
   }
 
   return (
-    <div className="page-container py-8 page-enter">
-      {/* Header */}
+    <div className="page-container page-enter relative h-screen flex flex-col overflow-hidden bg-slate-50/30">
+      <div className="shrink-0 pt-8 px-4 sm:px-8 z-20">
+        {/* Header */}
       <header className="page-header">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-navy-900 rounded-2xl flex items-center justify-center shadow-lg shadow-navy-900/10">
@@ -179,10 +181,12 @@ const Parts = () => {
         ))}
       </div>
 
-      <AdvancedFilterBar onFilterChange={(filters) => console.log('Parts Filter', filters)} />
+      <div className="mb-4">
+        <AdvancedFilterBar onFilterChange={(filters) => console.log('Parts Filter', filters)} />
+      </div>
 
       {/* Toolbar */}
-      <div className="section-card p-4 flex flex-col lg:flex-row items-center gap-4 mb-8">
+      <div className="section-card p-4 flex flex-col lg:flex-row items-center gap-4 mb-4">
         <div className="flex-1 w-full lg:w-64">
           <select
             className="input font-black uppercase tracking-widest text-[10px]"
@@ -214,10 +218,12 @@ const Parts = () => {
           </button>
         </div>
       </div>
+      </div>
 
-      {/* Assets Display */}
-      <div className="flex-1">
-        {isLoading ? renderSkeletons() : filteredParts.length === 0 ? (
+      {/* Assets Display explicitly scrollable */}
+      <div className="flex-1 min-h-0 relative flex gap-6 px-4 sm:px-8 pb-8">
+        <div id="parts-scroll-container" className="flex-1 overflow-y-auto hidden-scrollbar pr-2 pb-20 scroll-smooth">
+          {isLoading ? renderSkeletons() : filteredParts.length === 0 ? (
           <div className="empty-state py-24">
             <div className="bg-slate-50 w-24 h-24 rounded-full flex items-center justify-center mb-6 border border-slate-100 shadow-inner">
               <Package size={40} className="text-tertiary" />
@@ -402,6 +408,11 @@ const Parts = () => {
             )}
           </>
         )}
+        </div>
+        {/* Fast Scroll Setup */}
+        <div className="w-10 shrink-0 h-full py-1 hidden sm:block">
+          <FastScrollSlider containerId="parts-scroll-container" />
+        </div>
       </div>
 
       {/* Modals */}
