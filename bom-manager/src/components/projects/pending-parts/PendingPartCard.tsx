@@ -6,7 +6,7 @@ import { useToast } from '@/context/ToastContext';
 import { supabase } from '@/lib/supabase';
 import {
   Clock, CheckCircle2, XCircle, Link2, MessageSquare,
-  ShieldCheck, UserCircle2, Trash2, Pencil,
+  ShieldCheck, Trash2, Pencil, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import DiscussionThread from './DiscussionThread.tsx';
 import PendingPartFormModal from './PendingPartFormModal.tsx';
@@ -20,7 +20,6 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
   const [isRejecting, setIsRejecting] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
-  // Track current user id to show Edit button to creator too
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? null));
@@ -33,7 +32,7 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
       pendingPartsApi.updatePendingPartStatus(part.id, status, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-parts', projectId] });
-      showToast('success', 'Part status updated');
+      showToast('success', 'Status updated');
       setIsRejecting(false);
     },
     onError: (err: any) => showToast('error', err.message),
@@ -43,179 +42,172 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
     mutationFn: () => pendingPartsApi.deletePendingPart(part.id),
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: ['pending-parts', projectId] });
-      const previousParts = queryClient.getQueryData<PendingPart[]>(['pending-parts', projectId]);
-      if (previousParts) {
-        queryClient.setQueryData<PendingPart[]>(
-          ['pending-parts', projectId],
-          previousParts.filter(p => p.id !== part.id)
-        );
-      }
-      return { previousParts };
+      const prev = queryClient.getQueryData<PendingPart[]>(['pending-parts', projectId]);
+      if (prev) queryClient.setQueryData<PendingPart[]>(['pending-parts', projectId], prev.filter(p => p.id !== part.id));
+      return { prev };
     },
-    onSuccess: () => showToast('success', 'Pending request deleted permanently'),
-    onError: (err: any, _vars, context) => {
-      if (context?.previousParts) {
-        queryClient.setQueryData(['pending-parts', projectId], context.previousParts);
-      }
+    onSuccess: () => showToast('success', 'Part deleted permanently'),
+    onError: (err: any, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['pending-parts', projectId], ctx.prev);
       showToast('error', 'Delete failed: ' + err.message);
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['pending-parts', projectId] }),
   });
 
   const handleDelete = () => {
-    if (window.confirm('Delete this pending part and all associated comments/images? This action cannot be undone.')) {
+    if (window.confirm('Delete this pending part and all associated comments/images? This cannot be undone.')) {
       deleteMut.mutate();
     }
   };
 
-  const getStatusBadge = () => {
-    switch (part.status) {
-      case 'Approved':
-        return <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-black uppercase tracking-widest"><CheckCircle2 size={12} /> Approved</span>;
-      case 'Rejected':
-        return <span className="flex items-center gap-1.5 px-3 py-1 bg-red-50 text-red-600 border border-red-200 rounded-full text-xs font-black uppercase tracking-widest"><XCircle size={12} /> Rejected</span>;
-      default:
-        return <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-600 border border-amber-200 rounded-full text-xs font-black uppercase tracking-widest"><Clock size={12} /> Pending</span>;
-    }
+  // ── Status badge ──────────────────────────────────────────────────────────
+  const statusConfig = {
+    Approved: {
+      icon: <CheckCircle2 size={11} />,
+      className: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    },
+    Rejected: {
+      icon: <XCircle size={11} />,
+      className: 'bg-red-50 text-red-600 border-red-200',
+    },
+    Pending: {
+      icon: <Clock size={11} />,
+      className: 'bg-amber-50 text-amber-600 border-amber-200',
+    },
   };
+  const s = statusConfig[part.status];
+
+  const initial = (str?: string | null) => (str || '?')[0].toUpperCase();
 
   return (
     <>
-      <div className="bg-white flex flex-col rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden group hover:border-primary-200 hover:shadow-md transition-all">
-        <div className="p-6 flex-1">
+      <div className="bg-white flex flex-col rounded-[1.75rem] border border-slate-200/80 shadow-sm overflow-hidden group hover:border-primary-200 hover:shadow-lg transition-all duration-300">
 
-          {/* Header row */}
-          <div className="flex justify-between items-start mb-4 gap-4">
-            <div className="flex-1 min-w-0">
-              {/* Badges */}
-              <div className="flex flex-wrap items-center gap-3 mb-2">
-                {getStatusBadge()}
-                <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded-xl text-[10px] uppercase font-black tracking-widest border border-slate-200">
-                  {part.category?.replace(/_/g, ' ') || 'General'}
-                </span>
-              </div>
+        {/* ── Card body ──────────────────────────────────────────────────── */}
+        <div className="p-5 flex-1">
 
-              {/* Title */}
-              <h3 className="text-xl font-bold text-navy-900 group-hover:text-primary-600 transition-colors truncate">
-                {part.name}
-              </h3>
-
-              {/* Author row */}
-              <div className="flex items-center gap-2 mt-2">
-                <UserCircle2 className="w-4 h-4 text-slate-400 shrink-0" />
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-700">{part.author_name || part.author_email || 'Unknown Integrator'}</span>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400" title={new Date(part.created_at).toLocaleString()}>
-                    Requested {new Date(part.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-              </div>
-
-              {/* Assignee chip */}
-              {(part.assignee_name || part.assignee_email) && (
-                <div className="mt-2 flex items-center gap-1.5">
-                  <div className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-black ring-1 ring-white shrink-0">
-                    {(part.assignee_name || part.assignee_email || '?')[0].toUpperCase()}
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">
-                    Assigned → {part.assignee_name || part.assignee_email}
-                  </span>
-                </div>
-              )}
+          {/* Top row: badges + actions */}
+          <div className="flex items-start justify-between gap-3 mb-3">
+            {/* Left: status + category */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${s.className}`}>
+                {s.icon} {part.status}
+              </span>
+              <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded-xl text-[10px] uppercase font-black tracking-widest border border-slate-200/80">
+                {part.category?.replace(/_/g, ' ') || 'General'}
+              </span>
             </div>
 
-            {/* Admin / creator actions */}
-            <div className="flex flex-col items-end gap-2 shrink-0">
-              {/* Edit button */}
-              {canEdit && !isRejecting && (
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="btn btn-ghost text-slate-500 hover:text-primary-600 hover:bg-primary-50 px-3 border-slate-200"
-                  title="Edit Part"
-                >
-                  <Pencil className="w-4 h-4 mr-1.5" />
-                  Edit
-                </button>
-              )}
-
-              {isAdmin && !isRejecting && (
-                <>
-                  {part.status === 'Pending' && (
-                    <>
-                      <button
-                        onClick={() => updateStatus.mutate({ status: 'Approved' })}
-                        disabled={updateStatus.isPending}
-                        className="btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 shadow-lg px-4 w-full"
-                      >
-                        <ShieldCheck className="w-4 h-4 mr-2" />
-                        {updateStatus.isPending ? '...' : 'Approve'}
-                      </button>
-                      <button
-                        onClick={() => setIsRejecting(true)}
-                        className="btn btn-secondary border-red-100 text-red-600 hover:bg-red-50 hover:border-red-200 px-4 w-full"
-                      >
-                        Reject
-                      </button>
-                    </>
-                  )}
+            {/* Right: edit + admin actions */}
+            {!isRejecting && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {canEdit && (
+                  <button
+                    onClick={() => setEditOpen(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-primary-600 hover:bg-primary-50 border border-transparent hover:border-primary-200 rounded-xl transition-all"
+                    title="Edit Part"
+                  >
+                    <Pencil size={12} />
+                    Edit
+                  </button>
+                )}
+                {isAdmin && (
                   <button
                     onClick={handleDelete}
                     disabled={deleteMut.isPending}
-                    className="btn btn-ghost text-slate-400 hover:text-red-500 hover:bg-red-50 w-full px-4 border-dashed border-slate-200"
-                    title="Delete Request"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 hover:bg-red-50 border border-transparent hover:border-red-100 rounded-xl transition-all disabled:opacity-50"
+                    title="Delete"
                   >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    {deleteMut.isPending ? 'Deleting...' : 'Delete'}
+                    <Trash2 size={12} />
                   </button>
-                </>
-              )}
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Title */}
+          <h3 className="text-lg font-black text-navy-900 group-hover:text-primary-600 transition-colors leading-snug mb-2.5">
+            {part.name}
+          </h3>
+
+          {/* Author + Assignee row */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-4">
+            {/* Author */}
+            <div className="flex items-center gap-1.5">
+              <div className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[9px] font-black ring-1 ring-white shrink-0">
+                {initial(part.author_name || part.author_email)}
+              </div>
+              <div>
+                <span className="text-[10px] font-black text-slate-700">{part.author_name || part.author_email || 'Unknown'}</span>
+                <span className="text-[9px] font-bold text-slate-400 ml-1.5" title={new Date(part.created_at).toLocaleString()}>
+                  · {new Date(part.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              </div>
             </div>
+
+            {/* Assignee chip */}
+            {(part.assignee_name || part.assignee_email) && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg">
+                <div className="w-4 h-4 rounded-full bg-indigo-200 text-indigo-700 flex items-center justify-center text-[8px] font-black shrink-0">
+                  {initial(part.assignee_name || part.assignee_email)}
+                </div>
+                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-600 truncate max-w-[100px]">
+                  {part.assignee_name || part.assignee_email}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Rejection flow */}
           {isRejecting ? (
-            <div className="bg-red-50 border border-red-100 rounded-2xl p-4 mb-4 animate-in fade-in slide-in-from-top-2">
-              <h4 className="text-xs font-black uppercase tracking-widest text-red-600 mb-2">Rejection Reason</h4>
+            <div className="bg-red-50 border border-red-100 rounded-2xl p-4 mb-3 animate-in fade-in slide-in-from-top-2 duration-200">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-2">Rejection Reason</h4>
               <textarea
                 value={rejectReason}
                 onChange={e => setRejectReason(e.target.value)}
-                className="w-full bg-white border border-red-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-red-500/20 mb-3"
-                placeholder="Why is this requested part being rejected...?"
+                className="w-full bg-white border border-red-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-red-400/20 mb-3 resize-none"
+                placeholder="Why is this part being rejected?"
                 rows={3}
               />
               <div className="flex justify-end gap-2">
-                <button onClick={() => setIsRejecting(false)} className="btn btn-secondary px-4 py-2">Cancel</button>
-                <button onClick={() => updateStatus.mutate({ status: 'Rejected', reason: rejectReason })} className="btn bg-red-600 text-white hover:bg-red-700 px-4 py-2">Confirm Rejection</button>
+                <button onClick={() => setIsRejecting(false)} className="btn btn-secondary px-4 py-1.5 text-sm">Cancel</button>
+                <button onClick={() => updateStatus.mutate({ status: 'Rejected', reason: rejectReason })} className="btn bg-red-600 text-white hover:bg-red-700 px-4 py-1.5 text-sm">Confirm Rejection</button>
               </div>
             </div>
           ) : (
             <>
               {/* Description */}
-              <p className="text-sm text-slate-600 leading-relaxed mb-6 whitespace-pre-wrap">
-                {part.description || <span className="italic text-slate-300">No description provided</span>}
-              </p>
+              {part.description && (
+                <p className="text-sm text-slate-600 leading-relaxed mb-4 whitespace-pre-wrap">
+                  {part.description}
+                </p>
+              )}
 
-              {/* Rejection reason */}
+              {/* Rejection reason banner */}
               {part.status === 'Rejected' && part.rejection_reason && (
-                <div className="bg-red-50 border border-red-100 p-4 rounded-xl mb-6">
-                  <span className="text-[10px] uppercase font-black tracking-widest text-red-500 mb-1 block">Admin Feedback</span>
-                  <p className="text-sm font-bold text-red-700">{part.rejection_reason}</p>
+                <div className="bg-red-50/80 border border-red-100 p-3.5 rounded-xl mb-4">
+                  <span className="text-[9px] uppercase font-black tracking-widest text-red-500 mb-1 block">Admin Feedback</span>
+                  <p className="text-sm font-semibold text-red-700">{part.rejection_reason}</p>
                 </div>
               )}
 
               {/* Approval meta */}
               {part.approved_at && part.status !== 'Pending' && (
-                <div className={`p-3 rounded-xl mb-6 border flex items-start gap-3 ${part.status === 'Approved' ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-red-50/50 border-red-100 text-red-800'}`}>
+                <div className={`p-3 rounded-xl mb-4 border flex items-start gap-2.5 ${
+                  part.status === 'Approved'
+                    ? 'bg-emerald-50/60 border-emerald-100 text-emerald-800'
+                    : 'bg-red-50/60 border-red-100 text-red-800'
+                }`}>
                   {part.status === 'Approved'
-                    ? <CheckCircle2 size={16} className="text-emerald-500 mt-0.5" />
-                    : <XCircle size={16} className="text-red-500 mt-0.5" />}
+                    ? <CheckCircle2 size={15} className="text-emerald-500 mt-0.5 shrink-0" />
+                    : <XCircle size={15} className="text-red-500 mt-0.5 shrink-0" />}
                   <div>
-                    <span className={`text-[10px] uppercase font-black tracking-widest block mb-0.5 ${part.status === 'Approved' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    <span className={`text-[9px] uppercase font-black tracking-widest block mb-0.5 ${part.status === 'Approved' ? 'text-emerald-600' : 'text-red-600'}`}>
                       {part.status} Evaluation
                     </span>
                     <span className="text-xs font-medium">
-                      Processed by <span className="font-bold">{part.approver_name || 'Admin'}</span> on{' '}
-                      <span className="font-bold">{new Date(part.approved_at).toLocaleString()}</span>
+                      By <strong>{part.approver_name || 'Admin'}</strong> on{' '}
+                      <strong>{new Date(part.approved_at).toLocaleString()}</strong>
                     </span>
                   </div>
                 </div>
@@ -223,13 +215,13 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
 
               {/* Images + links */}
               {(part.images?.length > 0 || part.links?.length > 0) && (
-                <div className="flex flex-wrap gap-6 border-t border-slate-100 pt-5 mb-2">
+                <div className="flex flex-wrap gap-5 border-t border-slate-100 pt-4 mb-1">
                   {part.images?.length > 0 && (
                     <div>
                       <h4 className="text-[9px] uppercase font-black tracking-widest text-slate-400 mb-2">Images</h4>
                       <div className="flex gap-2">
                         {part.images.map((img, i) => (
-                          <a key={i} href={img} target="_blank" rel="noreferrer" className="w-12 h-12 rounded-xl border border-slate-200 overflow-hidden hover:border-primary-400 transition-colors block shrink-0 shadow-sm">
+                          <a key={i} href={img} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-xl border border-slate-200 overflow-hidden hover:border-primary-400 transition-all block shrink-0 shadow-sm hover:shadow-md">
                             <img src={img} alt="Preview" className="w-full h-full object-cover" loading="lazy" />
                           </a>
                         ))}
@@ -239,11 +231,11 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
                   {part.links?.length > 0 && (
                     <div>
                       <h4 className="text-[9px] uppercase font-black tracking-widest text-slate-400 mb-2">References</h4>
-                      <div className="flex flex-col gap-1.5 flex-wrap max-h-24">
+                      <div className="flex flex-col gap-1.5">
                         {part.links.map((link, i) => (
-                          <a key={i} href={link.url} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary-600 hover:text-primary-700 hover:underline flex items-center bg-primary-50/50 px-2 py-1 rounded-lg w-max">
-                            <Link2 className="w-3 h-3 mr-1.5 shrink-0" />
-                            <span className="truncate max-w-[150px]">{link.label || 'External Link'}</span>
+                          <a key={i} href={link.url} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary-600 hover:text-primary-700 hover:underline flex items-center bg-primary-50/60 px-2 py-1 rounded-lg w-max max-w-[180px]">
+                            <Link2 className="w-3 h-3 mr-1.5 shrink-0 opacity-60" />
+                            <span className="truncate">{link.label || 'External Link'}</span>
                           </a>
                         ))}
                       </div>
@@ -253,28 +245,54 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
               )}
             </>
           )}
+
+          {/* Admin status actions (Approve / Reject buttons) */}
+          {isAdmin && !isRejecting && part.status === 'Pending' && (
+            <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+              <button
+                onClick={() => updateStatus.mutate({ status: 'Approved' })}
+                disabled={updateStatus.isPending}
+                className="btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 shadow-md px-4 flex-1 text-xs"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
+                {updateStatus.isPending ? 'Approving…' : 'Approve'}
+              </button>
+              <button
+                onClick={() => setIsRejecting(true)}
+                className="btn btn-secondary border-red-100 text-red-600 hover:bg-red-50 hover:border-red-200 px-4 flex-1 text-xs"
+              >
+                Reject
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Discussion toggle */}
-        <div
-          className="bg-slate-50 border-t border-slate-100 p-4 shrink-0 flex justify-between items-center cursor-pointer hover:bg-slate-100 transition-colors mt-auto"
+        {/* ── Discussion toggle ──────────────────────────────────────────── */}
+        <button
+          type="button"
+          className={`flex items-center justify-between px-5 py-3 border-t text-left w-full transition-all duration-200 ${
+            showThread
+              ? 'bg-primary-50/60 border-primary-100 text-primary-600'
+              : 'bg-slate-50/80 border-slate-100 text-slate-500 hover:bg-slate-100/80'
+          }`}
           onClick={() => setShowThread(!showThread)}
         >
-          <span className={`text-xs font-black uppercase flex items-center gap-2 ${showThread ? 'text-primary-600' : 'text-slate-500'}`}>
-            <MessageSquare size={14} />
-            Discussion Thread
+          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+            <MessageSquare size={13} />
+            Discussion
           </span>
-          <span className="text-xs font-bold text-slate-400">{showThread ? 'Hide Comments' : 'Show Comments'}</span>
-        </div>
+          {showThread
+            ? <ChevronUp size={14} className="opacity-60" />
+            : <ChevronDown size={14} className="opacity-40" />}
+        </button>
 
         {showThread && (
-          <div className="border-t border-slate-200">
+          <div className="border-t border-slate-100 animate-in slide-in-from-top-1 duration-200">
             <DiscussionThread pendingPartId={part.id} />
           </div>
         )}
       </div>
 
-      {/* Edit modal (in-place, no tab-level state needed) */}
       {editOpen && (
         <PendingPartFormModal
           isOpen={editOpen}
