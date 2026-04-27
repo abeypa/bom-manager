@@ -102,7 +102,7 @@ export default function DiscussionThread({ pendingPartId }: { pendingPartId: num
               <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-sm shadow-sm flex-1 overflow-hidden">
                 <div className="flex justify-between items-end mb-1 border-b border-slate-50 pb-1.5">
                   <span className="text-[10px] font-black uppercase text-navy-900 tracking-wider flex items-center gap-1">
-                    <UserCircle2 size={12} className="text-slate-400" /> {c.author_name || c.author_email?.split('@')[0] || 'Unknown User'}
+                    <UserCircle2 size={12} className="text-slate-400" /> {c.author_name || c.author_email || 'Unknown User'}
                   </span>
                   <span className="text-[9px] text-slate-400 font-bold" title={new Date(c.created_at).toLocaleString()}>
                     {formatTimeAgo(c.created_at)}

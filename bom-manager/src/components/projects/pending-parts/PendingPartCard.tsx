@@ -6,7 +6,7 @@ import { useToast } from '@/context/ToastContext';
 import { Clock, CheckCircle2, XCircle, Link2, MessageSquare, ShieldCheck, UserCircle2, Trash2 } from 'lucide-react';
 import DiscussionThread from './DiscussionThread.tsx';
 
-export default function PendingPartCard({ part }: { part: PendingPart }) {
+export default function PendingPartCard({ part, projectId }: { part: PendingPart, projectId: number }) {
   const { isAdmin } = useRole();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -18,7 +18,7 @@ export default function PendingPartCard({ part }: { part: PendingPart }) {
     mutationFn: ({ status, reason }: { status: 'Approved' | 'Rejected', reason?: string }) => 
       pendingPartsApi.updatePendingPartStatus(part.id, status, reason),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pending-parts', part.project_id] });
+      queryClient.invalidateQueries({ queryKey: ['pending-parts', projectId] });
       showToast('success', 'Part status updated');
       setIsRejecting(false);
     },
@@ -28,7 +28,7 @@ export default function PendingPartCard({ part }: { part: PendingPart }) {
   const deleteMut = useMutation({
     mutationFn: () => pendingPartsApi.deletePendingPart(part.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pending-parts', part.project_id] });
+      queryClient.invalidateQueries({ queryKey: ['pending-parts', projectId] });
       showToast('success', 'Pending request deleted permanently');
     },
     onError: (err: any) => showToast('error', 'Delete failed: ' + err.message)

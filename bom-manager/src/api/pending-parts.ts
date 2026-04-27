@@ -61,7 +61,7 @@ export const pendingPartsApi = {
     const profilesMap: Record<string, any> = {};
     
     if (userIds.length > 0) {
-      const { data: profilesData } = await supabase.from('profiles').select('id, full_name, email, avatar_url').in('id', userIds);
+      const { data: profilesData } = await supabase.from('profiles').select('id, full_name, email').in('id', userIds);
       if (profilesData) {
         profilesData.forEach((p: any) => { profilesMap[p.id] = p });
       }
@@ -71,7 +71,7 @@ export const pendingPartsApi = {
       ...item,
       author_name: profilesMap[item.created_by]?.full_name,
       author_email: profilesMap[item.created_by]?.email,
-      author_avatar: profilesMap[item.created_by]?.avatar_url,
+      author_avatar: undefined, // profiles table does not have avatar_url column
       approver_name: profilesMap[item.approved_by]?.full_name,
       // Map arrays if they accidentally come back as strings or null
       images: Array.isArray(item.images) ? item.images : [],
@@ -151,7 +151,7 @@ export const pendingPartsApi = {
     const profilesMap: Record<string, any> = {};
     
     if (userIds.length > 0) {
-      const { data: profilesData } = await supabase.from('profiles').select('id, full_name, email, avatar_url').in('id', userIds);
+      const { data: profilesData } = await supabase.from('profiles').select('id, full_name, email').in('id', userIds);
       if (profilesData) {
         profilesData.forEach((p: any) => { profilesMap[p.id] = p });
       }
@@ -161,7 +161,7 @@ export const pendingPartsApi = {
       ...item,
       author_name: profilesMap[item.user_id]?.full_name,
       author_email: profilesMap[item.user_id]?.email,
-      author_avatar: profilesMap[item.user_id]?.avatar_url,
+      author_avatar: undefined, // profiles table does not have avatar_url column
       images: Array.isArray(item.images) ? item.images : [],
     }))
   },
@@ -190,13 +190,13 @@ export const pendingPartsApi = {
     if (error) throw error
 
     // Fetch the author's profile safely
-    const { data: profile } = await supabase.from('profiles').select('full_name, email, avatar_url').eq('id', user.id).single()
+    const { data: profile } = await supabase.from('profiles').select('full_name, email').eq('id', user.id).single()
 
     return {
       ...data,
       author_name: profile?.full_name,
       author_email: profile?.email,
-      author_avatar: profile?.avatar_url,
+      author_avatar: undefined,
     } as PendingPartComment
   },
 

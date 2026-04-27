@@ -84,7 +84,7 @@ export default function PendingPartsTab({ projectId }: { projectId: number }) {
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 pb-12">
           {filteredParts.map(part => (
-            <PendingPartCard key={part.id} part={part} />
+            <PendingPartCard key={part.id} part={part} projectId={projectId} />
           ))}
         </div>
       )}
