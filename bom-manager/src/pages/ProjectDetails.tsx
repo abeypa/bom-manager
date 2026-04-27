@@ -46,6 +46,8 @@ import { partsApi } from '@/api/parts'
 import BOMDraggableSection from '@/components/projects/BOMDraggableSection'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
 import POBasket from '@/components/projects/POBasket'
+import FastScrollSlider from '@/components/ui/FastScrollSlider'
+import PendingPartsTab from '@/components/projects/pending-parts/PendingPartsTab.tsx'
 import {
   DndContext,
   closestCenter,
@@ -108,7 +110,7 @@ const ProjectDetails = () => {
   } | null>(null)
 
   const [selectedPartIds, setSelectedPartIds] = useState<Set<number>>(new Set())
-  const [activeTab, setActiveTab] = useState<'bom' | 'documents' | 'jo' | 'pos'>('bom')
+  const [activeTab, setActiveTab] = useState<'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts'>('bom')
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set())
   const [imageModal, setImageModal] = useState<{
     open: boolean
@@ -458,72 +460,74 @@ const ProjectDetails = () => {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="page-container page-enter relative overflow-x-hidden min-h-screen">
+      <div className="page-container page-enter relative h-screen flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="page-header sticky top-0 bg-white/80 backdrop-blur-md z-30 py-4 mb-6">
-          <div className="flex items-center gap-4">
-            <Link to="/projects" className="btn btn-secondary flex items-center gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              Back to Projects
-            </Link>
-            <div>
-              <h1 className="page-title">{project.name}</h1>
-              <p className="text-sm text-tertiary font-mono italic">REF #{project.project_number} • {project.status || 'DESIGN'}</p>
+        <header className="page-header shrink-0 z-30 py-4 mb-2 shrink-0 border-b border-slate-100 bg-white/80 backdrop-blur-md px-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <Link to="/projects" className="btn btn-secondary flex items-center gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Back to Projects
+              </Link>
+              <div>
+                <h1 className="page-title">{project.name}</h1>
+                <p className="text-sm text-tertiary font-mono italic">REF #{project.project_number} • {project.status || 'DESIGN'}</p>
+              </div>
             </div>
-          </div>
 
-          <div className="flex gap-2">
-            {selectedPartIds.size > 0 && isAdmin && (
-              <button
-                onClick={() => {
-                  const parts: any[] = []
-                  project?.sections?.forEach((s: any) => {
-                    s.subsections?.forEach((sub: any) => {
-                      sub.parts?.forEach((p: any) => {
-                        if (selectedPartIds.has(p.id)) parts.push(p)
+            <div className="flex gap-2">
+              {selectedPartIds.size > 0 && isAdmin && (
+                <button
+                  onClick={() => {
+                    const parts: any[] = []
+                    project?.sections?.forEach((s: any) => {
+                      s.subsections?.forEach((sub: any) => {
+                        sub.parts?.forEach((p: any) => {
+                          if (selectedPartIds.has(p.id)) parts.push(p)
+                        })
                       })
                     })
-                  })
-                  addToBasket(parts)
-                  setSelectedPartIds(new Set())
-                }}
-                className="btn bg-navy-900 hover:bg-black text-white shadow-lg shadow-navy-900/20 px-6 animate-in slide-in-from-right duration-300"
-              >
-                <ShoppingCart className="h-4 w-4 mr-2" />
-                ADD TO BASKET ({selectedPartIds.size})
-              </button>
-            )}
-            <button 
-              onClick={() => setBasketOpen(!basketOpen)}
-              className={`btn ${basketItems.length > 0 ? 'bg-primary-500 text-white' : 'btn-secondary'} relative`}
-            >
-              <ShoppingBag className="h-4 w-4 mr-2" />
-              PO BASKET
-              {basketItems.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
-                  {basketItems.length}
-                </span>
+                    addToBasket(parts)
+                    setSelectedPartIds(new Set())
+                  }}
+                  className="btn bg-navy-900 hover:bg-black text-white shadow-lg shadow-navy-900/20 px-6 animate-in slide-in-from-right duration-300"
+                >
+                  <ShoppingCart className="h-4 w-4 mr-2" />
+                  ADD TO BASKET ({selectedPartIds.size})
+                </button>
               )}
-            </button>
-            <button 
-              onClick={handleExport}
-              className="btn btn-secondary border-navy-100 text-navy-900"
-            >
-              <FileDown className="h-4 w-4 mr-2" />
-              EXPORT BOM
-            </button>
-            <button 
-              onClick={() => setSectionModal({ open: true, editing: null })}
-              className="btn btn-primary shadow-lg shadow-primary-600/20"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              ADD SECTION
-            </button>
+              <button 
+                onClick={() => setBasketOpen(!basketOpen)}
+                className={`btn ${basketItems.length > 0 ? 'bg-primary-500 text-white' : 'btn-secondary'} relative`}
+              >
+                <ShoppingBag className="h-4 w-4 mr-2" />
+                PO BASKET
+                {basketItems.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
+                    {basketItems.length}
+                  </span>
+                )}
+              </button>
+              <button 
+                onClick={handleExport}
+                className="btn btn-secondary border-navy-100 text-navy-900"
+              >
+                <FileDown className="h-4 w-4 mr-2" />
+                EXPORT BOM
+              </button>
+              <button 
+                onClick={() => setSectionModal({ open: true, editing: null })}
+                className="btn btn-primary shadow-lg shadow-primary-600/20"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                ADD SECTION
+              </button>
+            </div>
           </div>
         </header>
 
         {/* Tab Bar */}
-        <div className="tab-bar mb-8 px-6">
+        <div className="tab-bar shrink-0 mb-6 px-6">
           <button
             onClick={() => setActiveTab('bom')}
             className={`tab-item ${activeTab === 'bom' ? 'active' : ''}`}
@@ -551,21 +555,32 @@ const ProjectDetails = () => {
             <ShoppingCart className="h-4 w-4 inline mr-1" />
             Purchase Orders
           </button>
+          <button
+            onClick={() => setActiveTab('pending_parts')}
+            className={`tab-item ${activeTab === 'pending_parts' ? 'active' : ''}`}
+          >
+            <Clock className="h-4 w-4 inline mr-1" />
+            Pending Parts
+          </button>
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-8 items-start px-6 pb-20">
+        <div className="flex flex-col lg:flex-row gap-8 items-start px-6 flex-1 min-h-0 pb-6">
           {/* Sidebar */}
-          <ProjectSidebar 
-            project={project} 
-            projectPOs={projectPOs || []}
-            onCreatePO={() => setPoModalOpen(true)}
-          />
+          <div className="w-full lg:w-80 shrink-0 h-full overflow-y-auto hidden-scrollbar pb-6">
+            <ProjectSidebar 
+              project={project} 
+              projectPOs={projectPOs || []}
+              onCreatePO={() => setPoModalOpen(true)}
+            />
+          </div>
 
           {/* Content Area */}
-          <div className="flex-1 w-full min-w-0">
+          <div className="flex-1 w-full min-w-0 flex flex-col h-full bg-slate-50/50 rounded-2xl border border-slate-200/60 shadow-sm p-6 overflow-hidden">
             {activeTab === 'bom' && (
-              <div className="space-y-6">
-                <AdvancedFilterBar onFilterChange={(filters) => console.log('Filters', filters)} />
+              <div className="flex flex-col h-full">
+                <div className="shrink-0 mb-6">
+                  <AdvancedFilterBar onFilterChange={(filters) => console.log('Filters', filters)} />
+                </div>
                 
                 {!project.sections?.length ? (
                   <div className="empty-state">
@@ -584,61 +599,69 @@ const ProjectDetails = () => {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-8">
-                    <BOMTreeView
-                      project={project}
-                      projectId={projectId}
-                      onEditSection={handleEditSection}
-                      onDeleteSection={handleDeleteSection}
-                      onAddSubsection={handleAddSubsection}
-                      onEditSubsection={handleEditSubsection}
-                      onDeleteSubsection={handleDeleteSubsection}
-                      onCopySubsection={handleCopySubsection}
-                      onAddPart={handleAddPart}
-                      onEditPart={handleEditPart}
-                      onDeletePart={handleDeletePart}
-                      onImageClick={handleImageClick}
-                      selectedPartIds={selectedPartIds}
-                      onToggleSelectPart={handleSelectPart}
-                      onToggleSelectAll={handleSelectAll}
-                      onAddSelectedToBasket={() => {
-                        const allParts = (project?.sections || [])
-                          .flatMap((s: any) => s.subsections || [])
-                          .flatMap((sub: any) => sub.parts || [])
-                        const selectedParts = allParts.filter((p: any) => selectedPartIds.has(p.id))
-                        
-                        if (selectedParts.length > 0) {
-                          addToBasket(selectedParts)
-                          setSelectedPartIds(new Set())
-                          showToast('success', `${selectedParts.length} parts added to basket`)
-                        } else {
-                          showToast('error', 'No selected parts found to add')
-                        }
-                      }}
-                    />
+                  <div className="flex-1 min-h-0 relative flex gap-6">
+                    <div id="bom-scroll-container" className="flex-1 overflow-y-auto hidden-scrollbar pr-2 pb-20 scroll-smooth">
+                      <div className="space-y-8">
+                        <BOMTreeView
+                          project={project}
+                          projectId={projectId}
+                          onEditSection={handleEditSection}
+                          onDeleteSection={handleDeleteSection}
+                          onAddSubsection={handleAddSubsection}
+                          onEditSubsection={handleEditSubsection}
+                          onDeleteSubsection={handleDeleteSubsection}
+                          onCopySubsection={handleCopySubsection}
+                          onAddPart={handleAddPart}
+                          onEditPart={handleEditPart}
+                          onDeletePart={handleDeletePart}
+                          onImageClick={handleImageClick}
+                          selectedPartIds={selectedPartIds}
+                          onToggleSelectPart={handleSelectPart}
+                          onToggleSelectAll={handleSelectAll}
+                          onAddSelectedToBasket={() => {
+                            const allParts = (project?.sections || [])
+                              .flatMap((s: any) => s.subsections || [])
+                              .flatMap((sub: any) => sub.parts || [])
+                            const selectedParts = allParts.filter((p: any) => selectedPartIds.has(p.id))
+                            
+                            if (selectedParts.length > 0) {
+                              addToBasket(selectedParts)
+                              setSelectedPartIds(new Set())
+                              showToast('success', `${selectedParts.length} parts added to basket`)
+                            } else {
+                              showToast('error', 'No selected parts found to add')
+                            }
+                          }}
+                        />
 
-                    {/* Orphaned subsections */}
-                    {project.orphaned_subsections && project.orphaned_subsections.length > 0 && (
-                      <div className="card bg-amber-50/50 border-amber-200 p-8">
-                        <div className="flex items-center gap-3 mb-4">
-                          <Package className="h-5 w-5 text-amber-600" />
-                          <h3 className="font-black text-amber-800 uppercase tracking-widest text-xs">
-                            Unassigned Subsections ({project.orphaned_subsections.length})
-                          </h3>
-                        </div>
-                        <p className="text-sm text-amber-700/80 mb-6 font-medium">
-                          These subsections exist but are not assigned to any Section. Please create a Section and edit these subsections to assign them.
-                        </p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {project.orphaned_subsections.map((sub: any) => (
-                            <div key={sub.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-100 shadow-sm">
-                              <span className="text-sm font-bold text-navy-900">{sub.name || sub.section_name}</span>
-                              <span className="badge badge-amber">{sub.parts?.length || 0} parts</span>
+                        {/* Orphaned subsections */}
+                        {project.orphaned_subsections && project.orphaned_subsections.length > 0 && (
+                          <div className="card bg-amber-50/50 border-amber-200 p-8">
+                            <div className="flex items-center gap-3 mb-4">
+                              <Package className="h-5 w-5 text-amber-600" />
+                              <h3 className="font-black text-amber-800 uppercase tracking-widest text-xs">
+                                Unassigned Subsections ({project.orphaned_subsections.length})
+                              </h3>
                             </div>
-                          ))}
-                        </div>
+                            <p className="text-sm text-amber-700/80 mb-6 font-medium">
+                              These subsections exist but are not assigned to any Section. Please create a Section and edit these subsections to assign them.
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {project.orphaned_subsections.map((sub: any) => (
+                                <div key={sub.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-100 shadow-sm">
+                                  <span className="text-sm font-bold text-navy-900">{sub.name || sub.section_name}</span>
+                                  <span className="badge badge-amber">{sub.parts?.length || 0} parts</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
+                    {/* Fast Scroll Slider attached to BOM contents */}
+                    <div className="w-10 shrink-0 h-full py-1">
+                      <FastScrollSlider containerId="bom-scroll-container" />
+                    </div>
                   </div>
                 )}
               </div>
@@ -646,20 +669,31 @@ const ProjectDetails = () => {
 
             {/* ── Documents Tab ───────────────────────────────────── */}
             {activeTab === 'documents' && (
-              <ProjectDocumentsTab projectId={projectId} />
+              <div className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
+                <ProjectDocumentsTab projectId={projectId} />
+              </div>
             )}
 
             {/* ── Job Order Tab ───────────────────────────────────── */}
             {activeTab === 'jo' && (
-              <JobOrderTab 
-                projectId={projectId} 
-                projectNumber={project.project_number} 
-              />
+              <div className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
+                <JobOrderTab 
+                  projectId={projectId} 
+                  projectNumber={project.project_number} 
+                />
+              </div>
+            )}
+
+            {/* ── Pending Parts Tab ───────────────────────────────────── */}
+            {activeTab === 'pending_parts' && (
+              <div className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
+                <PendingPartsTab projectId={projectId} />
+              </div>
             )}
 
             {/* ── POs Tab ───────────────────────────────────── */}
             {activeTab === 'pos' && (
-              <div className="space-y-4">
+              <div className="flex-1 overflow-y-auto hidden-scrollbar pb-20 space-y-4">
                 <h2 className="text-lg font-bold text-gray-900 flex items-center pt-2">
                   <ShoppingCart className="h-5 w-5 mr-2 text-primary-600" />
                   Project Purchase Orders
