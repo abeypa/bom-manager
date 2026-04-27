@@ -41,7 +41,7 @@ export const pendingPartsApi = {
   getPendingParts: async (projectId: number): Promise<PendingPart[]> => {
     const { data, error } = await supabase
       .from('pending_parts')
-      .select('*, author:created_by(email)')
+      .select('*')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false })
 
@@ -111,7 +111,7 @@ export const pendingPartsApi = {
   getComments: async (pendingPartId: number): Promise<PendingPartComment[]> => {
     const { data, error } = await supabase
       .from('pending_part_comments')
-      .select('*, author:user_id(email)')
+      .select('*')
       .eq('pending_part_id', pendingPartId)
       .order('created_at', { ascending: true })
 
@@ -140,7 +140,7 @@ export const pendingPartsApi = {
         user_id: user.id,
         message
       }])
-      .select('*, author:user_id(email)')
+      .select('*')
       .single()
 
     if (error) throw error
