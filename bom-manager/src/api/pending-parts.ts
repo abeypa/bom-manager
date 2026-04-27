@@ -204,50 +204,65 @@ export const pendingPartsApi = {
    * Delete a pending part and its associated storage assets
    */
   deletePendingPart: async (id: number): Promise<void> => {
-    // 1. Fetch part to get image URLs before deletion
+    // 1. Get all images before deleting (for cleanup)
     const { data: part } = await supabase
       .from('pending_parts')
       .select('images')
       .eq('id', id)
       .single();
 
-    // 2. Fetch comments to get image URLs
     const { data: comments } = await supabase
       .from('pending_part_comments')
       .select('images')
       .eq('pending_part_id', id);
 
-    // 3. Collect all unique image paths
-    const allImages: string[] = [];
-    if (Array.isArray(part?.images)) allImages.push(...part.images);
+    // 2. Collect all file paths for deletion from bom_assets bucket
+    const relativePaths: string[] = [];
+    if (part?.images && Array.isArray(part.images)) {
+      part.images.forEach((url: string) => {
+        if (url.includes('bom_assets')) {
+          const path = url.split('bom_assets/')[1];
+          if (path) relativePaths.push(path);
+        }
+      });
+    }
     if (comments) {
-      comments.forEach((c: any) => {
-        if (Array.isArray(c.images)) allImages.push(...c.images);
+      comments.forEach((comment: any) => {
+        if (comment.images && Array.isArray(comment.images)) {
+          comment.images.forEach((url: string) => {
+            if (url.includes('bom_assets')) {
+              const path = url.split('bom_assets/')[1];
+              if (path) relativePaths.push(path);
+            }
+          });
+        }
       });
     }
 
-    // 4. Transform URLs to relative storage paths
-    const extractPathFromUrl = (url: string) => {
-      try {
-        // We handle both 'bom_assets' and 'part-images' (fallback) just in case
-        const parts = url.split('/public/bom_assets/') || url.split('/public/part-images/');
-        return parts.length > 1 ? decodeURIComponent(parts[1]) : null;
-      } catch (e) { return null; }
-    };
+    // 3. DELETE from database (this must succeed)
+    const { error: dbError } = await supabase
+      .from('pending_parts')
+      .delete()
+      .eq('id', id)
+      .throwOnError();   // ← This will surface any RLS or query error
 
-    const relativePaths = [...new Set(allImages.map(extractPathFromUrl).filter(Boolean))] as string[];
-
-    // 5. Delete from DB (Comments will cascade delete)
-    await supabase.from('pending_parts').delete().eq('id', id).throwOnError();
-
-    // 6. Bulk delete from storage
-    if (relativePaths.length > 0) {
-      // Clean up from both possible buckets to be ultra safe
-      await Promise.all([
-        supabase.storage.from('bom_assets').remove(relativePaths),
-        supabase.storage.from('part-images').remove(relativePaths)
-      ]);
+    if (dbError) {
+      console.error('❌ DB Delete failed:', dbError);
+      throw dbError;
     }
+
+    // 4. Cleanup storage (non-blocking — don't fail the whole delete if storage fails)
+    if (relativePaths.length > 0) {
+      const { error: storageError } = await supabase.storage
+        .from('bom_assets')
+        .remove(relativePaths);
+
+      if (storageError) {
+        console.warn('⚠️ Storage cleanup failed (non-blocking):', storageError);
+      }
+    }
+
+    console.log(`✅ Pending part ${id} and all related data deleted successfully`);
   }
 }
 
