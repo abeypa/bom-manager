@@ -198,6 +198,57 @@ export const pendingPartsApi = {
       author_email: profile?.email,
       author_avatar: profile?.avatar_url,
     } as PendingPartComment
+  },
+
+  /**
+   * Delete a pending part and its associated storage assets
+   */
+  deletePendingPart: async (id: number): Promise<void> => {
+    // 1. Fetch part to get image URLs before deletion
+    const { data: part } = await supabase
+      .from('pending_parts')
+      .select('images')
+      .eq('id', id)
+      .single();
+
+    // 2. Fetch comments to get image URLs
+    const { data: comments } = await supabase
+      .from('pending_part_comments')
+      .select('images')
+      .eq('pending_part_id', id);
+
+    // 3. Collect all unique image paths
+    const allImages: string[] = [];
+    if (Array.isArray(part?.images)) allImages.push(...part.images);
+    if (comments) {
+      comments.forEach((c: any) => {
+        if (Array.isArray(c.images)) allImages.push(...c.images);
+      });
+    }
+
+    // 4. Transform URLs to relative storage paths
+    const extractPathFromUrl = (url: string) => {
+      try {
+        // We handle both 'bom_assets' and 'part-images' (fallback) just in case
+        const parts = url.split('/public/bom_assets/') || url.split('/public/part-images/');
+        return parts.length > 1 ? decodeURIComponent(parts[1]) : null;
+      } catch (e) { return null; }
+    };
+
+    const relativePaths = [...new Set(allImages.map(extractPathFromUrl).filter(Boolean))] as string[];
+
+    // 5. Delete from DB (Comments will cascade delete)
+    const { error: dbError } = await supabase.from('pending_parts').delete().eq('id', id);
+    if (dbError) throw dbError;
+
+    // 6. Bulk delete from storage
+    if (relativePaths.length > 0) {
+      // Clean up from both possible buckets to be ultra safe
+      await Promise.all([
+        supabase.storage.from('bom_assets').remove(relativePaths),
+        supabase.storage.from('part-images').remove(relativePaths)
+      ]);
+    }
   }
 }
 

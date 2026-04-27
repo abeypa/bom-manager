@@ -3,7 +3,7 @@ import { PendingPart, pendingPartsApi } from '@/api/pending-parts';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRole } from '@/hooks/useRole';
 import { useToast } from '@/context/ToastContext';
-import { Clock, CheckCircle2, XCircle, Link2, MessageSquare, ShieldCheck, UserCircle2 } from 'lucide-react';
+import { Clock, CheckCircle2, XCircle, Link2, MessageSquare, ShieldCheck, UserCircle2, Trash2 } from 'lucide-react';
 import DiscussionThread from './DiscussionThread.tsx';
 
 export default function PendingPartCard({ part }: { part: PendingPart }) {
@@ -24,6 +24,21 @@ export default function PendingPartCard({ part }: { part: PendingPart }) {
     },
     onError: (err: any) => showToast('error', err.message)
   });
+
+  const deleteMut = useMutation({
+    mutationFn: () => pendingPartsApi.deletePendingPart(part.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-parts', part.project_id] });
+      showToast('success', 'Pending request deleted permanently');
+    },
+    onError: (err: any) => showToast('error', 'Delete failed: ' + err.message)
+  });
+
+  const handleDelete = () => {
+    if (window.confirm("Delete this pending part and all associated comments/images? This action cannot be undone.")) {
+      deleteMut.mutate();
+    }
+  };
 
   const getStatusBadge = () => {
     switch (part.status) {
@@ -65,20 +80,34 @@ export default function PendingPartCard({ part }: { part: PendingPart }) {
               </div>
             </div>
           </div>
-          {isAdmin && part.status === 'Pending' && !isRejecting && (
+          {isAdmin && !isRejecting && (
             <div className="flex flex-col items-end gap-2 shrink-0">
+              {part.status === 'Pending' && (
+                <>
+                  <button 
+                    onClick={() => updateStatus.mutate({ status: 'Approved' })}
+                    disabled={updateStatus.isPending}
+                    className="btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 shadow-lg px-4 w-full"
+                  >
+                    <ShieldCheck className="w-4 h-4 mr-2" />
+                    {updateStatus.isPending ? '...' : 'Approve'}
+                  </button>
+                  <button 
+                    onClick={() => setIsRejecting(true)}
+                    className="btn btn-secondary border-red-100 text-red-600 hover:bg-red-50 hover:border-red-200 px-4 w-full"
+                  >
+                    Reject
+                  </button>
+                </>
+              )}
               <button 
-                onClick={() => updateStatus.mutate({ status: 'Approved' })}
-                className="btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 shadow-lg px-4 w-full"
+                onClick={handleDelete}
+                disabled={deleteMut.isPending}
+                className="btn btn-ghost text-slate-400 hover:text-red-500 hover:bg-red-50 w-full px-4 border-dashed border-slate-200 mt-2"
+                title="Delete Request"
               >
-                <ShieldCheck className="w-4 h-4 mr-2" />
-                Approve
-              </button>
-              <button 
-                onClick={() => setIsRejecting(true)}
-                className="btn btn-secondary border-red-100 text-red-600 hover:bg-red-50 hover:border-red-200 px-4 w-full"
-              >
-                Reject
+                <Trash2 className="w-4 h-4 mr-2" />
+                {deleteMut.isPending ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           )}

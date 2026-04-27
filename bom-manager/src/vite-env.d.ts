@@ -8,3 +8,7 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+declare const __GIT_HASH__: string;
+declare const __BUILD_TIME__: string;
+declare const __CACHE_BUST__: string;

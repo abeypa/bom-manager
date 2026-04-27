@@ -394,6 +394,9 @@ export default function ChangeLog() {
           <p className="label-caps mb-1.5 flex items-center gap-2">
             <Activity className="h-3.5 w-3.5 text-navy-500" />
             Audit Trail
+            <span className="ml-2 px-1.5 py-0.5 bg-slate-100 text-slate-400 border border-slate-200 rounded text-[8px] font-mono tracking-normal lowercase">
+              v.{__GIT_HASH__}
+            </span>
           </p>
           <h1 className="page-title">Change Log</h1>
         </div>

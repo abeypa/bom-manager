@@ -50,13 +50,13 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId }: { i
     try {
       const fileExt = file.name.split('.').pop()
       const fileName = `pending-${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
-      const { error } = await supabase.storage.from('part-images').upload(`pending/${fileName}`, file, {
+      const { error } = await supabase.storage.from('bom_assets').upload(`pending/${fileName}`, file, {
         cacheControl: '3600',
         upsert: false
       });
       if (error) throw error;
       
-      const { data: urlData } = supabase.storage.from('part-images').getPublicUrl(`pending/${fileName}`);
+      const { data: urlData } = supabase.storage.from('bom_assets').getPublicUrl(`pending/${fileName}`);
       setFormData(prev => ({ ...prev, images: [...prev.images, urlData.publicUrl] }));
     } catch (err: any) {
       showToast('error', 'Upload failed: ' + err.message);

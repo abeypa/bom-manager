@@ -55,14 +55,14 @@ export default function DiscussionThread({ pendingPartId }: { pendingPartId: num
             try {
               const fileExt = file.name.split('.').pop() || 'png';
               const fileName = `comment-${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-              const { error } = await supabase.storage.from('part-images').upload(`comments/${fileName}`, file, {
+              const { error } = await supabase.storage.from('bom_assets').upload(`comments/${fileName}`, file, {
                 cacheControl: '3600',
                 upsert: false
               });
               
               if (error) throw error;
               
-              const { data: urlData } = supabase.storage.from('part-images').getPublicUrl(`comments/${fileName}`);
+              const { data: urlData } = supabase.storage.from('bom_assets').getPublicUrl(`comments/${fileName}`);
               setAttachedImages(prev => [...prev, urlData.publicUrl]);
             } catch (err: any) {
               showToast('error', 'Image upload failed: ' + err.message);

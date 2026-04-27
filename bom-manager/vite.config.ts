@@ -1,6 +1,16 @@
+import { execSync } from 'child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+
+// Get git hash for version display
+const getGitHash = () => {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim()
+  } catch (e) {
+    return 'unknown'
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -34,6 +44,7 @@ export default defineConfig({
     // Forces a unique build hash every time — prevents Cloudflare build cache reuse
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __CACHE_BUST__: JSON.stringify('v3.2_2026-04-23_0649'),
+    __GIT_HASH__: JSON.stringify(getGitHash()),
   },
 })
 // cache-bust: 2026-04-23_0650
