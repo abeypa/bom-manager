@@ -27,11 +27,37 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
 
   const deleteMut = useMutation({
     mutationFn: () => pendingPartsApi.deletePendingPart(part.id),
+    onMutate: async () => {
+      // Cancel any outgoing refetches so they don't overwrite our optimistic update
+      await queryClient.cancelQueries({ queryKey: ['pending-parts', projectId] });
+
+      // Snapshot the previous value
+      const previousParts = queryClient.getQueryData<PendingPart[]>(['pending-parts', projectId]);
+
+      // Optimistically update to the new value (remove the part)
+      if (previousParts) {
+        queryClient.setQueryData<PendingPart[]>(['pending-parts', projectId], 
+          previousParts.filter(p => p.id !== part.id)
+        );
+      }
+
+      // Return a context object with the snapshotted value
+      return { previousParts };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pending-parts', projectId] });
       showToast('success', 'Pending request deleted permanently');
     },
-    onError: (err: any) => showToast('error', 'Delete failed: ' + err.message)
+    onError: (err: any, _variables, context) => {
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousParts) {
+        queryClient.setQueryData(['pending-parts', projectId], context.previousParts);
+      }
+      showToast('error', 'Delete failed: ' + err.message);
+    },
+    onSettled: () => {
+      // Always refetch after error or success to ensure we're in sync with the server
+      queryClient.invalidateQueries({ queryKey: ['pending-parts', projectId] });
+    }
   });
 
   const handleDelete = () => {
