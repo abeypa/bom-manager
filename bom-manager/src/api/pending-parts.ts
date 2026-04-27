@@ -238,8 +238,7 @@ export const pendingPartsApi = {
     const relativePaths = [...new Set(allImages.map(extractPathFromUrl).filter(Boolean))] as string[];
 
     // 5. Delete from DB (Comments will cascade delete)
-    const { error: dbError } = await supabase.from('pending_parts').delete().eq('id', id);
-    if (dbError) throw dbError;
+    await supabase.from('pending_parts').delete().eq('id', id).throwOnError();
 
     // 6. Bulk delete from storage
     if (relativePaths.length > 0) {
