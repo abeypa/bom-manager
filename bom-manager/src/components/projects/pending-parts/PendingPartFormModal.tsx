@@ -26,6 +26,7 @@ const BLANK: PendingPartInsert = {
   description: '',
   category: 'mechanical_bought_out',
   status: 'Pending',
+  priority: 'Medium',
   images: [],
   links: [],
   created_by: null,
@@ -50,6 +51,7 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
         description: editPart.description || '',
         category: editPart.category || 'mechanical_bought_out',
         status: editPart.status,
+        priority: editPart.priority || 'Medium',
         images: editPart.images || [],
         links: editPart.links || [],
         created_by: editPart.created_by,
@@ -121,6 +123,7 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
         name: formData.name,
         description: formData.description,
         category: formData.category,
+        priority: formData.priority,
         images: formData.images,
         links: formData.links,
         assigned_to: formData.assigned_to,
@@ -180,6 +183,30 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
                   {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▼</div>
+              </div>
+            </div>
+
+            {/* Priority */}
+            <div className="col-span-2">
+              <label className="block text-[10px] uppercase font-black text-slate-400 tracking-wider mb-2">Priority Level</label>
+              <div className="grid grid-cols-4 gap-2">
+                {(['Urgent', 'High', 'Medium', 'Low'] as const).map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, priority: p })}
+                    className={`py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+                      formData.priority === p
+                        ? p === 'Urgent' ? 'bg-red-50 border-red-200 text-red-600 shadow-sm'
+                        : p === 'High' ? 'bg-orange-50 border-orange-200 text-orange-600 shadow-sm'
+                        : p === 'Medium' ? 'bg-amber-50 border-amber-200 text-amber-600 shadow-sm'
+                        : 'bg-slate-100 border-slate-300 text-slate-700 shadow-sm'
+                        : 'bg-white border-slate-100 text-slate-400 hover:bg-slate-50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
               </div>
             </div>
 

@@ -148,7 +148,7 @@ export const storage = {
     if (!data) return false;
     
     const fileName = path.split('/').pop();
-    return data.some(file => file.name === fileName);
+    return data.some((file: any) => file.name === fileName);
   },
 };
 

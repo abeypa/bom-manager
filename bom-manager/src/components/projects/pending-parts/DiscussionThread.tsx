@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { pendingPartsApi, PendingPartComment, Profile } from '@/api/pending-parts';
-import { Send, X, Loader2, CornerDownRight, Reply, AtSign } from 'lucide-react';
+import { Send, X, Loader2, CornerDownRight, Reply, AtSign, ShieldCheck } from 'lucide-react';
+import { useRole } from '@/hooks/useRole';
 import { useToast } from '@/context/ToastContext';
 import { supabase } from '@/lib/supabase';
 
@@ -212,11 +213,22 @@ function CommentNode({ comment, depth, onReply, profiles }: CommentNodeProps) {
 
 // ─── Main DiscussionThread ─────────────────────────────────────────────────────
 
-export default function DiscussionThread({ pendingPartId }: { pendingPartId: number }) {
+export default function DiscussionThread({
+  pendingPartId,
+  projectId,
+  partStatus
+}: {
+  pendingPartId: number;
+  projectId: number;
+  partStatus: 'Pending' | 'Approved' | 'Rejected';
+}) {
+  const { isAdmin } = useRole();
   const [comment, setComment] = useState('');
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [replyTo, setReplyTo] = useState<PendingPartComment | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [isRejecting, setIsRejecting] = useState(false);
 
   // @mention state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null = closed
@@ -245,6 +257,17 @@ export default function DiscussionThread({ pendingPartId }: { pendingPartId: num
       setReplyTo(null);
       setMentionQuery(null);
       queryClient.invalidateQueries({ queryKey: ['pending-part-comments', pendingPartId] });
+    },
+    onError: (err: any) => showToast('error', err.message),
+  });
+
+  const updateStatus = useMutation({
+    mutationFn: ({ status, reason }: { status: 'Approved' | 'Rejected'; reason?: string }) =>
+      pendingPartsApi.updatePendingPartStatus(pendingPartId, status, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-parts', projectId] });
+      showToast('success', 'Status updated');
+      setIsRejecting(false);
     },
     onError: (err: any) => showToast('error', err.message),
   });
@@ -353,6 +376,51 @@ export default function DiscussionThread({ pendingPartId }: { pendingPartId: num
             {totalComments} {totalComments === 1 ? 'comment' : 'comments'}
           </span>
           <div className="flex-1 h-px bg-slate-200" />
+        </div>
+      )}
+
+      {/* Admin actions (Approve / Reject) */}
+      {isAdmin && partStatus === 'Pending' && (
+        <div className="px-5 pt-4 pb-2 border-b border-slate-100">
+          {isRejecting ? (
+            <div className="bg-red-50 border border-red-100 rounded-2xl p-4 animate-in fade-in slide-in-from-top-2 duration-200">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-2">Rejection Reason</h4>
+              <textarea
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                className="w-full bg-white border border-red-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-red-400/20 mb-3 resize-none font-medium"
+                placeholder="Why is this part being rejected?"
+                rows={2}
+              />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setIsRejecting(false)} className="btn btn-secondary px-4 py-1.5 text-[10px] uppercase font-black tracking-widest">Cancel</button>
+                <button
+                  onClick={() => updateStatus.mutate({ status: 'Rejected', reason: rejectReason })}
+                  disabled={updateStatus.isPending}
+                  className="btn bg-red-600 text-white hover:bg-red-700 px-4 py-1.5 text-[10px] uppercase font-black tracking-widest"
+                >
+                  {updateStatus.isPending ? 'Processing...' : 'Confirm Rejection'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={() => updateStatus.mutate({ status: 'Approved' })}
+                disabled={updateStatus.isPending}
+                className="btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 shadow-md px-4 flex-1 text-[10px] uppercase font-black tracking-widest py-2.5"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
+                {updateStatus.isPending ? 'Approving…' : 'Approve Part'}
+              </button>
+              <button
+                onClick={() => setIsRejecting(true)}
+                className="btn btn-secondary border-red-100 text-red-600 hover:bg-red-50 hover:border-red-200 px-4 flex-1 text-[10px] uppercase font-black tracking-widest py-2.5"
+              >
+                Reject
+              </button>
+            </div>
+          )}
         </div>
       )}
 

@@ -5,6 +5,8 @@ export type PendingPartLink = {
   url: string
 }
 
+export type PendingPartPriority = 'Urgent' | 'High' | 'Medium' | 'Low'
+
 export type PendingPart = {
   id: number
   project_id: number
@@ -12,6 +14,7 @@ export type PendingPart = {
   description: string | null
   category: string | null
   status: 'Pending' | 'Approved' | 'Rejected'
+  priority: PendingPartPriority
   created_by: string | null
   assigned_to: string | null
   images: string[]
@@ -48,7 +51,7 @@ export type PendingPartInsert = Omit<
 >
 
 export type PendingPartUpdate = Partial<
-  Pick<PendingPart, 'name' | 'description' | 'category' | 'images' | 'links' | 'assigned_to'>
+  Pick<PendingPart, 'name' | 'description' | 'category' | 'images' | 'links' | 'assigned_to' | 'priority'>
 >
 
 export type PendingPartComment = {

@@ -123,7 +123,7 @@ const Parts = () => {
 
   return (
     <div className="page-container page-enter relative h-screen flex flex-col overflow-hidden bg-slate-50/30">
-      <div className="shrink-0 pt-8 px-4 sm:px-8 z-20">
+      <div className="shrink-0 pt-4 px-4 sm:px-8 z-20">
         {/* Header */}
       <header className="page-header">
         <div className="flex items-center gap-4">
@@ -169,7 +169,7 @@ const Parts = () => {
       </header>
 
       {/* Category Tabs */}
-      <div className="tab-bar mb-4 flex-wrap">
+      <div className="tab-bar mb-2 flex-wrap">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -181,12 +181,12 @@ const Parts = () => {
         ))}
       </div>
 
-      <div className="mb-4">
+      <div className="mb-2">
         <AdvancedFilterBar onFilterChange={(filters) => console.log('Parts Filter', filters)} />
       </div>
 
       {/* Toolbar */}
-      <div className="section-card p-4 flex flex-col lg:flex-row items-center gap-4 mb-4">
+      <div className="section-card p-3 flex flex-col lg:flex-row items-center gap-4 mb-2">
         <div className="flex-1 w-full lg:w-64">
           <select
             className="input font-black uppercase tracking-widest text-[10px]"
