@@ -6,9 +6,13 @@
  * localStorage and sent only to https://openrouter.ai/api/v1.
  */
 
+export type ORContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } }
+
 export interface ORMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | null
+  content: string | ORContentPart[] | null
   name?: string
   tool_calls?: ORToolCall[]
   tool_call_id?: string
@@ -50,13 +54,20 @@ export interface AISettings {
 export const DEFAULT_MODEL = 'anthropic/claude-3.5-sonnet'
 
 export const RECOMMENDED_MODELS = [
-  { id: 'anthropic/claude-3.5-sonnet',         label: 'Claude 3.5 Sonnet (recommended)' },
-  { id: 'anthropic/claude-3.5-haiku',          label: 'Claude 3.5 Haiku (fast/cheap)' },
-  { id: 'openai/gpt-4o',                       label: 'GPT-4o' },
-  { id: 'openai/gpt-4o-mini',                  label: 'GPT-4o mini' },
-  { id: 'google/gemini-2.5-flash',             label: 'Gemini 2.5 Flash' },
-  { id: 'meta-llama/llama-3.3-70b-instruct',   label: 'Llama 3.3 70B' },
+  { id: 'anthropic/claude-3.5-sonnet',         label: 'Claude 3.5 Sonnet (recommended) · vision', vision: true },
+  { id: 'anthropic/claude-3.5-haiku',          label: 'Claude 3.5 Haiku (fast/cheap) · vision',   vision: true },
+  { id: 'openai/gpt-4o',                       label: 'GPT-4o · vision',                          vision: true },
+  { id: 'openai/gpt-4o-mini',                  label: 'GPT-4o mini · vision',                     vision: true },
+  { id: 'google/gemini-2.5-flash',             label: 'Gemini 2.5 Flash · vision',                vision: true },
+  { id: 'meta-llama/llama-3.3-70b-instruct',   label: 'Llama 3.3 70B (text only)',                vision: false },
 ]
+
+export function modelSupportsVision(modelId: string): boolean {
+  const m = RECOMMENDED_MODELS.find(x => x.id === modelId)
+  if (m) return m.vision
+  // unknown model → assume vision (most recent OpenRouter models do)
+  return true
+}
 
 export function loadSettings(): AISettings {
   try {

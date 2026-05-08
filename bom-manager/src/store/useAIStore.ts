@@ -1,5 +1,7 @@
 import { create } from 'zustand'
-import type { ORMessage, ORToolCall } from '@/lib/openrouter'
+import type { ORMessage, ORToolCall, ORContentPart } from '@/lib/openrouter'
+import type { Attachment } from '@/lib/ai-attachments'
+import { modelSupportsVision, loadSettings } from '@/lib/openrouter'
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system'
 
@@ -7,6 +9,8 @@ export interface ChatMessage {
   id: string
   role: ChatRole
   content: string
+  /** Files attached to this user message (images + PDFs) */
+  attachments?: Attachment[]
   /** For assistant messages: any tool calls it requested */
   tool_calls?: ORToolCall[]
   /** For tool messages: which tool_call_id this responds to */
@@ -64,9 +68,40 @@ export const useAIStore = create<AIStore>((set, get) => ({
 
   asWireMessages: () => {
     const out: ORMessage[] = []
+    const visionOk = modelSupportsVision(loadSettings().model)
     for (const m of get().messages) {
-      if (m.role === 'system' || m.role === 'user') {
-        out.push({ role: m.role, content: m.content })
+      if (m.role === 'system') {
+        out.push({ role: 'system', content: m.content })
+      } else if (m.role === 'user') {
+        const hasAttachments = (m.attachments?.length || 0) > 0
+        if (!hasAttachments) {
+          out.push({ role: 'user', content: m.content })
+        } else {
+          const parts: ORContentPart[] = []
+          // Inline PDF text first so the model can reference it
+          for (const a of m.attachments || []) {
+            if (a.kind === 'pdf') {
+              parts.push({
+                type: 'text',
+                text: `[Attached PDF "${a.name}", ${a.pageCount} pages${a.truncated ? ' — truncated' : ''}]\n${a.text}`,
+              })
+            }
+          }
+          parts.push({ type: 'text', text: m.content || '(no message)' })
+          for (const a of m.attachments || []) {
+            if (a.kind === 'image') {
+              if (visionOk) {
+                parts.push({ type: 'image_url', image_url: { url: a.dataUrl } })
+              } else {
+                parts.push({
+                  type: 'text',
+                  text: `[Image "${a.name}" attached, but the selected model does not support vision. Switch to a vision-capable model in AI settings.]`,
+                })
+              }
+            }
+          }
+          out.push({ role: 'user', content: parts })
+        }
       } else if (m.role === 'assistant') {
         out.push({
           role: 'assistant',
