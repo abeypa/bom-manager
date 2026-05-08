@@ -131,6 +131,38 @@ export default function AIChat() {
 
           {visibleMessages.map(m => <MessageBubble key={m.id} m={m} />)}
 
+          {openPending.length > 1 && (
+            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border border-amber-200 rounded-xl p-2 flex items-center gap-2 shadow-sm">
+              <span className="text-[11px] font-bold text-amber-700 flex-1">
+                {openPending.length} actions waiting
+              </span>
+              <button
+                onClick={async () => {
+                  if (!confirm(`Approve and run all ${openPending.length} pending actions?`)) return
+                  for (const p of openPending) {
+                    if (useAIStore.getState().pending.find(x => x.id === p.id && x.status === 'pending')) {
+                      await approvePending(p)
+                    }
+                  }
+                }}
+                disabled={busy}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold rounded-lg disabled:opacity-50"
+              >
+                Approve all
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirm(`Reject all ${openPending.length} pending actions?`)) return
+                  for (const p of openPending) await rejectPending(p)
+                }}
+                disabled={busy}
+                className="px-3 py-1.5 bg-white border border-slate-300 hover:border-red-400 hover:text-red-600 text-slate-700 text-[11px] font-semibold rounded-lg disabled:opacity-50"
+              >
+                Reject all
+              </button>
+            </div>
+          )}
+
           {openPending.map(p => (
             <div key={p.id} className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3 space-y-2 shadow-sm">
               <div className="flex items-start gap-2">
