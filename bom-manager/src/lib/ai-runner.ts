@@ -77,6 +77,14 @@ B. RESOLVE THE SUPPLIER
    2. If no match → propose create_supplier (include GSTIN in notes).
 
 C. FOR EACH LINE ITEM (process them ONE AT A TIME)
+   ABSOLUTE RULE: never create the same master part twice. Before
+   proposing create_master_part you MUST run find_master_part_by_erp_id
+   (it scans every part_type) AND verify by manufacturer_part_number
+   if you have one. The create_master_part tool also rejects duplicates
+   on (part_number / beperp_part_no / manufacturer_part_number) across
+   every category in code — but you should catch them in the lookup
+   step so the user only sees relevant proposals.
+
    1. find_master_part_by_erp_id with the Item Code.
       - If found → just propose update_master_part_price with the new
         price / discount / last_price_date. Skip to step D.

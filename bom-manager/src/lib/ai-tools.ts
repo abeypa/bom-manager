@@ -364,16 +364,35 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       if (!a.beperp_part_no) throw new Error('beperp_part_no (ERP Item Code) is required')
       const part_number = `${prefix}-${a.beperp_part_no}`
 
-      // Hard duplicate check before insert
-      const { data: dup } = await (supabase as any)
-        .from(a.part_type)
-        .select('id, part_number')
-        .or(`part_number.eq.${part_number},beperp_part_no.eq.${a.beperp_part_no}`)
-        .limit(1)
-      if (dup && dup.length) {
-        throw new Error(
-          `A master part with part_number "${part_number}" or ERP id "${a.beperp_part_no}" already exists (id ${dup[0].id}). Use update_master_part_price to change its data.`,
-        )
+      // Hard duplicate check across EVERY part_type table.
+      // The same physical component must never exist twice in part master,
+      // regardless of which category an earlier record was filed under.
+      const mfgPart = a.manufacturer_part_number || null
+      for (const pt of part_type_enum) {
+        const orClauses = [
+          `part_number.eq.${part_number}`,
+          `beperp_part_no.eq.${a.beperp_part_no}`,
+        ]
+        if (mfgPart) orClauses.push(`manufacturer_part_number.eq.${mfgPart}`)
+        const { data: dup } = await (supabase as any)
+          .from(pt)
+          .select('id, part_number, beperp_part_no, manufacturer_part_number, description')
+          .or(orClauses.join(','))
+          .limit(1)
+        if (dup && dup.length) {
+          const d = dup[0]
+          const reasons: string[] = []
+          if (d.part_number === part_number) reasons.push(`part_number "${part_number}"`)
+          if (String(d.beperp_part_no) === String(a.beperp_part_no)) reasons.push(`ERP id "${a.beperp_part_no}"`)
+          if (mfgPart && d.manufacturer_part_number === mfgPart) reasons.push(`manufacturer_part_number "${mfgPart}"`)
+          throw new Error(
+            `Refusing to create duplicate master part. ` +
+            `An existing record matches by ${reasons.join(' / ')} ` +
+            `in table "${pt}" (id ${d.id}, part_number ${d.part_number}). ` +
+            `If the price changed, use update_master_part_price on that record. ` +
+            `If the existing record is filed under the wrong category, ask the user before doing anything else.`,
+          )
+        }
       }
 
       const insertRow: any = {
