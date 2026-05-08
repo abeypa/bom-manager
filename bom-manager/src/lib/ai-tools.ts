@@ -826,34 +826,197 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
   },
   {
-    name: 'release_purchase_order',
+    name: 'create_draft_po',
     kind: 'write',
-    description: 'Release a Draft PO. Will fail if the PO has no BEP PO PDF attached.',
+    description:
+      'Create a DRAFT purchase order from an attached PO PDF/image, AFTER the matching project_parts have been saved. ' +
+      'Status is locked to "Draft" — the AI can never release, send, confirm, partial-receive or cancel a PO; the user does that from the PO screen. ' +
+      'GST / CGST / SGST is NEVER included as a line item or added to grand_total. ' +
+      'Each item must reference an existing project_part_id; the tool runs three interlocks per line: ' +
+      '(a) project_part.unit_price equals the unit_price you pass; ' +
+      '(b) the unit_price you pass equals expected_price_from_source (the price you read off the PDF); ' +
+      '(c) the master part for that project_part has supplier_id equal to the PO supplier_id. ' +
+      'Mismatches throw — fix the BOM mapping or re-read the PDF instead of forcing the PO through.',
     parameters: {
       type: 'object',
-      required: ['po_id'],
-      properties: { po_id: { type: 'number' } },
-    },
-    summarize: (a) => `Release purchase order #${a.po_id} (Draft → Released)`,
-    handler: async (a: any) => purchaseOrdersApi.releasePO(a.po_id),
-  },
-  {
-    name: 'update_po_status',
-    kind: 'write',
-    description: 'Move a PO to the next state (Sent, Confirmed, Partial, Received, Cancelled).',
-    parameters: {
-      type: 'object',
-      required: ['po_id', 'new_status'],
+      required: ['project_id', 'supplier_id', 'po_date', 'expected_supplier_name', 'items'],
       properties: {
-        po_id: { type: 'number' },
-        new_status: {
-          type: 'string',
-          enum: ['Released', 'Sent', 'Confirmed', 'Partial', 'Received', 'Cancelled'],
+        project_id: { type: 'number' },
+        supplier_id: { type: 'number' },
+        expected_supplier_name: { type: 'string', description: 'Supplier name as printed on the source PDF — cross-checked against the DB row.' },
+        po_number: { type: 'string', description: 'Optional. If omitted, auto-generated as CPO-<8digits>. You may pass the document number from the PDF (e.g. PO/P/25-26/100255).' },
+        po_date: { type: 'string', description: 'ISO date as printed on the source PDF.' },
+        expected_delivery_date: { type: 'string' },
+        currency: { type: 'string', default: 'INR' },
+        notes: { type: 'string' },
+        items: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            required: ['project_part_id', 'quantity', 'unit_price', 'expected_price_from_source'],
+            properties: {
+              project_part_id: { type: 'number' },
+              quantity: { type: 'number', minimum: 1 },
+              unit_price: { type: 'number', minimum: 0 },
+              discount_percent: { type: 'number', minimum: 0, maximum: 100, default: 0 },
+              expected_price_from_source: { type: 'number', description: 'Unit price as printed on the PDF for this line (sanity check, must equal unit_price).' },
+            },
+          },
         },
       },
     },
-    summarize: (a) => `Set PO #${a.po_id} status → ${a.new_status}`,
-    handler: async (a: any) => purchaseOrdersApi.updateStatus(a.po_id, a.new_status),
+    summarize: (a) => {
+      const total = (a.items || []).reduce((s: number, it: any) =>
+        s + (it.quantity || 0) * (it.unit_price || 0) * (1 - (it.discount_percent || 0) / 100), 0)
+      return `Draft PO for project #${a.project_id} → supplier ${a.expected_supplier_name} (#${a.supplier_id}), ` +
+        `${a.items?.length || 0} line(s), grand total ${a.currency || 'INR'} ${total.toFixed(2)} (excl. GST)`
+    },
+    handler: async (a: any) => {
+      // Field-level interlocks
+      assertInteger('project_id', a.project_id)
+      assertInteger('supplier_id', a.supplier_id)
+      assertNonEmpty('po_date', a.po_date)
+      assertNonEmpty('expected_supplier_name', a.expected_supplier_name)
+      if (!Array.isArray(a.items) || a.items.length === 0)
+        throw new Error('items must be a non-empty array.')
+
+      // Verify project + supplier
+      const { data: project } = await (supabase as any)
+        .from('projects').select('id, project_name, project_number').eq('id', a.project_id).maybeSingle()
+      if (!project) throw new Error(`project #${a.project_id} does not exist.`)
+
+      const { data: supplier } = await (supabase as any)
+        .from('suppliers').select('id, name').eq('id', a.supplier_id).maybeSingle()
+      if (!supplier) throw new Error(`supplier #${a.supplier_id} does not exist.`)
+
+      // Cross-check supplier name vs the PDF
+      const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').replace(/[.,]/g, '').trim()
+      if (!norm(supplier.name).includes(norm(a.expected_supplier_name)) &&
+          !norm(a.expected_supplier_name).includes(norm(supplier.name))) {
+        throw new Error(
+          `Supplier mismatch: PO supplier_id #${a.supplier_id} is "${supplier.name}", ` +
+          `but expected_supplier_name from PDF is "${a.expected_supplier_name}". ` +
+          `Pick the correct supplier_id (use find_supplier_by_name) or stop and ask the user.`,
+        )
+      }
+
+      // Reject duplicate project_part_ids inside the draft itself
+      const seen = new Set<number>()
+      for (const it of a.items) {
+        if (seen.has(it.project_part_id))
+          throw new Error(`project_part_id #${it.project_part_id} appears more than once in items[]; PO lines must be unique.`)
+        seen.add(it.project_part_id)
+      }
+
+      // Per-line interlocks: project_part exists in this project, prices match, supplier matches
+      const ppIds = a.items.map((it: any) => it.project_part_id)
+      const { data: pps } = await (supabase as any)
+        .from('project_parts')
+        .select('id, project_section_id, part_type, part_id, quantity, unit_price, discount_percent, currency')
+        .in('id', ppIds)
+      const ppById = new Map<number, any>((pps || []).map((p: any) => [p.id, p]))
+
+      const subIds = Array.from(new Set((pps || []).map((p: any) => p.project_section_id).filter(Boolean)))
+      const { data: subs } = await (supabase as any)
+        .from('project_subsections').select('id, project_id').in('id', subIds.length ? subIds : [-1])
+      const subProjectById = new Map<number, number>((subs || []).map((s: any) => [s.id, s.project_id]))
+
+      const poItems: any[] = []
+      let grand = 0
+      for (const it of a.items) {
+        const pp = ppById.get(it.project_part_id)
+        if (!pp) throw new Error(`project_part #${it.project_part_id} does not exist.`)
+
+        // (1) project membership
+        const ppProjectId = subProjectById.get(pp.project_section_id)
+        if (ppProjectId !== a.project_id) {
+          throw new Error(
+            `project_part #${it.project_part_id} belongs to project #${ppProjectId ?? '?'}, not #${a.project_id}. ` +
+            `A draft PO can only contain lines from the project it is being raised against.`,
+          )
+        }
+
+        // (2) numeric range
+        assertNumberInRange('items[].quantity', it.quantity, 1, MAX_QTY)
+        assertNumberInRange('items[].unit_price', it.unit_price, 0, MAX_PRICE)
+        assertNumberInRange('items[].expected_price_from_source', it.expected_price_from_source, 0, MAX_PRICE)
+        if (it.discount_percent != null) assertNumberInRange('items[].discount_percent', it.discount_percent, 0, 100)
+
+        // (3) price agreement: PDF == arg unit_price == saved project_part price
+        const eps = 0.01
+        if (Math.abs(it.unit_price - it.expected_price_from_source) > eps) {
+          throw new Error(
+            `Price mismatch on project_part #${it.project_part_id}: ` +
+            `unit_price ${it.unit_price} != expected_price_from_source ${it.expected_price_from_source} (from PDF). ` +
+            `Re-read the PDF; do NOT silently overwrite either value.`,
+          )
+        }
+        if (Math.abs(Number(pp.unit_price || 0) - it.unit_price) > eps) {
+          throw new Error(
+            `Price drift on project_part #${it.project_part_id}: ` +
+            `BOM line stores ${pp.unit_price}, draft says ${it.unit_price}. ` +
+            `Update the BOM with update_part_quantity first, or fix the PDF reading. The draft PO will not be created with mismatched prices.`,
+          )
+        }
+        // discount agreement (allow 0 vs null equivalence)
+        const ppDisc = Number(pp.discount_percent || 0)
+        const itDisc = Number(it.discount_percent || 0)
+        if (Math.abs(ppDisc - itDisc) > eps) {
+          throw new Error(
+            `Discount drift on project_part #${it.project_part_id}: ` +
+            `BOM line stores ${ppDisc}%, draft says ${itDisc}%. Reconcile before drafting.`,
+          )
+        }
+
+        // (4) the master part referenced by this BOM line must belong to the PO supplier
+        const { data: master } = await (supabase as any)
+          .from(pp.part_type)
+          .select('id, part_number, supplier_id')
+          .eq('id', pp.part_id)
+          .maybeSingle()
+        if (!master) throw new Error(`Master part ${pp.part_type} #${pp.part_id} does not exist.`)
+        if (master.supplier_id && master.supplier_id !== a.supplier_id) {
+          throw new Error(
+            `Supplier mismatch on project_part #${it.project_part_id} (${master.part_number}): ` +
+            `master record's supplier is #${master.supplier_id}, draft PO supplier is #${a.supplier_id}. ` +
+            `A PO can only contain lines from one supplier.`,
+          )
+        }
+
+        // (5) build the wire row — GST is intentionally NOT applied
+        const lineTotal = it.quantity * it.unit_price * (1 - itDisc / 100)
+        grand += lineTotal
+        poItems.push({
+          part_type: pp.part_type,
+          part_id: pp.part_id,
+          part_number: master.part_number,
+          description: null,
+          quantity: it.quantity,
+          unit_price: it.unit_price,
+          discount_percent: itDisc,
+          total_amount: lineTotal,
+          project_part_id: pp.id,
+        })
+      }
+
+      const po_number = a.po_number || `CPO-${Date.now().toString().slice(-8)}`
+      const poData: any = {
+        po_number,
+        project_id: a.project_id,
+        supplier_id: a.supplier_id,
+        po_date: a.po_date,
+        expected_delivery_date: a.expected_delivery_date || null,
+        currency: a.currency || 'INR',
+        status: 'Draft',          // hard-coded — AI cannot create non-Draft POs
+        grand_total: grand,        // GST excluded by design
+        total_items: poItems.length,
+        total_quantity: poItems.reduce((s, i) => s + i.quantity, 0),
+        notes: (a.notes ? a.notes + ' | ' : '') + 'Drafted by AI from source PO. GST excluded.',
+        created_date: new Date().toISOString(),
+      }
+      return purchaseOrdersApi.createPurchaseOrderWithItems(poData, poItems)
+    },
   },
   {
     name: 'stock_in',
