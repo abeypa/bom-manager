@@ -42,6 +42,18 @@ const part_type_enum = [
   'pneumatic_bought_out',
 ]
 
+/** Internal part-number prefix → part_type table mapping. */
+export const PART_TYPE_BY_PREFIX: Record<string, string> = {
+  EBO: 'electrical_bought_out',
+  EMF: 'electrical_manufacture',
+  MBO: 'mechanical_bought_out',
+  MMF: 'mechanical_manufacture',
+  PBO: 'pneumatic_bought_out',
+}
+export const PREFIX_BY_PART_TYPE: Record<string, string> = Object.fromEntries(
+  Object.entries(PART_TYPE_BY_PREFIX).map(([k, v]) => [v, k]),
+)
+
 export const TOOL_REGISTRY: ToolSpec[] = [
   // ── READ ────────────────────────────────────────────────────────────────
   {
@@ -162,6 +174,138 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
   },
   {
+    name: 'find_master_part_by_erp_id',
+    kind: 'read',
+    description:
+      'Find an existing master part by ERP Integration ID (column beperp_part_no), manufacturer_part_number, or part_number. Searches all part_types unless one is specified. Use this BEFORE creating a new master part to avoid duplicates.',
+    parameters: {
+      type: 'object',
+      required: ['code'],
+      properties: {
+        code: { type: 'string', description: 'Item code from PO PDF (e.g. 9101689) or part_number / manufacturer_part_number' },
+        part_type: { type: 'string', enum: part_type_enum, description: 'Optional: scope to one part_type' },
+      },
+    },
+    handler: async ({ code, part_type }: any) => {
+      const types = part_type ? [part_type] : part_type_enum
+      const out: any[] = []
+      for (const pt of types) {
+        const { data } = await (supabase as any)
+          .from(pt)
+          .select('id, part_number, beperp_part_no, manufacturer_part_number, description, supplier_id, base_price, discount_percent, currency')
+          .or(`beperp_part_no.eq.${code},manufacturer_part_number.eq.${code},part_number.eq.${code}`)
+          .limit(5)
+        for (const d of data || []) out.push({ part_type: pt, ...d })
+      }
+      return out
+    },
+  },
+  {
+    name: 'get_next_internal_part_number',
+    kind: 'read',
+    description:
+      'Suggest the next available Internal Part Number for a prefix (EBO, EMF, MBO, MMF, PBO). Reads the matching master table and returns "<PREFIX>-<NNNN>".',
+    parameters: {
+      type: 'object',
+      required: ['prefix'],
+      properties: {
+        prefix: { type: 'string', enum: Object.keys(PART_TYPE_BY_PREFIX) },
+        pad: { type: 'number', default: 4, description: 'Zero-pad width' },
+      },
+    },
+    handler: async ({ prefix, pad = 4 }: any) => {
+      const pt = PART_TYPE_BY_PREFIX[prefix]
+      if (!pt) throw new Error(`Unknown prefix: ${prefix}`)
+      const { data } = await (supabase as any)
+        .from(pt)
+        .select('part_number')
+        .ilike('part_number', `${prefix}-%`)
+        .order('part_number', { ascending: false })
+        .limit(50)
+      let max = 0
+      for (const r of data || []) {
+        const m = String(r.part_number).match(new RegExp(`^${prefix}-(\\d+)$`, 'i'))
+        if (m) max = Math.max(max, parseInt(m[1], 10))
+      }
+      const next = String(max + 1).padStart(pad, '0')
+      return { prefix, part_type: pt, next: `${prefix}-${next}`, current_max: max }
+    },
+  },
+  {
+    name: 'find_supplier_by_name',
+    kind: 'read',
+    description: 'Look up a supplier by partial name match (case-insensitive).',
+    parameters: {
+      type: 'object',
+      required: ['query'],
+      properties: { query: { type: 'string' } },
+    },
+    handler: async ({ query }: any) => {
+      const { data } = await (supabase as any)
+        .from('suppliers')
+        .select('id, name, address, email, phone, notes')
+        .ilike('name', `%${query}%`)
+        .limit(10)
+      return data || []
+    },
+  },
+  {
+    name: 'get_project_structure',
+    kind: 'read',
+    description: 'Get the full section/subsection tree for a project (no parts). Use this BEFORE adding parts so you can decide whether to reuse an existing subsection or create a new one.',
+    parameters: {
+      type: 'object',
+      required: ['project_id'],
+      properties: { project_id: { type: 'number' } },
+    },
+    handler: async ({ project_id }: any) => {
+      const { data: sections } = await (supabase as any)
+        .from('project_sections')
+        .select('id, name, order_index')
+        .eq('project_id', project_id)
+        .order('order_index', { ascending: true })
+      const { data: subs } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, section_id, section_name, description, sort_order')
+        .eq('project_id', project_id)
+        .order('sort_order', { ascending: true })
+      return {
+        sections: sections || [],
+        subsections: subs || [],
+      }
+    },
+  },
+  {
+    name: 'search_image_url',
+    kind: 'read',
+    description:
+      'Search Wikimedia Commons (CORS-friendly, free, no key) for an image matching the query and return the first usable image URL. May return empty if nothing relevant is found — that is OK, the part can be created without an image.',
+    parameters: {
+      type: 'object',
+      required: ['query'],
+      properties: { query: { type: 'string', description: 'e.g. "Siemens 5ST3010 auxiliary switch"' } },
+    },
+    handler: async ({ query }: any) => {
+      const url =
+        'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=5&gsrnamespace=6' +
+        '&prop=imageinfo&iiprop=url&iiurlwidth=400&gsrsearch=' +
+        encodeURIComponent(`filetype:bitmap ${query}`)
+      try {
+        const res = await fetch(url)
+        const json = await res.json()
+        const pages = json?.query?.pages || {}
+        for (const id of Object.keys(pages)) {
+          const ii = pages[id]?.imageinfo?.[0]
+          if (ii?.thumburl) return { found: true, image_url: ii.thumburl, source: 'wikimedia' }
+          if (ii?.url) return { found: true, image_url: ii.url, source: 'wikimedia' }
+        }
+        return { found: false, image_url: null, source: 'wikimedia' }
+      } catch (e: any) {
+        return { found: false, image_url: null, error: e?.message }
+      }
+    },
+  },
+  {
     name: 'list_purchase_orders',
     kind: 'read',
     description: 'List purchase orders, optionally filtered by status or project.',
@@ -182,6 +326,195 @@ export const TOOL_REGISTRY: ToolSpec[] = [
   },
 
   // ── WRITE (require user approval) ───────────────────────────────────────
+  {
+    name: 'create_supplier',
+    kind: 'write',
+    description: 'Create a new supplier. Use only after find_supplier_by_name returned no match.',
+    parameters: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string' },
+        address: { type: 'string' },
+        email: { type: 'string' },
+        phone: { type: 'string' },
+        gstin: { type: 'string', description: 'Indian GSTIN — stored in notes since there is no dedicated column.' },
+        contact_person: { type: 'string' },
+      },
+    },
+    summarize: (a) => `Create supplier "${a.name}"${a.gstin ? ` (GSTIN ${a.gstin})` : ''}`,
+    handler: async (a: any) => {
+      const notes = [a.gstin && `GSTIN: ${a.gstin}`].filter(Boolean).join(' | ') || null
+      const { data, error } = await (supabase as any)
+        .from('suppliers')
+        .insert([{
+          name: a.name,
+          address: a.address || null,
+          email: a.email || null,
+          phone: a.phone || null,
+          contact_person: a.contact_person || null,
+          notes,
+        }])
+        .select()
+        .single()
+      if (error) throw error
+      return data
+    },
+  },
+  {
+    name: 'create_master_part',
+    kind: 'write',
+    description:
+      'Create a master part record. Always look up first with find_master_part_by_erp_id; never create a duplicate. The Internal Part Number must come from get_next_internal_part_number. ERP Integration ID (Item Code from PO PDF) goes into beperp_part_no. The supplier-side / manufacturer code goes into manufacturer_part_number. last_price_date should be the PO date.',
+    parameters: {
+      type: 'object',
+      required: ['part_type', 'part_number', 'beperp_part_no', 'description', 'supplier_id', 'base_price'],
+      properties: {
+        part_type: { type: 'string', enum: part_type_enum },
+        part_number: { type: 'string', description: 'Internal part number (e.g. EBO-0047)' },
+        beperp_part_no: { type: 'string', description: 'ERP Integration ID = Item Code from PO PDF' },
+        manufacturer_part_number: { type: 'string', description: 'Supplier / OEM catalogue number, e.g. 5ST3010' },
+        description: { type: 'string' },
+        supplier_id: { type: 'number' },
+        manufacturer: { type: 'string' },
+        base_price: { type: 'number' },
+        discount_percent: { type: 'number', default: 0 },
+        currency: { type: 'string', default: 'INR' },
+        image_path: { type: 'string', description: 'Optional image URL — try search_image_url first.' },
+        last_price_date: { type: 'string', description: 'ISO date (the PO date).' },
+        specifications: { type: 'string' },
+      },
+    },
+    summarize: (a) =>
+      `Create ${a.part_type} ${a.part_number} (ERP ${a.beperp_part_no})${a.manufacturer_part_number ? ' / ' + a.manufacturer_part_number : ''} @ ${a.currency || 'INR'} ${a.base_price}` +
+      (a.discount_percent ? ` (-${a.discount_percent}%)` : ''),
+    handler: async (a: any) => {
+      const insertRow: any = {
+        part_number: a.part_number,
+        beperp_part_no: a.beperp_part_no,
+        manufacturer_part_number: a.manufacturer_part_number || null,
+        description: a.description,
+        supplier_id: a.supplier_id,
+        manufacturer: a.manufacturer || null,
+        base_price: a.base_price,
+        discount_percent: a.discount_percent || 0,
+        currency: a.currency || 'INR',
+        image_path: a.image_path || null,
+        specifications: a.specifications || null,
+      }
+      // last_price_date is stored in updated_date if there is no dedicated column.
+      if (a.last_price_date) insertRow.updated_date = a.last_price_date
+      const { data, error } = await (supabase as any)
+        .from(a.part_type)
+        .insert([insertRow])
+        .select()
+        .single()
+      if (error) throw error
+      return data
+    },
+  },
+  {
+    name: 'update_master_part_price',
+    kind: 'write',
+    description:
+      'Update price / discount / image / last_price_date on an EXISTING master part. Use when a new PO has the same item code at a different price.',
+    parameters: {
+      type: 'object',
+      required: ['part_type', 'part_id'],
+      properties: {
+        part_type: { type: 'string', enum: part_type_enum },
+        part_id: { type: 'number' },
+        base_price: { type: 'number' },
+        discount_percent: { type: 'number' },
+        currency: { type: 'string' },
+        image_path: { type: 'string' },
+        last_price_date: { type: 'string' },
+        manufacturer_part_number: { type: 'string' },
+      },
+    },
+    summarize: (a) => {
+      const bits = []
+      if (a.base_price != null) bits.push(`price=${a.base_price}`)
+      if (a.discount_percent != null) bits.push(`disc=${a.discount_percent}%`)
+      if (a.image_path) bits.push('image set')
+      return `Update ${a.part_type} #${a.part_id}: ${bits.join(', ') || 'metadata'}`
+    },
+    handler: async (a: any) => {
+      const patch: any = {}
+      if (a.base_price != null) patch.base_price = a.base_price
+      if (a.discount_percent != null) patch.discount_percent = a.discount_percent
+      if (a.currency) patch.currency = a.currency
+      if (a.image_path) patch.image_path = a.image_path
+      if (a.manufacturer_part_number) patch.manufacturer_part_number = a.manufacturer_part_number
+      if (a.last_price_date) patch.updated_date = a.last_price_date
+      else patch.updated_date = new Date().toISOString()
+      const { data, error } = await (supabase as any)
+        .from(a.part_type)
+        .update(patch)
+        .eq('id', a.part_id)
+        .select()
+        .single()
+      if (error) throw error
+      return data
+    },
+  },
+  {
+    name: 'create_project_section',
+    kind: 'write',
+    description: 'Create a top-level section under a project.',
+    parameters: {
+      type: 'object',
+      required: ['project_id', 'name'],
+      properties: {
+        project_id: { type: 'number' },
+        name: { type: 'string' },
+        order_index: { type: 'number' },
+      },
+    },
+    summarize: (a) => `Create section "${a.name}" in project #${a.project_id}`,
+    handler: async (a: any) => {
+      const { data, error } = await (supabase as any)
+        .from('project_sections')
+        .insert([{ project_id: a.project_id, name: a.name, order_index: a.order_index || 0 }])
+        .select()
+        .single()
+      if (error) throw error
+      return data
+    },
+  },
+  {
+    name: 'create_project_subsection',
+    kind: 'write',
+    description: 'Create a subsection under an existing section. Returns the subsection id you then pass to add_part_to_project.',
+    parameters: {
+      type: 'object',
+      required: ['project_id', 'section_id', 'section_name'],
+      properties: {
+        project_id: { type: 'number' },
+        section_id: { type: 'number' },
+        section_name: { type: 'string', description: 'Name of the new subsection (column is called section_name).' },
+        description: { type: 'string' },
+        sort_order: { type: 'number' },
+      },
+    },
+    summarize: (a) => `Create subsection "${a.section_name}" under section #${a.section_id} (project #${a.project_id})`,
+    handler: async (a: any) => {
+      const { data, error } = await (supabase as any)
+        .from('project_subsections')
+        .insert([{
+          project_id: a.project_id,
+          section_id: a.section_id,
+          section_name: a.section_name,
+          description: a.description || null,
+          status: 'active',
+          sort_order: a.sort_order || 0,
+        }])
+        .select()
+        .single()
+      if (error) throw error
+      return data
+    },
+  },
   {
     name: 'add_part_to_project',
     kind: 'write',
