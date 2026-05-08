@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, Package, ShoppingCart,
   ArrowUpDown, LogOut, ShieldCheck, Truck, Factory,
-  ChevronRight, Menu, X, Settings, Bell, Search, Activity, BarChart3
+  ChevronRight, Menu, X, Settings, Bell, Search, Activity, BarChart3, Bot
 } from 'lucide-react';
 import { useRole } from '../../hooks/useRole';
 import { useAuth } from '../../context/AuthContext';
@@ -11,6 +11,8 @@ import SearchOverlay from '@/components/ui/SearchOverlay';
 import POBasket from '@/components/projects/POBasket';
 import CreatePOFromBOMModal from '@/components/projects/CreatePOFromBOMModal';
 import { usePOBasketStore } from '@/store/usePOBasketStore';
+import AIChat from '@/components/ai/AIChat';
+import { useAIStore } from '@/store/useAIStore';
 
 const NAV_SECTIONS = [
   {
@@ -273,14 +275,40 @@ export default function AppLayout() {
          </main>
        </div>
        <SearchOverlay isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
-        
+
         {/* Global PO Basket UI */}
         <POBasket />
 
         {/* Global Create PO Modal */}
         <GlobalPOModal />
+
+        {/* AI Assistant */}
+        <AILauncher />
+        <AIChat />
       </div>
     );
+}
+
+function AILauncher() {
+  const open = useAIStore(s => s.open);
+  const setOpen = useAIStore(s => s.setOpen);
+  const pendingCount = useAIStore(s => s.pending.filter(p => p.status === 'pending').length);
+  if (open) return null;
+  return (
+    <button
+      onClick={() => setOpen(true)}
+      className="fixed bottom-4 right-4 z-40 w-14 h-14 rounded-full shadow-2xl bg-gradient-to-br from-navy-700 to-navy-900 text-white flex items-center justify-center hover:scale-105 transition-transform"
+      title="AI assistant"
+      aria-label="Open AI assistant"
+    >
+      <Bot size={22} />
+      {pendingCount > 0 && (
+        <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-white">
+          {pendingCount}
+        </span>
+      )}
+    </button>
+  );
 }
 
 // Separate helper component to use hooks correctly

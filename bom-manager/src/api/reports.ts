@@ -41,6 +41,24 @@ export interface POReportItem {
   expected_delivery_date: string | null
 }
 
+export interface ReconciliationRow {
+  project_id: number
+  project_name: string
+  project_number: string
+  part_type: string
+  part_id: number | null
+  part_number: string
+  description: string
+  bom_qty: number
+  po_qty: number
+  qty_delta: number          // po_qty - bom_qty
+  bom_value: number
+  po_value: number
+  value_delta: number        // po_value - bom_value
+  po_numbers: string[]
+  issue: 'OK' | 'QTY_MISMATCH' | 'VALUE_MISMATCH' | 'BOM_NO_PO' | 'PO_NO_BOM'
+}
+
 export interface ReportFilters {
   status?: string          // Project status filter
   customer?: string
@@ -224,5 +242,142 @@ export const reportsApi = {
       .order('customer')
 
     return [...new Set((data || []).map((d: any) => d.customer).filter(Boolean))] as string[]
+  },
+
+  /**
+   * BOM vs PO reconciliation. For each (project, part_type, part_id) tuple,
+   * sums BOM qty/value from project_parts and PO qty/value from
+   * purchase_order_items, and returns a row only when there is a difference
+   * (or a part appears on one side and not the other).
+   */
+  getReconciliation: async (
+    projectId?: number
+  ): Promise<ReconciliationRow[]> => {
+    // Resolve project id list
+    let projectsQ = (supabase as any)
+      .from('projects')
+      .select('id, project_name, project_number')
+    if (projectId) projectsQ = projectsQ.eq('id', projectId)
+    const { data: projects } = await projectsQ
+    const projectList: any[] = projects || []
+    if (projectList.length === 0) return []
+    const projectIds = projectList.map((p: any) => p.id)
+
+    // Fetch BOM
+    const { data: subsections } = await (supabase as any)
+      .from('project_subsections')
+      .select('id, project_id')
+      .in('project_id', projectIds)
+    const subsectionToProject: Record<number, number> = {}
+    for (const s of subsections || []) subsectionToProject[s.id] = s.project_id
+
+    const subIds = (subsections || []).map((s: any) => s.id)
+    let bomRows: any[] = []
+    if (subIds.length) {
+      const { data: bd } = await (supabase as any)
+        .from('project_parts')
+        .select('project_section_id, part_type, part_id, quantity, unit_price, discount_percent')
+        .in('project_section_id', subIds)
+      bomRows = bd || []
+    }
+
+    // Fetch PO items
+    const { data: poRows } = await (supabase as any)
+      .from('purchase_orders')
+      .select('id, project_id, po_number, status, purchase_order_items(part_type, part_id, quantity, unit_price, discount_percent)')
+      .in('project_id', projectIds)
+
+    type Agg = { qty: number; value: number; po_numbers: Set<string> }
+    const bomMap = new Map<string, Agg>()
+    const poMap = new Map<string, Agg>()
+    const partLabels = new Map<string, { part_type: string; part_id: number; project_id: number }>()
+
+    const key = (projectId: number, part_type: string, part_id: number | null) =>
+      `${projectId}::${part_type}::${part_id ?? 'null'}`
+
+    for (const r of bomRows) {
+      const projectIdHere = subsectionToProject[r.project_section_id]
+      if (!projectIdHere || !r.part_type) continue
+      const k = key(projectIdHere, r.part_type, r.part_id)
+      const qty = r.quantity || 0
+      const value = qty * (r.unit_price || 0) * (1 - (r.discount_percent || 0) / 100)
+      const cur = bomMap.get(k) || { qty: 0, value: 0, po_numbers: new Set() }
+      cur.qty += qty
+      cur.value += value
+      bomMap.set(k, cur)
+      partLabels.set(k, { part_type: r.part_type, part_id: r.part_id, project_id: projectIdHere })
+    }
+
+    for (const po of poRows || []) {
+      for (const it of po.purchase_order_items || []) {
+        if (!it.part_type) continue
+        const k = key(po.project_id, it.part_type, it.part_id)
+        const qty = it.quantity || 0
+        const value = qty * (it.unit_price || 0) * (1 - (it.discount_percent || 0) / 100)
+        const cur = poMap.get(k) || { qty: 0, value: 0, po_numbers: new Set() }
+        cur.qty += qty
+        cur.value += value
+        cur.po_numbers.add(po.po_number)
+        poMap.set(k, cur)
+        if (!partLabels.has(k)) {
+          partLabels.set(k, { part_type: it.part_type, part_id: it.part_id, project_id: po.project_id })
+        }
+      }
+    }
+
+    // Resolve part_number / description per (part_type, part_id)
+    const idsByType: Record<string, Set<number>> = {}
+    for (const v of partLabels.values()) {
+      if (!v.part_id) continue
+      if (!idsByType[v.part_type]) idsByType[v.part_type] = new Set()
+      idsByType[v.part_type].add(v.part_id)
+    }
+    const detailsMap: Record<string, Record<number, any>> = {}
+    for (const [pt, ids] of Object.entries(idsByType)) {
+      const { data: rows } = await (supabase as any)
+        .from(pt)
+        .select('id, part_number, description')
+        .in('id', Array.from(ids))
+      detailsMap[pt] = {}
+      for (const d of rows || []) detailsMap[pt][d.id] = d
+    }
+
+    const projectInfo = new Map<number, any>(projectList.map((p: any) => [p.id, p]))
+
+    const out: ReconciliationRow[] = []
+    const allKeys = new Set<string>([...bomMap.keys(), ...poMap.keys()])
+    for (const k of allKeys) {
+      const meta = partLabels.get(k)!
+      const bom = bomMap.get(k) || { qty: 0, value: 0, po_numbers: new Set() }
+      const po = poMap.get(k) || { qty: 0, value: 0, po_numbers: new Set() }
+      const qtyDelta = po.qty - bom.qty
+      const valueDelta = po.value - bom.value
+      const proj = projectInfo.get(meta.project_id) || {}
+      const det = (meta.part_id && detailsMap[meta.part_type]?.[meta.part_id]) || {}
+      let issue: ReconciliationRow['issue'] = 'OK'
+      if (bom.qty === 0 && po.qty > 0) issue = 'PO_NO_BOM'
+      else if (po.qty === 0 && bom.qty > 0) issue = 'BOM_NO_PO'
+      else if (qtyDelta !== 0) issue = 'QTY_MISMATCH'
+      else if (Math.abs(valueDelta) > 0.01) issue = 'VALUE_MISMATCH'
+      out.push({
+        project_id: meta.project_id,
+        project_name: proj.project_name || '',
+        project_number: proj.project_number || '',
+        part_type: meta.part_type,
+        part_id: meta.part_id,
+        part_number: det.part_number || '—',
+        description: det.description || '',
+        bom_qty: bom.qty,
+        po_qty: po.qty,
+        qty_delta: qtyDelta,
+        bom_value: bom.value,
+        po_value: po.value,
+        value_delta: valueDelta,
+        po_numbers: Array.from(po.po_numbers),
+        issue,
+      })
+    }
+    out.sort((a, b) => Math.abs(b.value_delta) - Math.abs(a.value_delta))
+    return out
   },
 }
