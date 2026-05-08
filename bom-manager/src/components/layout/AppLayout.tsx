@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, Package, ShoppingCart,
   ArrowUpDown, LogOut, ShieldCheck, Truck, Factory,
-  ChevronRight, Menu, X, Settings, Bell, Search, Activity
+  ChevronRight, Menu, X, Settings, Bell, Search, Activity, BarChart3
 } from 'lucide-react';
 import { useRole } from '../../hooks/useRole';
 import { useAuth } from '../../context/AuthContext';
@@ -32,8 +32,9 @@ const NAV_SECTIONS = [
   {
     label: 'MASTER DATA',
     items: [
-      { to: '/suppliers',      icon: Truck,           label: 'Suppliers' },
-      { to: '/part-usage-logs', icon: Activity, label: 'Usage Logs' },
+      { to: '/suppliers',       icon: Truck,       label: 'Suppliers' },
+      { to: '/part-usage-logs', icon: Activity,    label: 'Usage Logs' },
+      { to: '/reports',         icon: BarChart3,   label: 'Reports' },
     ],
   },
 ];

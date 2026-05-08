@@ -18,6 +18,7 @@ import PartUsageLogs from './pages/PartUsageLogs';
 import Admin from './pages/Admin';
 import ChangeLog from './pages/ChangeLog';
 import ProcurementDashboard from './pages/ProcurementDashboard';
+import Reports from './pages/Reports';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -131,6 +132,12 @@ function App() {
                 <Route path="/part-usage-logs" element={
                   <RoleGuard>
                     <PartUsageLogs />
+                  </RoleGuard>
+                } />
+
+                <Route path="/reports" element={
+                  <RoleGuard>
+                    <Reports />
                   </RoleGuard>
                 } />
 
