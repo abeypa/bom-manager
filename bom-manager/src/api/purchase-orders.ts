@@ -439,13 +439,56 @@ export const purchaseOrdersApi = {
     return partsWithDetails.filter((p: any) => !orderedIds.has(p.id))
   },
 
-  // Delete single PO line item
+  // Delete single PO line item, then recalc parent PO totals
   deletePOItem: async (itemId: number) => {
+    const { data: item } = await supabase
+      .from('purchase_order_items')
+      .select('purchase_order_id')
+      .eq('id', itemId)
+      .single();
+
     const { error } = await supabase
       .from('purchase_order_items')
       .delete()
       .eq('id', itemId);
     if (error) throw error;
+
+    const poId = (item as any)?.purchase_order_id;
+    if (poId) await purchaseOrdersApi.recalcPOTotals(poId);
+  },
+
+  /**
+   * Recompute purchase_orders.grand_total / total_items / total_quantity
+   * from the live purchase_order_items rows. Call after any item insert,
+   * update, or delete so downstream reports stay accurate.
+   */
+  recalcPOTotals: async (poId: number) => {
+    const { data: items } = await supabase
+      .from('purchase_order_items')
+      .select('quantity, unit_price, discount_percent')
+      .eq('purchase_order_id', poId);
+
+    const rows = (items as any[]) || [];
+    const grand_total = rows.reduce((s, r) => {
+      const qty = r.quantity || 0;
+      const price = r.unit_price || 0;
+      const disc = r.discount_percent || 0;
+      return s + qty * price * (1 - disc / 100);
+    }, 0);
+    const total_items = rows.length;
+    const total_quantity = rows.reduce((s, r) => s + (r.quantity || 0), 0);
+
+    const { error } = await (supabase as any)
+      .from('purchase_orders')
+      .update({
+        grand_total,
+        total_items,
+        total_quantity,
+        updated_date: new Date().toISOString(),
+      })
+      .eq('id', poId);
+    if (error) throw error;
+    return { grand_total, total_items, total_quantity };
   },
 
   /**

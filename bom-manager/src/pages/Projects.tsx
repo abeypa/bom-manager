@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { projectsApi, Project } from '@/api/projects'
-import { 
-  Search, Plus, Edit, Trash2, ChevronRight, LayoutGrid, List, 
-  Filter, FolderKanban, ArrowUpDown, MoreVertical, ExternalLink 
+import { reportsApi } from '@/api/reports'
+import {
+  Search, Plus, Edit, Trash2, ChevronRight, LayoutGrid, List,
+  Filter, FolderKanban, ArrowUpDown, MoreVertical, ExternalLink
 } from 'lucide-react'
 import ProjectFormModal from '@/components/projects/ProjectFormModal'
 import { Link } from 'react-router-dom'
@@ -43,6 +44,22 @@ const Projects = () => {
     queryKey: ['projects'],
     queryFn: projectsApi.getProjects,
   })
+
+  // Live financials per project — refetches on focus thanks to global config
+  const { data: financials = [] } = useQuery({
+    queryKey: ['projects-financials-light'],
+    queryFn: () => reportsApi.getProjectFinancials({ status: 'all', poStatus: 'all' }),
+  })
+  const finByProject = new Map<number, { bom: number; po: number; currency: string }>()
+  for (const f of financials) {
+    finByProject.set(f.project_id, {
+      bom: f.bom_total_value,
+      po: f.po_total_value,
+      currency: f.currencies[0] || 'INR',
+    })
+  }
+  const fmtMoney = (v: number, ccy = 'INR') =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: ccy, maximumFractionDigits: 0 }).format(v)
 
   useEffect(() => {
     document.title = 'Projects | BOM Manager'
@@ -89,8 +106,8 @@ const Projects = () => {
       {/* Header */}
       <div className="page-header">
         <div className="flex items-center gap-4">
-          <h1 className="page-title">Project Registry</h1>
-          <span className="badge px-3 py-1 text-sm">{filteredProjects.length} entities</span>
+          <h1 className="page-title">Projects</h1>
+          <span className="badge px-3 py-1 text-sm">{filteredProjects.length} {filteredProjects.length === 1 ? 'project' : 'projects'}</span>
         </div>
 
         <div className="flex items-center gap-3">
@@ -131,7 +148,7 @@ const Projects = () => {
             className="btn btn-primary flex items-center gap-2 shadow-lg shadow-navy-900/10"
           >
             <Plus className="h-4 w-4" />
-            INITIALIZE PROJECT
+            New Project
           </button>
         </div>
       </div>
@@ -167,6 +184,24 @@ const Projects = () => {
                     </div>
                   )}
 
+                  {/* Live Project Value */}
+                  {(() => {
+                    const fin = finByProject.get(project.id)
+                    if (!fin) return null
+                    return (
+                      <div className="mb-5 grid grid-cols-2 gap-2 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                        <div>
+                          <p className="label-caps !text-[8px] !text-tertiary mb-0.5">BOM Value</p>
+                          <p className="font-mono font-black text-navy-900 text-sm tabular-nums">{fmtMoney(fin.bom, fin.currency)}</p>
+                        </div>
+                        <div>
+                          <p className="label-caps !text-[8px] !text-tertiary mb-0.5">PO Spend</p>
+                          <p className="font-mono font-black text-navy-700 text-sm tabular-nums">{fmtMoney(fin.po, fin.currency)}</p>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
                   {/* Lifecycle Indicators */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -195,7 +230,7 @@ const Projects = () => {
                     to={`/projects/${project.id}`}
                     className="btn btn-secondary btn-sm"
                   >
-                    INSPECT PROJECT →
+                    Open project →
                   </Link>
                   <div className="flex items-center gap-1">
                     <button
@@ -230,9 +265,11 @@ const Projects = () => {
           <table className="data-table-modern">
             <thead>
               <tr>
-                <th>Project Entity</th>
+                <th>Project</th>
                 <th>Reference</th>
-                <th>State</th>
+                <th>Status</th>
+                <th>BOM Value</th>
+                <th>PO Spend</th>
                 <th className="text-center">Lifecycle</th>
                 <th>Last Update</th>
                 <th className="w-20" />
@@ -258,6 +295,18 @@ const Projects = () => {
                       </span>
                     </td>
                     <td><span className={`badge ${sm.cls}`}>{sm.label}</span></td>
+                    <td className="font-mono text-xs font-bold text-navy-900 tabular-nums">
+                      {(() => {
+                        const fin = finByProject.get(project.id)
+                        return fin ? fmtMoney(fin.bom, fin.currency) : '—'
+                      })()}
+                    </td>
+                    <td className="font-mono text-xs font-bold text-navy-700 tabular-nums">
+                      {(() => {
+                        const fin = finByProject.get(project.id)
+                        return fin ? fmtMoney(fin.po, fin.currency) : '—'
+                      })()}
+                    </td>
                     <td>
                       <div className="flex items-center gap-3">
                         <div className="h-1.5 w-20 bg-slate-100 rounded-full overflow-hidden">

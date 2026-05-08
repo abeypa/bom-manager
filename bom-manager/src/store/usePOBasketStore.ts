@@ -17,8 +17,14 @@ export interface BasketItem {
   currency?: string
   part_type?: string
   part_id?: number
-  po_info?: any
-  part_ref?: any
+  po_info?: Record<string, unknown>
+  part_ref?: Record<string, unknown> | string
+}
+
+export type AddToBasketInput = Partial<BasketItem> & {
+  id: number
+  quantity?: number
+  unit_price?: number
 }
 
 interface POBasketStore {
@@ -30,14 +36,14 @@ interface POBasketStore {
   // Actions
   setBasketOpen: (open: boolean) => void
   setPoModalOpen: (open: boolean) => void
-  addToBasket: (parts: any[]) => void
+  addToBasket: (parts: AddToBasketInput[]) => void
   removeFromBasket: (id: number) => void
   updateItem: (id: number, updates: Partial<BasketItem>) => void
   clearBasket: () => void
   setProjectId: (id: number | null) => void
 }
 
-export const usePOBasketStore = create<POBasketStore>((set, get) => ({
+export const usePOBasketStore = create<POBasketStore>((set) => ({
   basketItems: [],
   basketOpen: false, // Default to hidden
   poModalOpen: false,
@@ -55,23 +61,27 @@ export const usePOBasketStore = create<POBasketStore>((set, get) => ({
         if (existing) {
           existing.quantity = (existing.quantity || 1) + (p.quantity || 1)
         } else {
+          const ref = p.part_ref as any
+          const refPartNo = typeof ref === 'string' ? ref : ref?.part_number
+          const refDesc = typeof ref === 'object' ? ref?.description : undefined
+          const refMfg = typeof ref === 'object' ? ref?.manufacturer_part_number : undefined
           next.push({
             ...p,
             id: p.id,
             project_part_id: p.id,
             bomItemId: p.id,
-            part_number: p.part_ref?.part_number || p.part_ref || 'N/A',
-            partRef: p.part_ref?.part_number || p.part_ref || 'N/A',
-            description: p.description || p.part_ref?.description || 'N/A',
-            globalDescription: p.globalDescription || p.description || p.part_ref?.description || 'N/A',
-            manufacturerPartNo: p.manufacturerPartNo || p.part_ref?.manufacturer_part_number || '',
+            part_number: p.part_number || refPartNo || 'N/A',
+            partRef: p.partRef || refPartNo || 'N/A',
+            description: p.description || refDesc || 'N/A',
+            globalDescription: p.globalDescription || p.description || refDesc || 'N/A',
+            manufacturerPartNo: p.manufacturerPartNo || refMfg || '',
             quantity: p.quantity || 1,
             unit_price: p.unit_price || 0,
             unitPrice: p.unit_price || 0,
             discount_percent: p.discount_percent || 0,
             snapshotDiscount: p.snapshotDiscount || p.discount_percent || 0,
-            currency: p.currency || 'INR'
-          })
+            currency: p.currency || 'INR',
+          } as BasketItem)
         }
       })
       // Keep basket status as is (do not auto-open)
