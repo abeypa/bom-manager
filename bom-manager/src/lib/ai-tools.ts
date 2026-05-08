@@ -54,6 +54,39 @@ export const PREFIX_BY_PART_TYPE: Record<string, string> = Object.fromEntries(
   Object.entries(PART_TYPE_BY_PREFIX).map(([k, v]) => [v, k]),
 )
 
+// ─── Software interlocks ────────────────────────────────────────────────────
+// These run inside every write handler regardless of what the AI claims.
+// If the AI proposes nonsense (negative price, missing supplier, empty name,
+// duplicate row, etc.) the tool throws; the runner feeds the error back to
+// the model, which is then expected to ask the user instead of retrying.
+
+const MAX_QTY = 1_000_000
+const MAX_PRICE = 1_000_000_000
+const MAX_DESC_LEN = 2000
+
+function assertNonEmpty(field: string, v: any) {
+  if (v == null || (typeof v === 'string' && v.trim() === '')) {
+    throw new Error(`Validation: ${field} is required and cannot be empty.`)
+  }
+}
+function assertNumberInRange(field: string, v: any, min: number, max: number) {
+  if (typeof v !== 'number' || !Number.isFinite(v))
+    throw new Error(`Validation: ${field} must be a finite number.`)
+  if (v < min || v > max)
+    throw new Error(`Validation: ${field} must be between ${min} and ${max} (got ${v}).`)
+}
+function assertInteger(field: string, v: any) {
+  if (!Number.isInteger(v)) throw new Error(`Validation: ${field} must be an integer (got ${v}).`)
+}
+function assertMaxLen(field: string, v: any, max: number) {
+  if (typeof v === 'string' && v.length > max)
+    throw new Error(`Validation: ${field} is too long (${v.length} > ${max}).`)
+}
+async function assertRowExists(table: string, id: number, label?: string) {
+  const { data } = await (supabase as any).from(table).select('id').eq('id', id).maybeSingle()
+  if (!data) throw new Error(`${label || table} #${id} does not exist.`)
+}
+
 export const TOOL_REGISTRY: ToolSpec[] = [
   // ── READ ────────────────────────────────────────────────────────────────
   {
@@ -313,11 +346,22 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
     summarize: (a) => `Create supplier "${a.name}"${a.gstin ? ` (GSTIN ${a.gstin})` : ''}`,
     handler: async (a: any) => {
+      assertNonEmpty('name', a.name)
+      assertMaxLen('name', a.name, 200)
+      // Case-insensitive duplicate check
+      const { data: dup } = await (supabase as any)
+        .from('suppliers')
+        .select('id, name')
+        .ilike('name', a.name.trim())
+        .limit(1)
+      if (dup && dup.length) {
+        throw new Error(`Supplier "${dup[0].name}" already exists (id ${dup[0].id}). Use it instead of creating a duplicate.`)
+      }
       const notes = [a.gstin && `GSTIN: ${a.gstin}`].filter(Boolean).join(' | ') || null
       const { data, error } = await (supabase as any)
         .from('suppliers')
         .insert([{
-          name: a.name,
+          name: a.name.trim(),
           address: a.address || null,
           email: a.email || null,
           phone: a.phone || null,
@@ -395,11 +439,19 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         }
       }
 
+      // Field-level validation
+      assertNonEmpty('description', a.description)
+      assertMaxLen('description', a.description, MAX_DESC_LEN)
+      assertInteger('supplier_id', a.supplier_id)
+      assertNumberInRange('base_price', a.base_price, 0, MAX_PRICE)
+      if (a.discount_percent != null) assertNumberInRange('discount_percent', a.discount_percent, 0, 100)
+      await assertRowExists('suppliers', a.supplier_id, 'supplier')
+
       const insertRow: any = {
         part_number,
-        beperp_part_no: a.beperp_part_no,
-        manufacturer_part_number: a.manufacturer_part_number || null,
-        description: a.description,
+        beperp_part_no: String(a.beperp_part_no).trim(),
+        manufacturer_part_number: a.manufacturer_part_number ? String(a.manufacturer_part_number).trim() : null,
+        description: String(a.description).trim(),
         supplier_id: a.supplier_id,
         manufacturer: a.manufacturer || null,
         base_price: a.base_price,
@@ -445,6 +497,11 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       return `Update ${a.part_type} #${a.part_id}: ${bits.join(', ') || 'metadata'}`
     },
     handler: async (a: any) => {
+      assertInteger('part_id', a.part_id)
+      if (a.base_price != null) assertNumberInRange('base_price', a.base_price, 0, MAX_PRICE)
+      if (a.discount_percent != null) assertNumberInRange('discount_percent', a.discount_percent, 0, 100)
+      await assertRowExists(a.part_type, a.part_id, `${a.part_type} master part`)
+
       const patch: any = {}
       if (a.base_price != null) patch.base_price = a.base_price
       if (a.discount_percent != null) patch.discount_percent = a.discount_percent
@@ -453,6 +510,9 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       if (a.manufacturer_part_number) patch.manufacturer_part_number = a.manufacturer_part_number
       if (a.last_price_date) patch.updated_date = a.last_price_date
       else patch.updated_date = new Date().toISOString()
+      if (Object.keys(patch).length === 1 /* only updated_date */) {
+        throw new Error('update_master_part_price: nothing to update — supply at least one of base_price, discount_percent, currency, image_path, manufacturer_part_number, last_price_date.')
+      }
       const { data, error } = await (supabase as any)
         .from(a.part_type)
         .update(patch)
@@ -478,9 +538,23 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
     summarize: (a) => `Create section "${a.name}" in project #${a.project_id}`,
     handler: async (a: any) => {
+      assertNonEmpty('name', a.name)
+      assertMaxLen('name', a.name, 200)
+      assertInteger('project_id', a.project_id)
+      await assertRowExists('projects', a.project_id, 'project')
+      // Reject duplicate section name within the same project
+      const { data: dup } = await (supabase as any)
+        .from('project_sections')
+        .select('id, name')
+        .eq('project_id', a.project_id)
+        .ilike('name', a.name.trim())
+        .limit(1)
+      if (dup && dup.length) {
+        throw new Error(`Section "${dup[0].name}" already exists in project #${a.project_id} (id ${dup[0].id}). Reuse it instead of creating a duplicate.`)
+      }
       const { data, error } = await (supabase as any)
         .from('project_sections')
-        .insert([{ project_id: a.project_id, name: a.name, order_index: a.order_index || 0 }])
+        .insert([{ project_id: a.project_id, name: a.name.trim(), order_index: a.order_index || 0 }])
         .select()
         .single()
       if (error) throw error
@@ -504,12 +578,39 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
     summarize: (a) => `Create subsection "${a.section_name}" under section #${a.section_id} (project #${a.project_id})`,
     handler: async (a: any) => {
+      assertNonEmpty('section_name', a.section_name)
+      assertMaxLen('section_name', a.section_name, 200)
+      assertInteger('project_id', a.project_id)
+      assertInteger('section_id', a.section_id)
+
+      // Verify the parent section exists AND belongs to the same project
+      const { data: parent } = await (supabase as any)
+        .from('project_sections')
+        .select('id, project_id, name')
+        .eq('id', a.section_id)
+        .maybeSingle()
+      if (!parent) throw new Error(`Parent section #${a.section_id} does not exist.`)
+      if (parent.project_id !== a.project_id) {
+        throw new Error(`Section #${a.section_id} belongs to project #${parent.project_id}, not #${a.project_id}.`)
+      }
+
+      // Reject duplicate subsection name under the same section
+      const { data: dup } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, section_name')
+        .eq('section_id', a.section_id)
+        .ilike('section_name', a.section_name.trim())
+        .limit(1)
+      if (dup && dup.length) {
+        throw new Error(`Subsection "${dup[0].section_name}" already exists under section #${a.section_id} (id ${dup[0].id}). Reuse it.`)
+      }
+
       const { data, error } = await (supabase as any)
         .from('project_subsections')
         .insert([{
           project_id: a.project_id,
           section_id: a.section_id,
-          section_name: a.section_name,
+          section_name: a.section_name.trim(),
           description: a.description || null,
           status: 'active',
           sort_order: a.sort_order || 0,
@@ -541,6 +642,13 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     summarize: (a) =>
       `Map ${a.quantity}× ${a.part_type} #${a.part_id} @ ${a.currency || 'INR'} ${a.unit_price} to subsection ${a.project_subsection_id} (disc ${a.discount_percent || 0}%)`,
     handler: async (a: any) => {
+      // Field-level interlocks
+      assertInteger('project_subsection_id', a.project_subsection_id)
+      assertInteger('part_id', a.part_id)
+      assertNumberInRange('quantity', a.quantity, 1, MAX_QTY)
+      assertNumberInRange('unit_price', a.unit_price, 0, MAX_PRICE)
+      if (a.discount_percent != null) assertNumberInRange('discount_percent', a.discount_percent, 0, 100)
+
       // Hard guard 1: master part must exist. add_part_to_project NEVER creates master parts.
       const { data: master, error: lookupErr } = await (supabase as any)
         .from(a.part_type)
@@ -620,6 +728,49 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     summarize: (a) =>
       `Move project_part #${a.project_part_id} → subsection #${a.target_subsection_id}`,
     handler: async (a: any) => {
+      assertInteger('project_part_id', a.project_part_id)
+      assertInteger('target_subsection_id', a.target_subsection_id)
+      // Verify both rows exist and that the move is within the same project
+      const { data: src } = await (supabase as any)
+        .from('project_parts')
+        .select('id, project_section_id, part_type, part_id')
+        .eq('id', a.project_part_id)
+        .maybeSingle()
+      if (!src) throw new Error(`project_part #${a.project_part_id} does not exist.`)
+      const { data: dstSub } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, project_id, section_name')
+        .eq('id', a.target_subsection_id)
+        .maybeSingle()
+      if (!dstSub) throw new Error(`target_subsection_id #${a.target_subsection_id} does not exist.`)
+      const { data: srcSub } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, project_id')
+        .eq('id', src.project_section_id)
+        .maybeSingle()
+      if (srcSub && srcSub.project_id !== dstSub.project_id) {
+        throw new Error(
+          `Refusing cross-project move: project_part #${a.project_part_id} is in project #${srcSub.project_id}, ` +
+          `target subsection is in project #${dstSub.project_id}. Cross-project moves are not supported.`,
+        )
+      }
+      if (src.project_section_id === a.target_subsection_id) {
+        throw new Error(`project_part #${a.project_part_id} is already in subsection #${a.target_subsection_id}.`)
+      }
+      // Don't allow the move if the destination subsection already has the same master part mapped
+      const { data: existing } = await (supabase as any)
+        .from('project_parts')
+        .select('id')
+        .eq('part_type', src.part_type)
+        .eq('part_id', src.part_id)
+        .eq('project_section_id', a.target_subsection_id)
+        .limit(1)
+      if (existing && existing.length) {
+        throw new Error(
+          `Subsection "${dstSub.section_name}" already has this master part (line id ${existing[0].id}). ` +
+          `Merge with update_part_quantity instead of moving and creating a duplicate.`,
+        )
+      }
       const { data, error } = await (supabase as any)
         .from('project_parts')
         .update({ project_section_id: a.target_subsection_id })
@@ -652,10 +803,18 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       return `Update project_part #${a.project_part_id}: ${parts.join(', ')}`
     },
     handler: async (a: any) => {
+      assertInteger('project_part_id', a.project_part_id)
+      if (a.quantity != null) assertNumberInRange('quantity', a.quantity, 0, MAX_QTY)
+      if (a.unit_price != null) assertNumberInRange('unit_price', a.unit_price, 0, MAX_PRICE)
+      if (a.discount_percent != null) assertNumberInRange('discount_percent', a.discount_percent, 0, 100)
+      await assertRowExists('project_parts', a.project_part_id, 'project_part')
       const patch: any = {}
       if (a.quantity != null) patch.quantity = a.quantity
       if (a.unit_price != null) patch.unit_price = a.unit_price
       if (a.discount_percent != null) patch.discount_percent = a.discount_percent
+      if (Object.keys(patch).length === 0) {
+        throw new Error('update_part_quantity: nothing to update — supply at least one of quantity, unit_price, discount_percent.')
+      }
       const { data, error } = await (supabase as any)
         .from('project_parts')
         .update(patch)
@@ -716,8 +875,17 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
     summarize: (a) => `Stock IN: +${a.quantity} of ${a.part_number} (${a.part_table_name})`,
     handler: async (a: any) => {
+      assertInteger('part_id', a.part_id)
+      assertNumberInRange('quantity', a.quantity, 1, MAX_QTY)
+      assertNonEmpty('part_number', a.part_number)
       const { data: part } = await (supabase as any)
-        .from(a.part_table_name).select('stock_quantity').eq('id', a.part_id).single()
+        .from(a.part_table_name).select('id, stock_quantity, part_number').eq('id', a.part_id).maybeSingle()
+      if (!part) throw new Error(`${a.part_table_name} master part #${a.part_id} does not exist.`)
+      if (part.part_number && part.part_number !== a.part_number) {
+        throw new Error(
+          `part_number mismatch: master record is "${part.part_number}" but stock_in payload says "${a.part_number}". Verify the row before retrying.`,
+        )
+      }
       const stockBefore = (part as any)?.stock_quantity ?? 0
       const stockAfter = stockBefore + a.quantity
       await (supabase as any).from(a.part_table_name).update({ stock_quantity: stockAfter }).eq('id', a.part_id)
@@ -753,10 +921,19 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
     summarize: (a) => `Stock OUT: -${a.quantity} of ${a.part_number} (${a.part_table_name})`,
     handler: async (a: any) => {
+      assertInteger('part_id', a.part_id)
+      assertNumberInRange('quantity', a.quantity, 1, MAX_QTY)
+      assertNonEmpty('part_number', a.part_number)
       const { data: part } = await (supabase as any)
-        .from(a.part_table_name).select('stock_quantity').eq('id', a.part_id).single()
+        .from(a.part_table_name).select('id, stock_quantity, part_number').eq('id', a.part_id).maybeSingle()
+      if (!part) throw new Error(`${a.part_table_name} master part #${a.part_id} does not exist.`)
+      if (part.part_number && part.part_number !== a.part_number) {
+        throw new Error(
+          `part_number mismatch: master record is "${part.part_number}" but stock_out payload says "${a.part_number}". Verify the row before retrying.`,
+        )
+      }
       const stockBefore = (part as any)?.stock_quantity ?? 0
-      if (stockBefore < a.quantity) throw new Error(`Insufficient stock. Have ${stockBefore}, need ${a.quantity}`)
+      if (stockBefore < a.quantity) throw new Error(`Insufficient stock for ${part.part_number}. Have ${stockBefore}, need ${a.quantity}.`)
       const stockAfter = stockBefore - a.quantity
       await (supabase as any).from(a.part_table_name).update({ stock_quantity: stockAfter }).eq('id', a.part_id)
       return stockMovementsApi.addMovement({
