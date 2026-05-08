@@ -16,8 +16,13 @@
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 export const MAX_PDF_TEXT_CHARS = 200_000
-export const PDFJS_VERSION = '4.7.76'
-export const PDFJS_CDN = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}`
+// v3.x ships UMD that loads via a classic <script> tag. v4+ is ESM-only.
+export const PDFJS_VERSION = '3.11.174'
+const PDFJS_SOURCES = [
+  `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}`,
+  `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build`,
+  `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build`,
+]
 
 export interface ImageAttachment {
   kind: 'image'
@@ -59,24 +64,42 @@ export async function fileToImageAttachment(f: File): Promise<ImageAttachment> {
 
 let pdfjsLoadingPromise: Promise<any> | null = null
 
+function loadScript(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = src
+    s.async = true
+    s.onload = () => resolve()
+    s.onerror = () => reject(new Error(`Failed to load ${src}`))
+    document.head.appendChild(s)
+  })
+}
+
 async function loadPdfJs(): Promise<any> {
   if ((window as any).pdfjsLib) return (window as any).pdfjsLib
   if (pdfjsLoadingPromise) return pdfjsLoadingPromise
-  pdfjsLoadingPromise = new Promise<any>((resolve, reject) => {
-    const s = document.createElement('script')
-    s.src = `${PDFJS_CDN}/pdf.min.js`
-    s.onload = () => {
-      const lib = (window as any).pdfjsLib
-      if (!lib) {
-        reject(new Error('pdf.js failed to load'))
-        return
+
+  pdfjsLoadingPromise = (async () => {
+    let lastErr: any = null
+    for (const base of PDFJS_SOURCES) {
+      try {
+        await loadScript(`${base}/pdf.min.js`)
+        const lib = (window as any).pdfjsLib
+        if (!lib) throw new Error('pdf.min.js loaded but window.pdfjsLib is missing')
+        lib.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.min.js`
+        return lib
+      } catch (e) {
+        lastErr = e
+        // try next CDN
       }
-      lib.GlobalWorkerOptions.workerSrc = `${PDFJS_CDN}/pdf.worker.min.js`
-      resolve(lib)
     }
-    s.onerror = () => reject(new Error('Could not fetch pdf.js from CDN'))
-    document.head.appendChild(s)
-  })
+    throw new Error(
+      `Could not load pdf.js from any CDN. Last error: ${lastErr?.message || lastErr}. ` +
+      `Check the browser console for blocked requests (CSP, ad-blocker, offline).`,
+    )
+  })()
+
+  pdfjsLoadingPromise.catch(() => { pdfjsLoadingPromise = null })  // allow retry next time
   return pdfjsLoadingPromise
 }
 
