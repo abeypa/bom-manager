@@ -79,7 +79,7 @@ export default function Reports() {
   const { data: customers = [] } =
     useQuery({ queryKey: ['report-customers'], queryFn: reportsApi.getCustomers })
 
-  // KPIs
+  // KPIs (top strip — across all data matching server-side filters)
   const totalBOM = projectData.reduce((s, p) => s + p.bom_total_value, 0)
   const totalPO  = projectData.reduce((s, p) => s + p.po_total_value, 0)
   const totalReceived = projectData.reduce((s, p) => s + p.po_received_value, 0)
@@ -302,18 +302,27 @@ export default function Reports() {
                   </tr>
                 ))}
               </tbody>
-              {sortedProjects.length > 0 && (
-                <tfoot>
-                  <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={3} className="px-5 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider">Totals</td>
-                    <td className="px-5 py-3.5 font-mono font-bold text-gray-900">{fmt(totalBOM)}</td>
-                    <td className="px-5 py-3.5 text-center font-mono font-bold text-gray-900">{poData.length}</td>
-                    <td className="px-5 py-3.5 font-mono font-bold text-gray-900">{fmt(totalPO)}</td>
-                    <td className="px-5 py-3.5 font-mono font-bold text-emerald-600">{fmt(totalReceived)}</td>
-                    <td className="px-5 py-3.5 font-mono font-bold text-amber-600">{fmt(totalPending)}</td>
-                  </tr>
-                </tfoot>
-              )}
+              {sortedProjects.length > 0 && (() => {
+                const fBOM = sortedProjects.reduce((s, p) => s + p.bom_total_value, 0)
+                const fPO = sortedProjects.reduce((s, p) => s + p.po_total_value, 0)
+                const fRecv = sortedProjects.reduce((s, p) => s + p.po_received_value, 0)
+                const fPend = sortedProjects.reduce((s, p) => s + p.po_pending_value, 0)
+                const fPOCount = sortedProjects.reduce((s, p) => s + p.po_count, 0)
+                return (
+                  <tfoot>
+                    <tr className="bg-gray-50 border-t-2 border-gray-200">
+                      <td colSpan={3} className="px-5 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider">
+                        Totals ({sortedProjects.length} {sortedProjects.length === 1 ? 'project' : 'projects'})
+                      </td>
+                      <td className="px-5 py-3.5 font-mono font-bold text-gray-900">{fmt(fBOM)}</td>
+                      <td className="px-5 py-3.5 text-center font-mono font-bold text-gray-900">{fPOCount}</td>
+                      <td className="px-5 py-3.5 font-mono font-bold text-gray-900">{fmt(fPO)}</td>
+                      <td className="px-5 py-3.5 font-mono font-bold text-emerald-600">{fmt(fRecv)}</td>
+                      <td className="px-5 py-3.5 font-mono font-bold text-amber-600">{fmt(fPend)}</td>
+                    </tr>
+                  </tfoot>
+                )
+              })()}
             </table>
           </div>
         </div>

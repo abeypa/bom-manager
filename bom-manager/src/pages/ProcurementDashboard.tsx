@@ -153,9 +153,10 @@ export default function ProcurementDashboard() {
         <div>
           <p className="label-caps mb-1.5 flex items-center gap-2">
             <Activity className="h-3.5 w-3.5 text-navy-500" />
-            Global Supply Chain Registry
+            Pending Procurement
           </p>
-          <h1 className="page-title">Procurement Manager</h1>
+          <h1 className="page-title">Procurement</h1>
+          <p className="text-sm text-secondary mt-1">Group pending BOM parts by supplier and create draft purchase orders.</p>
         </div>
 
         <div className="flex items-center gap-4">
@@ -165,17 +166,23 @@ export default function ProcurementDashboard() {
                 const partsToPO = pendingParts?.filter((p: any) => selectedParts.has(p.id)) || [];
                 if (partsToPO.length === 0) return;
                 const suppId = getSupplierId(partsToPO[0]);
-                const sameSupplier = partsToPO.every((p: any) => getSupplierId(p) === suppId);
-                if (!sameSupplier) {
-                  showToast('error', 'Critical Error: Selection crosses multiple supply partners. PO must be partner-specific.');
+                if (!suppId) {
+                  showToast('error', 'Selected parts have no supplier assigned. Assign a supplier on the part before creating a PO.');
                   return;
                 }
+                const sameSupplier = partsToPO.every((p: any) => getSupplierId(p) === suppId);
+                if (!sameSupplier) {
+                  showToast('error', 'Selection contains parts from multiple suppliers. A purchase order can only be raised against one supplier at a time.');
+                  return;
+                }
+                if (!window.confirm(`Create a draft PO for ${partsToPO.length} part(s)?`)) return;
                 generatePOMutation.mutate({ supplierId: suppId, parts: partsToPO });
               }}
               className="btn btn-primary btn-lg shadow-xl shadow-navy-900/10 px-8 scale-110"
+              disabled={generatePOMutation.isPending}
              >
                 <ShoppingCart className="w-4 h-4" />
-                RELEASE MANIFEST ({selectedParts.size})
+                {generatePOMutation.isPending ? 'Creating…' : `Create Draft PO (${selectedParts.size})`}
              </button>
            )}
         </div>
@@ -188,7 +195,7 @@ export default function ProcurementDashboard() {
           <input 
             type="text"
             className="input pl-11"
-            placeholder="Search by vendor identity or supply partner..."
+            placeholder="Search suppliers…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -200,9 +207,9 @@ export default function ProcurementDashboard() {
           <div className="bg-slate-50 w-24 h-24 rounded-full flex items-center justify-center mb-6 border border-slate-100 shadow-inner">
             <ShoppingCart size={40} className="text-tertiary" />
           </div>
-          <h3 className="section-title mb-2">No pending procurement entities</h3>
+          <h3 className="section-title mb-2">No pending parts to procure</h3>
           <p className="text-secondary mb-8 max-w-sm text-center">
-            All project artifacts have been satisfied or no BOMs have been finalized for procurement yet.
+            Either every BOM line has been ordered, or no projects have parts marked for procurement yet.
           </p>
         </div>
       ) : (
@@ -215,12 +222,12 @@ export default function ProcurementDashboard() {
                          <Factory className="w-6 h-6 text-navy-600" />
                       </div>
                       <div>
-                         <h3 className="text-lg font-black tracking-tight text-navy-900 leading-none mb-1.5 uppercase">{name}</h3>
-                         <p className="label-caps !text-[9px] !text-tertiary">{data.parts.length} PENDING ARTIFACTS</p>
+                         <h3 className="text-lg font-black tracking-tight text-navy-900 leading-none mb-1.5">{name}</h3>
+                         <p className="label-caps !text-[9px] !text-tertiary">{data.parts.length} pending part{data.parts.length === 1 ? '' : 's'}</p>
                       </div>
                    </div>
                    <div className="text-right">
-                      <p className="label-caps !text-[8px] !text-navy-400 mb-1">AGGREGATED VALUATION</p>
+                      <p className="label-caps !text-[8px] !text-navy-400 mb-1">Total value</p>
                       <p className="text-2xl font-black text-navy-900 tabular-nums italic tracking-tighter">
                         <span className="text-xs font-black not-italic mr-1 text-tertiary">₹</span>
                         {data.parts.reduce((sum: number, p: any) => sum + (p.quantity * p.unit_price), 0).toLocaleString('en-IN')}
@@ -249,11 +256,11 @@ export default function ProcurementDashboard() {
                                   {isSelected ? <CheckCircle2 size={18} /> : <Package size={18} />}
                                </div>
                                <div className="min-w-0">
-                                  <p className="text-xs font-black text-navy-900 truncate tracking-tight uppercase leading-none mb-1.5 group-hover/item:text-amber-700 transition-colors">{partNumber}</p>
+                                  <p className="text-xs font-black text-navy-900 truncate tracking-tight leading-none mb-1.5 group-hover/item:text-amber-700 transition-colors">{partNumber}</p>
                                   <div className="flex items-center gap-2">
                                      <Briefcase size={10} className="text-slate-300" />
                                      <p className="label-caps !text-[8px] !text-tertiary truncate">
-                                        {p.subsection?.section?.project?.project_name || 'MASTER'} <span className="mx-1 opacity-20">•</span> {p.subsection?.section_name || 'CORE'}
+                                        {p.subsection?.section?.project?.project_name || 'No project'} <span className="mx-1 opacity-20">•</span> {p.subsection?.section_name || 'No section'}
                                      </p>
                                   </div>
                                </div>
@@ -281,7 +288,7 @@ export default function ProcurementDashboard() {
                       }}
                       className="btn btn-ghost btn-sm w-full font-black text-[10px] tracking-[0.1em] hover:text-navy-900"
                     >
-                       {data.parts.every((p: any) => selectedParts.has(p.id)) ? 'DISCARD ALL SELECTIONS' : 'SELECT ALL VENDOR ITEMS'}
+                       {data.parts.every((p: any) => selectedParts.has(p.id)) ? 'Clear selection' : 'Select all parts from this supplier'}
                        <ArrowRight size={14} className="ml-2" />
                     </button>
                 </div>
