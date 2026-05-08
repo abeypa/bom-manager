@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { reportsApi, ReportFilters } from '@/api/reports'
+import { reportsApi, ReportFilters, ReconciliationRow } from '@/api/reports'
 import {
   BarChart3, FileText, TrendingUp, Package, ShoppingCart,
   Filter, Download, RefreshCw, ChevronUp, ChevronDown, Search
@@ -63,7 +63,8 @@ function KPICard({ label, value, sub, icon: Icon, color }: {
 type SortKey = 'project_name' | 'bom_total_value' | 'po_total_value' | 'po_count' | 'status'
 
 export default function Reports() {
-  const [tab, setTab] = useState<'projects' | 'po'>('projects')
+  const [tab, setTab] = useState<'projects' | 'po' | 'reconcile'>('projects')
+  const [reconcileScope, setReconcileScope] = useState<'mismatches' | 'all'>('mismatches')
   const [filters, setFilters] = useState<ReportFilters>({ status: 'all', poStatus: 'all' })
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('bom_total_value')
@@ -78,6 +79,13 @@ export default function Reports() {
 
   const { data: customers = [] } =
     useQuery({ queryKey: ['report-customers'], queryFn: reportsApi.getCustomers })
+
+  const { data: reconcileRows = [], isLoading: reconcileLoading, refetch: refetchReconcile } =
+    useQuery<ReconciliationRow[]>({
+      queryKey: ['reports-reconcile'],
+      queryFn: () => reportsApi.getReconciliation(),
+      enabled: tab === 'reconcile',
+    })
 
   // KPIs (top strip — across all data matching server-side filters)
   const totalBOM = projectData.reduce((s, p) => s + p.bom_total_value, 0)
@@ -139,17 +147,38 @@ export default function Reports() {
         `${p.project_number},"${p.project_name}","${p.customer || ''}",${p.status},${p.bom_total_value.toFixed(2)},${p.po_count},${p.po_total_value.toFixed(2)},${p.po_received_value.toFixed(2)},${p.po_pending_value.toFixed(2)}`
       )
       downloadCSV([header, ...rows].join('\n'), 'project-financials.csv')
-    } else {
+    } else if (tab === 'po') {
       const header = 'PO Number,Project,Supplier,Status,Currency,Grand Total,PO Date'
       const rows = sortedPOs.map(p =>
         `${p.po_number},"${p.project_name}","${p.supplier_name}",${p.status},${p.currency},${p.grand_total.toFixed(2)},${p.po_date}`
       )
       downloadCSV([header, ...rows].join('\n'), 'po-report.csv')
+    } else {
+      const header = 'Project Number,Project Name,Part Number,Description,Issue,BOM Qty,PO Qty,Qty Delta,BOM Value,PO Value,Value Delta,POs'
+      const rows = filteredReconcile.map(r =>
+        `${r.project_number},"${r.project_name}",${r.part_number},"${(r.description || '').replace(/"/g, '""')}",${r.issue},${r.bom_qty},${r.po_qty},${r.qty_delta},${r.bom_value.toFixed(2)},${r.po_value.toFixed(2)},${r.value_delta.toFixed(2)},"${r.po_numbers.join(' ')}"`
+      )
+      downloadCSV([header, ...rows].join('\n'), 'reconciliation.csv')
     }
   }
 
-  const isLoading = tab === 'projects' ? projLoading : poLoading
-  const refetch = tab === 'projects' ? refetchProj : refetchPO
+  const filteredReconcile = useMemo(() => {
+    let rows = reconcileRows
+    if (reconcileScope === 'mismatches') rows = rows.filter(r => r.issue !== 'OK')
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      rows = rows.filter(r =>
+        r.project_name.toLowerCase().includes(q) ||
+        r.project_number.toLowerCase().includes(q) ||
+        r.part_number.toLowerCase().includes(q) ||
+        r.description.toLowerCase().includes(q)
+      )
+    }
+    return rows
+  }, [reconcileRows, reconcileScope, search])
+
+  const isLoading = tab === 'projects' ? projLoading : tab === 'po' ? poLoading : reconcileLoading
+  const refetch = tab === 'projects' ? refetchProj : tab === 'po' ? refetchPO : refetchReconcile
 
   return (
     <div className="space-y-6">
@@ -191,13 +220,24 @@ export default function Reports() {
 
           {/* Tab */}
           <div className="flex rounded-xl bg-gray-100 p-1 gap-1">
-            {(['projects', 'po'] as const).map(t => (
+            {(['projects', 'po', 'reconcile'] as const).map(t => (
               <button key={t} onClick={() => { setTab(t); setSearch('') }}
                 className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${tab === t ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-                {t === 'projects' ? 'By Project' : 'By PO'}
+                {t === 'projects' ? 'By Project' : t === 'po' ? 'By PO' : 'Reconciliation'}
               </button>
             ))}
           </div>
+
+          {tab === 'reconcile' && (
+            <div className="flex rounded-xl bg-gray-100 p-1 gap-1">
+              {(['mismatches', 'all'] as const).map(s => (
+                <button key={s} onClick={() => setReconcileScope(s)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${reconcileScope === s ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {s === 'mismatches' ? 'Mismatches only' : 'All parts'}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="w-px h-5 bg-gray-200" />
 
@@ -326,7 +366,7 @@ export default function Reports() {
             </table>
           </div>
         </div>
-      ) : (
+      ) : tab === 'po' ? (
         <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -371,7 +411,89 @@ export default function Reports() {
             </table>
           </div>
         </div>
+      ) : (
+        <ReconciliationTable rows={filteredReconcile} loading={isLoading} fmt={fmt} />
       )}
+    </div>
+  )
+}
+
+// ─── Reconciliation table ────────────────────────────────────────────────────
+const ISSUE_LABEL: Record<ReconciliationRow['issue'], { label: string; cls: string }> = {
+  OK:             { label: 'OK',            cls: 'bg-emerald-500/15 text-emerald-700' },
+  QTY_MISMATCH:   { label: 'Qty mismatch',  cls: 'bg-amber-500/15 text-amber-700' },
+  VALUE_MISMATCH: { label: 'Value mismatch',cls: 'bg-amber-500/15 text-amber-700' },
+  BOM_NO_PO:      { label: 'BOM, no PO',    cls: 'bg-slate-500/15 text-slate-700' },
+  PO_NO_BOM:      { label: 'PO, no BOM',    cls: 'bg-red-500/15 text-red-700' },
+}
+
+function ReconciliationTable({
+  rows,
+  loading,
+  fmt,
+}: {
+  rows: ReconciliationRow[]
+  loading: boolean
+  fmt: (v: number, ccy?: string) => string
+}) {
+  return (
+    <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
+        <p className="text-xs text-gray-500">
+          Compares BOM (project_parts) vs PO (purchase_order_items) per part. Mismatches indicate over-/under-ordering, duplicate PO lines, or items added on a PO that aren't in the BOM.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100">
+              {['Project', 'Part', 'Issue', 'BOM Qty', 'PO Qty', 'Δ Qty', 'BOM Value', 'PO Value', 'Δ Value', 'POs'].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={10} className="py-16 text-center text-gray-400 text-sm">Loading…</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={10} className="py-16 text-center text-emerald-600 text-sm font-semibold">No mismatches — BOM and POs are aligned.</td></tr>
+            ) : rows.map((r, i) => {
+              const il = ISSUE_LABEL[r.issue]
+              const dq = r.qty_delta
+              const dv = r.value_delta
+              return (
+                <tr key={`${r.project_id}-${r.part_type}-${r.part_id}-${i}`}
+                  className={`border-b border-gray-50 hover:bg-blue-50/40 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                  <td className="px-4 py-3">
+                    <div className="font-semibold text-gray-900 text-xs">{r.project_name}</div>
+                    <div className="text-[10px] text-gray-400 font-mono">{r.project_number}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-mono text-xs font-semibold text-gray-900">{r.part_number}</div>
+                    <div className="text-[10px] text-gray-400 truncate max-w-[260px]">{r.description || r.part_type}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${il.cls}`}>{il.label}</span>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700 text-right">{r.bom_qty}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700 text-right">{r.po_qty}</td>
+                  <td className={`px-4 py-3 font-mono text-xs text-right font-bold ${dq > 0 ? 'text-red-600' : dq < 0 ? 'text-amber-600' : 'text-gray-300'}`}>
+                    {dq > 0 ? `+${dq}` : dq}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700 text-right">{fmt(r.bom_value)}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700 text-right">{fmt(r.po_value)}</td>
+                  <td className={`px-4 py-3 font-mono text-xs text-right font-bold ${dv > 0.01 ? 'text-red-600' : dv < -0.01 ? 'text-amber-600' : 'text-gray-300'}`}>
+                    {dv > 0 ? `+${fmt(dv)}` : fmt(dv)}
+                  </td>
+                  <td className="px-4 py-3 text-[10px] text-gray-500 font-mono">{r.po_numbers.join(', ') || '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
