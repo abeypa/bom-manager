@@ -177,7 +177,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'find_master_part_by_erp_id',
     kind: 'read',
     description:
-      'Find an existing master part by ERP Integration ID (column beperp_part_no), manufacturer_part_number, or part_number. Searches all part_types unless one is specified. Use this BEFORE creating a new master part to avoid duplicates.',
+      'Find an existing master part by ERP Integration ID (column beperp_part_no), manufacturer_part_number, or part_number. Searches all part_types unless one is specified. Use this BEFORE creating a new master part to avoid duplicates AND before adding a part to any project — mapping a project line requires the master part to already exist.',
     parameters: {
       type: 'object',
       required: ['code'],
@@ -198,37 +198,6 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         for (const d of data || []) out.push({ part_type: pt, ...d })
       }
       return out
-    },
-  },
-  {
-    name: 'get_next_internal_part_number',
-    kind: 'read',
-    description:
-      'Suggest the next available Internal Part Number for a prefix (EBO, EMF, MBO, MMF, PBO). Reads the matching master table and returns "<PREFIX>-<NNNN>".',
-    parameters: {
-      type: 'object',
-      required: ['prefix'],
-      properties: {
-        prefix: { type: 'string', enum: Object.keys(PART_TYPE_BY_PREFIX) },
-        pad: { type: 'number', default: 4, description: 'Zero-pad width' },
-      },
-    },
-    handler: async ({ prefix, pad = 4 }: any) => {
-      const pt = PART_TYPE_BY_PREFIX[prefix]
-      if (!pt) throw new Error(`Unknown prefix: ${prefix}`)
-      const { data } = await (supabase as any)
-        .from(pt)
-        .select('part_number')
-        .ilike('part_number', `${prefix}-%`)
-        .order('part_number', { ascending: false })
-        .limit(50)
-      let max = 0
-      for (const r of data || []) {
-        const m = String(r.part_number).match(new RegExp(`^${prefix}-(\\d+)$`, 'i'))
-        if (m) max = Math.max(max, parseInt(m[1], 10))
-      }
-      const next = String(max + 1).padStart(pad, '0')
-      return { prefix, part_type: pt, next: `${prefix}-${next}`, current_max: max }
     },
   },
   {
@@ -365,13 +334,12 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'create_master_part',
     kind: 'write',
     description:
-      'Create a master part record. Always look up first with find_master_part_by_erp_id; never create a duplicate. The Internal Part Number must come from get_next_internal_part_number. ERP Integration ID (Item Code from PO PDF) goes into beperp_part_no. The supplier-side / manufacturer code goes into manufacturer_part_number. last_price_date should be the PO date.',
+      'Create a master part record. Always look up first with find_master_part_by_erp_id; never create a duplicate. ERP Integration ID (Item Code from PO PDF) goes into beperp_part_no. The supplier-side / manufacturer code goes into manufacturer_part_number. The Internal Part Number is derived automatically as "<PREFIX>-<beperp_part_no>" based on the part_type — DO NOT supply part_number; it is computed for you. last_price_date should be the PO date.',
     parameters: {
       type: 'object',
-      required: ['part_type', 'part_number', 'beperp_part_no', 'description', 'supplier_id', 'base_price'],
+      required: ['part_type', 'beperp_part_no', 'description', 'supplier_id', 'base_price'],
       properties: {
         part_type: { type: 'string', enum: part_type_enum },
-        part_number: { type: 'string', description: 'Internal part number (e.g. EBO-0047)' },
         beperp_part_no: { type: 'string', description: 'ERP Integration ID = Item Code from PO PDF' },
         manufacturer_part_number: { type: 'string', description: 'Supplier / OEM catalogue number, e.g. 5ST3010' },
         description: { type: 'string' },
@@ -385,12 +353,31 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         specifications: { type: 'string' },
       },
     },
-    summarize: (a) =>
-      `Create ${a.part_type} ${a.part_number} (ERP ${a.beperp_part_no})${a.manufacturer_part_number ? ' / ' + a.manufacturer_part_number : ''} @ ${a.currency || 'INR'} ${a.base_price}` +
-      (a.discount_percent ? ` (-${a.discount_percent}%)` : ''),
+    summarize: (a) => {
+      const prefix = PREFIX_BY_PART_TYPE[a.part_type] || '?'
+      return `Create ${a.part_type} ${prefix}-${a.beperp_part_no} (ERP ${a.beperp_part_no})${a.manufacturer_part_number ? ' / ' + a.manufacturer_part_number : ''} @ ${a.currency || 'INR'} ${a.base_price}` +
+        (a.discount_percent ? ` (-${a.discount_percent}%)` : '')
+    },
     handler: async (a: any) => {
+      const prefix = PREFIX_BY_PART_TYPE[a.part_type]
+      if (!prefix) throw new Error(`Unknown part_type: ${a.part_type}`)
+      if (!a.beperp_part_no) throw new Error('beperp_part_no (ERP Item Code) is required')
+      const part_number = `${prefix}-${a.beperp_part_no}`
+
+      // Hard duplicate check before insert
+      const { data: dup } = await (supabase as any)
+        .from(a.part_type)
+        .select('id, part_number')
+        .or(`part_number.eq.${part_number},beperp_part_no.eq.${a.beperp_part_no}`)
+        .limit(1)
+      if (dup && dup.length) {
+        throw new Error(
+          `A master part with part_number "${part_number}" or ERP id "${a.beperp_part_no}" already exists (id ${dup[0].id}). Use update_master_part_price to change its data.`,
+        )
+      }
+
       const insertRow: any = {
-        part_number: a.part_number,
+        part_number,
         beperp_part_no: a.beperp_part_no,
         manufacturer_part_number: a.manufacturer_part_number || null,
         description: a.description,
@@ -402,7 +389,6 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         image_path: a.image_path || null,
         specifications: a.specifications || null,
       }
-      // last_price_date is stored in updated_date if there is no dedicated column.
       if (a.last_price_date) insertRow.updated_date = a.last_price_date
       const { data, error } = await (supabase as any)
         .from(a.part_type)
@@ -519,7 +505,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'add_part_to_project',
     kind: 'write',
     description:
-      'Add a master part as a BOM line in a project subsection. Requires user approval. Use search_master_parts first to find part_id and part_type.',
+      'Map an EXISTING master part to a project subsection as a BOM line. NEVER use this with a part_id you have not first verified via find_master_part_by_erp_id or search_master_parts. This tool will REJECT any (part_type, part_id) that is not in the master catalogue — it does NOT create new master parts. If the part is missing from master, stop and ask the user; only ingest a PO PDF or manually create the master record first.',
     parameters: {
       type: 'object',
       required: ['project_subsection_id', 'part_type', 'part_id', 'quantity', 'unit_price'],
@@ -534,8 +520,53 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       },
     },
     summarize: (a) =>
-      `Add ${a.quantity}× ${a.part_type} #${a.part_id} @ ${a.currency || 'INR'} ${a.unit_price} to subsection ${a.project_subsection_id} (disc ${a.discount_percent || 0}%)`,
+      `Map ${a.quantity}× ${a.part_type} #${a.part_id} @ ${a.currency || 'INR'} ${a.unit_price} to subsection ${a.project_subsection_id} (disc ${a.discount_percent || 0}%)`,
     handler: async (a: any) => {
+      // Hard guard 1: master part must exist. add_part_to_project NEVER creates master parts.
+      const { data: master, error: lookupErr } = await (supabase as any)
+        .from(a.part_type)
+        .select('id, part_number, beperp_part_no')
+        .eq('id', a.part_id)
+        .maybeSingle()
+      if (lookupErr) throw lookupErr
+      if (!master) {
+        throw new Error(
+          `Master part not found: ${a.part_type} #${a.part_id}. add_part_to_project only maps existing master parts. ` +
+          `Use find_master_part_by_erp_id first; if the part is missing from master, ingest a PO PDF or create it explicitly with create_master_part — but do NOT auto-create as part of mapping.`,
+        )
+      }
+
+      // Hard guard 2: never map the same master part twice into the same project.
+      // We need the project_id of the chosen subsection to scope the duplicate check.
+      const { data: targetSub, error: subErr } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, project_id, section_name')
+        .eq('id', a.project_subsection_id)
+        .maybeSingle()
+      if (subErr) throw subErr
+      if (!targetSub) throw new Error(`project_subsection ${a.project_subsection_id} not found.`)
+
+      const { data: peerSubs } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, section_name')
+        .eq('project_id', targetSub.project_id)
+      const peerIds = (peerSubs || []).map((s: any) => s.id)
+
+      const { data: existing } = await (supabase as any)
+        .from('project_parts')
+        .select('id, project_section_id, quantity, unit_price')
+        .eq('part_type', a.part_type)
+        .eq('part_id', a.part_id)
+        .in('project_section_id', peerIds.length ? peerIds : [targetSub.id])
+      if (existing && existing.length) {
+        const e = existing[0]
+        const where = (peerSubs || []).find((s: any) => s.id === e.project_section_id)?.section_name || `subsection #${e.project_section_id}`
+        throw new Error(
+          `This master part is already mapped to project #${targetSub.project_id} (line id ${e.id}, in "${where}", qty ${e.quantity} @ ${e.unit_price}). ` +
+          `Update the existing line via update_part_quantity / move_part_to_subsection instead of adding a duplicate.`,
+        )
+      }
+
       const { data, error } = await (supabase as any)
         .from('project_parts')
         .insert([
