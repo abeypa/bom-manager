@@ -1,11 +1,15 @@
 import { useState, useRef, useEffect } from 'react'
 import {
   Bot, X, Send, Settings as SettingsIcon, Trash2, Check, X as XIcon,
-  Loader2, AlertTriangle, FileText
+  Loader2, AlertTriangle, FileText, Paperclip, Image as ImageIcon, FileText as PdfIcon
 } from 'lucide-react'
 import { useAIStore, ChatMessage } from '@/store/useAIStore'
 import { sendUserMessage, approvePending, rejectPending } from '@/lib/ai-runner'
-import { isConfigured } from '@/lib/openrouter'
+import { isConfigured, loadSettings, modelSupportsVision } from '@/lib/openrouter'
+import {
+  fileToAttachment, isImageFile, isPDFFile,
+  type Attachment, type ImageAttachment
+} from '@/lib/ai-attachments'
 import AISettings from './AISettings'
 
 export default function AIChat() {
@@ -18,7 +22,36 @@ export default function AIChat() {
 
   const [input, setInput] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const [attachBusy, setAttachBusy] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const addFiles = async (files: FileList | File[]) => {
+    setAttachError(null)
+    setAttachBusy(true)
+    try {
+      const list = Array.from(files)
+      const out: Attachment[] = []
+      for (const f of list) {
+        if (!isImageFile(f) && !isPDFFile(f)) {
+          setAttachError(`Skipped ${f.name} — only images and PDFs are supported.`)
+          continue
+        }
+        try { out.push(await fileToAttachment(f)) } catch (e: any) {
+          setAttachError(e?.message || `Failed to read ${f.name}`)
+        }
+      }
+      if (out.length) setAttachments(a => [...a, ...out])
+    } finally {
+      setAttachBusy(false)
+    }
+  }
+
+  const removeAttachment = (i: number) =>
+    setAttachments(a => a.filter((_, idx) => idx !== i))
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -26,11 +59,18 @@ export default function AIChat() {
 
   const submit = async () => {
     const t = input.trim()
-    if (!t || busy) return
+    if ((!t && attachments.length === 0) || busy) return
     if (!isConfigured()) { setShowSettings(true); return }
+    const text = t || '(see attached file)'
+    const atts = attachments
     setInput('')
-    await sendUserMessage(t)
+    setAttachments([])
+    setAttachError(null)
+    await sendUserMessage(text, atts)
   }
+
+  const visionOk = modelSupportsVision(loadSettings().model)
+  const hasImage = attachments.some(a => a.kind === 'image')
 
   if (!open) return null
 
@@ -39,7 +79,15 @@ export default function AIChat() {
 
   return (
     <>
-      <div className="fixed bottom-4 right-4 z-50 w-[420px] max-w-[calc(100vw-2rem)] h-[640px] max-h-[calc(100vh-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+      <div
+        className={`fixed bottom-4 right-4 z-50 w-[420px] max-w-[calc(100vw-2rem)] h-[640px] max-h-[calc(100vh-2rem)] bg-white rounded-2xl shadow-2xl border ${dragOver ? 'border-navy-500 ring-4 ring-navy-500/20' : 'border-slate-200'} flex flex-col overflow-hidden`}
+        onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => {
+          e.preventDefault(); setDragOver(false)
+          if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files)
+        }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-navy-700 to-navy-900 text-white">
           <div className="flex items-center gap-2">
@@ -125,30 +173,75 @@ export default function AIChat() {
 
         {/* Footer / input */}
         <div className="border-t border-slate-100 p-3 bg-white">
+          {/* Attachment chips */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {attachments.map((a, i) => (
+                <AttachmentChip key={i} a={a} onRemove={() => removeAttachment(i)} />
+              ))}
+            </div>
+          )}
+          {hasImage && !visionOk && (
+            <div className="mb-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+              Selected model has no vision. Switch to a vision-capable model in settings, or attach a PDF instead.
+            </div>
+          )}
+          {attachError && (
+            <div className="mb-2 text-[10px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+              {attachError}
+            </div>
+          )}
           <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              multiple
+              hidden
+              onChange={e => {
+                if (e.target.files) addFiles(e.target.files)
+                e.target.value = ''
+              }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={attachBusy}
+              className="p-2.5 text-slate-500 hover:text-navy-700 hover:bg-slate-100 rounded-lg disabled:opacity-50"
+              title="Attach image or PDF"
+              aria-label="Attach file"
+            >
+              {attachBusy ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
+            </button>
             <textarea
               value={input}
               onChange={e => setInput(e.target.value)}
+              onPaste={e => {
+                const files = Array.from(e.clipboardData.files || [])
+                if (files.length) {
+                  e.preventDefault()
+                  addFiles(files)
+                }
+              }}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
                   submit()
                 }
               }}
-              placeholder={isConfigured() ? 'Ask about BOMs, POs, stock…' : 'Configure your OpenRouter key to start.'}
+              placeholder={isConfigured() ? 'Ask, paste/drop an image or PDF…' : 'Configure your OpenRouter key to start.'}
               rows={1}
               className="flex-1 text-sm resize-none px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20 max-h-32"
             />
             <button
               onClick={submit}
-              disabled={busy || !input.trim()}
+              disabled={busy || (!input.trim() && attachments.length === 0)}
               className="p-2.5 bg-navy-700 hover:bg-navy-800 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send size={14} />
             </button>
           </div>
           <p className="text-[10px] text-slate-400 mt-1.5 leading-tight">
-            Enter to send · Shift+Enter for newline · Writes always need your approval.
+            Enter to send · Shift+Enter for newline · Drop / paste images & PDFs · Writes always need your approval.
           </p>
         </div>
       </div>
@@ -162,8 +255,25 @@ function MessageBubble({ m }: { m: ChatMessage }) {
   if (m.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] bg-navy-700 text-white text-sm rounded-2xl rounded-br-sm px-3.5 py-2 whitespace-pre-wrap">
-          {m.content}
+        <div className="max-w-[85%] bg-navy-700 text-white text-sm rounded-2xl rounded-br-sm px-3.5 py-2 whitespace-pre-wrap space-y-2">
+          {m.attachments && m.attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 -m-0.5">
+              {m.attachments.map((a, i) => (
+                <div key={i} className="bg-white/10 rounded-lg overflow-hidden">
+                  {a.kind === 'image' ? (
+                    <img src={(a as ImageAttachment).dataUrl} alt={a.name} className="max-w-[160px] max-h-[160px] object-cover" />
+                  ) : (
+                    <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px]">
+                      <PdfIcon size={12} />
+                      <span className="font-mono truncate max-w-[140px]">{a.name}</span>
+                      <span className="text-white/50">{(a as any).pageCount}p</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {m.content && <div>{m.content}</div>}
         </div>
       </div>
     )
@@ -190,6 +300,28 @@ function MessageBubble({ m }: { m: ChatMessage }) {
     )
   }
   return null
+}
+
+function AttachmentChip({ a, onRemove }: { a: Attachment; onRemove: () => void }) {
+  return (
+    <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg pl-1.5 pr-1 py-1 text-[11px]">
+      {a.kind === 'image' ? (
+        <>
+          <img src={(a as ImageAttachment).dataUrl} className="w-7 h-7 object-cover rounded" />
+          <span className="truncate max-w-[100px] font-mono">{a.name}</span>
+        </>
+      ) : (
+        <>
+          <PdfIcon size={13} className="text-red-500" />
+          <span className="truncate max-w-[100px] font-mono">{a.name}</span>
+          <span className="text-slate-400">{(a as any).pageCount}p{(a as any).truncated ? ' · trim' : ''}</span>
+        </>
+      )}
+      <button onClick={onRemove} className="p-0.5 text-slate-400 hover:text-red-600">
+        <XIcon size={11} />
+      </button>
+    </div>
+  )
 }
 
 function HTMLReport({ title, html }: { title: string; html: string }) {

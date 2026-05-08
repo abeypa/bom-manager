@@ -20,6 +20,7 @@ import {
   sanitizeHTML,
 } from '@/lib/ai-tools'
 import { useAIStore, ChatMessage, PendingAction } from '@/store/useAIStore'
+import type { Attachment } from '@/lib/ai-attachments'
 
 const SYSTEM_PROMPT = `You are the BOM Manager AI assistant for Bharath Engineering Pvt Ltd.
 
@@ -49,6 +50,13 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
 
 7. If a tool returns an error, do not retry blindly — explain the error
    to the user and ask how to proceed.
+
+8. The user may attach images (screenshots of POs, invoices, BOM tables,
+   handwritten notes) or PDFs (PDF text is pre-extracted and inlined as
+   text). When an attachment is present, READ IT CAREFULLY before
+   answering. If a screenshot shows a part / PO / supplier, look up the
+   real record with a read tool before proposing any write — never type
+   IDs from the picture without verifying them in the database.
 
 You are working for a procurement engineer; be concise and factual.`
 
@@ -90,7 +98,7 @@ function pendingForCall(tc: { id: string; function: { name: string; arguments: s
  * Send the user's prompt, then process model responses (with auto-loop for
  * read-tool calls) until the model finishes or queues a write tool.
  */
-export async function sendUserMessage(text: string) {
+export async function sendUserMessage(text: string, attachments?: Attachment[]) {
   const store = useAIStore.getState()
   ensureSystemMessage()
 
@@ -98,6 +106,7 @@ export async function sendUserMessage(text: string) {
     id: uid(),
     role: 'user',
     content: text,
+    attachments: attachments && attachments.length ? attachments : undefined,
     ts: Date.now(),
   })
 
