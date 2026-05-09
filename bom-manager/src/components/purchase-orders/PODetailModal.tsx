@@ -67,6 +67,8 @@ export default function PODetailModal({
   const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [bulkNotes, setBulkNotes] = useState<string>('');
   const [isBulkRunning, setIsBulkRunning] = useState(false);
+  // Issued-out totals for this PO, keyed by `${part_table_name}:${part_id}`
+  const [issuedMap, setIssuedMap] = useState<Record<string, number>>({});
 
   const toggleItemSelected = (id: number) => {
     setSelectedItemIds(prev => {
@@ -336,6 +338,30 @@ export default function PODetailModal({
       setPayments(paymentsData);
       setReceipts(receiptsData);
       setPoNumberInput(poData.po_number || '');
+
+      // Aggregate OUT stock_movements for this PO so we can show
+      // "Stock Out" per line in the Items tab.
+      try {
+        if (poData?.po_number) {
+          const { supabase } = await import('../../lib/supabase');
+          const { data: outRows } = await (supabase as any)
+            .from('stock_movements')
+            .select('part_table_name, part_id, quantity')
+            .eq('po_number', poData.po_number)
+            .eq('movement_type', 'OUT');
+          const map: Record<string, number> = {};
+          for (const r of (outRows || [])) {
+            const key = `${r.part_table_name}:${r.part_id}`;
+            map[key] = (map[key] || 0) + (r.quantity || 0);
+          }
+          setIssuedMap(map);
+        } else {
+          setIssuedMap({});
+        }
+      } catch (e) {
+        console.warn('Failed to aggregate issued-out for PO:', e);
+        setIssuedMap({});
+      }
 
       // ── Resolve a usable view URL from the stored value ──
       const stored = poData.bep_po_pdf_url || '';
@@ -860,12 +886,12 @@ export default function PODetailModal({
                             />
                           </th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Part</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Description</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Unit Price</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Disc. %</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Ordered</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Received</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Pending</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Stock Out</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Actions</th>
                         </tr>
                       </thead>
@@ -892,7 +918,6 @@ export default function PODetailModal({
                                 </div>
                               )}
                             </td>
-                            <td className="px-6 py-4 text-xs text-gray-500 max-w-[200px] truncate">{item.description || '—'}</td>
                             <td className="px-6 py-4 font-bold text-sm tabular-nums text-gray-500">
                                ₹{item.unit_price?.toLocaleString('en-IN')}
                             </td>
@@ -908,6 +933,16 @@ export default function PODetailModal({
                             </td>
                             <td className="px-6 py-4 font-bold text-sm tabular-nums text-gray-500">
                               {Math.max(0, item.quantity - (item.received_qty || 0))}
+                            </td>
+                            <td className="px-6 py-4">
+                              {(() => {
+                                const issued = issuedMap[`${item.part_type}:${item.part_id}`] || 0;
+                                return (
+                                  <span className={`font-black text-sm tabular-nums ${issued > 0 ? 'text-red-600' : 'text-gray-300'}`}>
+                                    {issued}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex items-center gap-2">
@@ -1365,8 +1400,8 @@ export default function PODetailModal({
                           <tr key={it.id}>
                             <td className="px-4 py-3">
                               <div className="font-black text-xs text-gray-900 font-mono">{it.part_number}</div>
-                              {it.description && (
-                                <div className="text-[10px] text-gray-500 max-w-[280px] truncate">{it.description}</div>
+                              {it.manufacturer_part_number && (
+                                <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest mt-0.5">MPN: {it.manufacturer_part_number}</div>
                               )}
                             </td>
                             <td className="px-4 py-3 text-right tabular-nums text-xs font-bold text-gray-700">{it.quantity}</td>
