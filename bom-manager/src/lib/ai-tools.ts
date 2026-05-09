@@ -18,6 +18,7 @@ import { projectsApi } from '@/api/projects'
 import { suppliersApi } from '@/api/suppliers'
 import { purchaseOrdersApi } from '@/api/purchase-orders'
 import { stockMovementsApi } from '@/api/stock-movements'
+import { getPoRemainingForPart } from '@/api/po-payments'
 import { supabase } from '@/lib/supabase'
 
 export type ToolKind = 'read' | 'write'
@@ -1209,6 +1210,30 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           `part_number mismatch: master record is "${part.part_number}" but stock_in payload says "${a.part_number}". Verify the row before retrying.`,
         )
       }
+      // PO interlock: when a po_number is provided, total IN against
+      // this (PO, part) cannot exceed the ordered qty for that part on
+      // that PO. Manual stock_in without po_number is unrestricted.
+      if (a.po_number) {
+        const { ordered, completed, remaining } = await getPoRemainingForPart({
+          poNumber: a.po_number,
+          partTable: a.part_table_name,
+          partId: a.part_id,
+          mode: 'IN',
+        })
+        if (ordered === 0) {
+          throw new Error(
+            `PO ${a.po_number} has no line for ${a.part_number} (${a.part_table_name}). ` +
+            `Either drop po_number to record a manual receipt, or correct the PO/part reference.`,
+          )
+        }
+        if (a.quantity > remaining) {
+          throw new Error(
+            `Cannot stock_in ${a.quantity} for ${a.part_number} against PO ${a.po_number}: ` +
+            `ordered ${ordered}, already received ${completed}, only ${remaining} remaining. ` +
+            `Adjust stock manually from Part Master if needed.`,
+          )
+        }
+      }
       const stockBefore = (part as any)?.stock_quantity ?? 0
       const stockAfter = stockBefore + a.quantity
       await (supabase as any).from(a.part_table_name).update({ stock_quantity: stockAfter }).eq('id', a.part_id)
@@ -1229,7 +1254,8 @@ export const TOOL_REGISTRY: ToolSpec[] = [
   {
     name: 'stock_out',
     kind: 'write',
-    description: 'Record an outward stock movement (issue to project / scrap).',
+    description:
+      'Record an outward stock movement (issue to project / scrap). When the issue is being made against a specific PO, pass po_number — the tool then caps the OUT against the PO ordered qty.',
     parameters: {
       type: 'object',
       required: ['part_table_name', 'part_id', 'part_number', 'quantity'],
@@ -1239,6 +1265,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         part_number: { type: 'string' },
         quantity: { type: 'number', minimum: 1 },
         project_id: { type: 'number' },
+        po_number: { type: 'string' },
         reference_notes: { type: 'string' },
       },
     },
@@ -1255,6 +1282,31 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           `part_number mismatch: master record is "${part.part_number}" but stock_out payload says "${a.part_number}". Verify the row before retrying.`,
         )
       }
+      // PO interlock: when a po_number is provided, total OUT against
+      // this (PO, part) cannot exceed the ordered qty for that part on
+      // that PO. Manual stock_out without a po_number is only capped
+      // by master stock.
+      if (a.po_number) {
+        const { ordered, completed, remaining } = await getPoRemainingForPart({
+          poNumber: a.po_number,
+          partTable: a.part_table_name,
+          partId: a.part_id,
+          mode: 'OUT',
+        })
+        if (ordered === 0) {
+          throw new Error(
+            `PO ${a.po_number} has no line for ${a.part_number} (${a.part_table_name}). ` +
+            `Either drop po_number to record a manual issue, or correct the PO/part reference.`,
+          )
+        }
+        if (a.quantity > remaining) {
+          throw new Error(
+            `Cannot stock_out ${a.quantity} for ${a.part_number} against PO ${a.po_number}: ` +
+            `ordered ${ordered}, already issued ${completed}, only ${remaining} remaining. ` +
+            `Adjust stock manually from Part Master if needed.`,
+          )
+        }
+      }
       const stockBefore = (part as any)?.stock_quantity ?? 0
       if (stockBefore < a.quantity) throw new Error(`Insufficient stock for ${part.part_number}. Have ${stockBefore}, need ${a.quantity}.`)
       const stockAfter = stockBefore - a.quantity
@@ -1268,6 +1320,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         stock_before: stockBefore,
         stock_after: stockAfter,
         project_id: a.project_id,
+        po_number: a.po_number,
         reference_notes: a.reference_notes,
       } as any)
     },
