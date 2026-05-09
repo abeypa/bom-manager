@@ -243,6 +243,25 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
   },
   {
+    name: 'find_project_by_name',
+    kind: 'read',
+    description: 'Look up a project by partial name or project_number (case-insensitive). Use this whenever the user mentions a project by name (e.g. "JPM") so you can reference it by id.',
+    parameters: {
+      type: 'object',
+      required: ['query'],
+      properties: { query: { type: 'string' } },
+    },
+    handler: async ({ query }: any) => {
+      const q = String(query).trim()
+      const { data } = await (supabase as any)
+        .from('projects')
+        .select('id, project_number, project_name, customer, status')
+        .or(`project_name.ilike.%${q}%,project_number.ilike.%${q}%,customer.ilike.%${q}%`)
+        .limit(10)
+      return data || []
+    },
+  },
+  {
     name: 'find_supplier_by_name',
     kind: 'read',
     description: 'Look up a supplier by partial name match (case-insensitive).',
