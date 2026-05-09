@@ -30,6 +30,15 @@ export interface ToolSpec {
   parameters: Record<string, any>
   /** Renderer-friendly summary for the approval card (write tools only) */
   summarize?: (args: any) => string
+  /**
+   * Optional pre-flight validation for write tools. Runs at proposal time,
+   * BEFORE the action is queued for user approval. If it throws, the
+   * proposal is dropped and the error is fed back to the model so it can
+   * re-plan (e.g. switch from create_master_part → update_master_part_price
+   * when a duplicate is detected). Use this to surface conflicts the user
+   * should not even see in the approval queue.
+   */
+  preflight?: (args: any) => Promise<void>
   /** Actual handler. For write tools this is invoked AFTER user approves. */
   handler: (args: any) => Promise<any>
 }
@@ -345,6 +354,20 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       },
     },
     summarize: (a) => `Create supplier "${a.name}"${a.gstin ? ` (GSTIN ${a.gstin})` : ''}`,
+    preflight: async (a: any) => {
+      if (!a.name || String(a.name).trim() === '') throw new Error('name is required')
+      const { data: dup } = await (supabase as any)
+        .from('suppliers')
+        .select('id, name')
+        .ilike('name', String(a.name).trim())
+        .limit(1)
+      if (dup && dup.length) {
+        throw new Error(
+          `Supplier "${dup[0].name}" already exists (id ${dup[0].id}). ` +
+          `Use supplier_id ${dup[0].id} directly; do NOT propose create_supplier.`,
+        )
+      }
+    },
     handler: async (a: any) => {
       assertNonEmpty('name', a.name)
       assertMaxLen('name', a.name, 200)
@@ -402,11 +425,49 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       return `Create ${a.part_type} ${prefix}-${a.beperp_part_no} (ERP ${a.beperp_part_no})${a.manufacturer_part_number ? ' / ' + a.manufacturer_part_number : ''} @ ${a.currency || 'INR'} ${a.base_price}` +
         (a.discount_percent ? ` (-${a.discount_percent}%)` : '')
     },
+    preflight: async (a: any) => {
+      const prefix = PREFIX_BY_PART_TYPE[a.part_type]
+      if (!prefix) throw new Error(`Unknown part_type: ${a.part_type}`)
+      if (a.beperp_part_no == null || String(a.beperp_part_no).trim() === '')
+        throw new Error('beperp_part_no (ERP Item Code) is required')
+      const erp = String(a.beperp_part_no).trim()
+      const part_number = `${prefix}-${erp}`
+      const mfgPart = a.manufacturer_part_number ? String(a.manufacturer_part_number).trim() : null
+      // Scan every part_type table for a matching record
+      for (const pt of part_type_enum) {
+        const orClauses = [
+          `part_number.eq.${part_number}`,
+          `beperp_part_no.eq.${erp}`,
+        ]
+        if (mfgPart) orClauses.push(`manufacturer_part_number.eq.${mfgPart}`)
+        const { data: dup } = await (supabase as any)
+          .from(pt)
+          .select('id, part_number, beperp_part_no, manufacturer_part_number, base_price, discount_percent, currency')
+          .or(orClauses.join(','))
+          .limit(1)
+        if (dup && dup.length) {
+          const d = dup[0]
+          const reasons: string[] = []
+          if (d.part_number === part_number) reasons.push(`part_number "${part_number}"`)
+          if (String(d.beperp_part_no) === erp) reasons.push(`ERP id "${erp}"`)
+          if (mfgPart && d.manufacturer_part_number === mfgPart) reasons.push(`manufacturer_part_number "${mfgPart}"`)
+          throw new Error(
+            `Duplicate master part: a record already exists matching ${reasons.join(' / ')} ` +
+            `in table "${pt}" (id ${d.id}, part_number ${d.part_number}, ` +
+            `current price ${d.currency || 'INR'} ${d.base_price} with ${d.discount_percent || 0}% discount). ` +
+            `Do NOT propose create_master_part. If the new PO has a different price/discount, propose ` +
+            `update_master_part_price({ part_type: "${pt}", part_id: ${d.id}, base_price: <new>, discount_percent: <new>, last_price_date: <po_date> }) ` +
+            `instead. If the price is unchanged, skip this part.`,
+          )
+        }
+      }
+    },
     handler: async (a: any) => {
       const prefix = PREFIX_BY_PART_TYPE[a.part_type]
       if (!prefix) throw new Error(`Unknown part_type: ${a.part_type}`)
-      if (!a.beperp_part_no) throw new Error('beperp_part_no (ERP Item Code) is required')
-      const part_number = `${prefix}-${a.beperp_part_no}`
+      if (a.beperp_part_no == null || String(a.beperp_part_no).trim() === '')
+        throw new Error('beperp_part_no (ERP Item Code) is required')
+      const part_number = `${prefix}-${String(a.beperp_part_no).trim()}`
 
       // Hard duplicate check across EVERY part_type table.
       // The same physical component must never exist twice in part master,
@@ -537,6 +598,21 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       },
     },
     summarize: (a) => `Create section "${a.name}" in project #${a.project_id}`,
+    preflight: async (a: any) => {
+      if (!a.name || String(a.name).trim() === '') throw new Error('name is required')
+      const { data: dup } = await (supabase as any)
+        .from('project_sections')
+        .select('id, name')
+        .eq('project_id', a.project_id)
+        .ilike('name', String(a.name).trim())
+        .limit(1)
+      if (dup && dup.length) {
+        throw new Error(
+          `Section "${dup[0].name}" already exists in project #${a.project_id} (id ${dup[0].id}). ` +
+          `Reuse section_id ${dup[0].id}; do NOT propose create_project_section.`,
+        )
+      }
+    },
     handler: async (a: any) => {
       assertNonEmpty('name', a.name)
       assertMaxLen('name', a.name, 200)
@@ -577,6 +653,30 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       },
     },
     summarize: (a) => `Create subsection "${a.section_name}" under section #${a.section_id} (project #${a.project_id})`,
+    preflight: async (a: any) => {
+      if (!a.section_name || String(a.section_name).trim() === '') throw new Error('section_name is required')
+      const { data: parent } = await (supabase as any)
+        .from('project_sections')
+        .select('id, project_id')
+        .eq('id', a.section_id)
+        .maybeSingle()
+      if (!parent) throw new Error(`Parent section #${a.section_id} does not exist.`)
+      if (parent.project_id !== a.project_id) {
+        throw new Error(`Section #${a.section_id} belongs to project #${parent.project_id}, not #${a.project_id}.`)
+      }
+      const { data: dup } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, section_name')
+        .eq('section_id', a.section_id)
+        .ilike('section_name', String(a.section_name).trim())
+        .limit(1)
+      if (dup && dup.length) {
+        throw new Error(
+          `Subsection "${dup[0].section_name}" already exists under section #${a.section_id} (id ${dup[0].id}). ` +
+          `Reuse project_subsection_id ${dup[0].id}; do NOT propose create_project_subsection.`,
+        )
+      }
+    },
     handler: async (a: any) => {
       assertNonEmpty('section_name', a.section_name)
       assertMaxLen('section_name', a.section_name, 200)
@@ -641,6 +741,47 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
     summarize: (a) =>
       `Map ${a.quantity}× ${a.part_type} #${a.part_id} @ ${a.currency || 'INR'} ${a.unit_price} to subsection ${a.project_subsection_id} (disc ${a.discount_percent || 0}%)`,
+    preflight: async (a: any) => {
+      // Master part must exist
+      const { data: master } = await (supabase as any)
+        .from(a.part_type)
+        .select('id, part_number')
+        .eq('id', a.part_id)
+        .maybeSingle()
+      if (!master) {
+        throw new Error(
+          `Master part not found: ${a.part_type} #${a.part_id}. ` +
+          `Use find_master_part_by_erp_id first; do not propose add_part_to_project for an unknown master.`,
+        )
+      }
+      // Resolve target subsection → project_id, then check for duplicate mapping anywhere in the project
+      const { data: targetSub } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, project_id, section_name')
+        .eq('id', a.project_subsection_id)
+        .maybeSingle()
+      if (!targetSub) throw new Error(`project_subsection ${a.project_subsection_id} not found.`)
+      const { data: peerSubs } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, section_name')
+        .eq('project_id', targetSub.project_id)
+      const peerIds = (peerSubs || []).map((s: any) => s.id)
+      const { data: existing } = await (supabase as any)
+        .from('project_parts')
+        .select('id, project_section_id, quantity, unit_price')
+        .eq('part_type', a.part_type)
+        .eq('part_id', a.part_id)
+        .in('project_section_id', peerIds.length ? peerIds : [targetSub.id])
+      if (existing && existing.length) {
+        const e = existing[0]
+        const where = (peerSubs || []).find((s: any) => s.id === e.project_section_id)?.section_name || `subsection #${e.project_section_id}`
+        throw new Error(
+          `${master.part_number} is already mapped to project #${targetSub.project_id} (line id ${e.id}, in "${where}", qty ${e.quantity} @ ${e.unit_price}). ` +
+          `Do NOT propose add_part_to_project. Use update_part_quantity to change qty/price, ` +
+          `or move_part_to_subsection to relocate.`,
+        )
+      }
+    },
     handler: async (a: any) => {
       // Field-level interlocks
       assertInteger('project_subsection_id', a.project_subsection_id)
