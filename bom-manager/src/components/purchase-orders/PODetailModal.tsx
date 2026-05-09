@@ -59,6 +59,142 @@ export default function PODetailModal({
   const [isIssueOutModalOpen, setIsIssueOutModalOpen] = useState(false);
   const [currentAvailableStock, setCurrentAvailableStock] = useState<number>(0);
 
+  // Bulk select / bulk in-out state
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
+  const [bulkMode, setBulkMode] = useState<null | 'IN' | 'OUT'>(null);
+  const [bulkQtys, setBulkQtys] = useState<Record<number, number>>({});
+  const [bulkStockMap, setBulkStockMap] = useState<Record<number, number>>({});
+  const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [bulkNotes, setBulkNotes] = useState<string>('');
+  const [isBulkRunning, setIsBulkRunning] = useState(false);
+
+  const toggleItemSelected = (id: number) => {
+    setSelectedItemIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (items: any[]) => {
+    setSelectedItemIds(prev => {
+      if (prev.size === items.length) return new Set();
+      return new Set(items.map(i => i.id));
+    });
+  };
+
+  const openBulkModal = async (mode: 'IN' | 'OUT') => {
+    const items = (po?.purchase_order_items || []).filter((i: any) => selectedItemIds.has(i.id));
+    if (items.length === 0) {
+      showToast('error', 'Select at least one line item first');
+      return;
+    }
+
+    const qtyDefaults: Record<number, number> = {};
+    const stockMap: Record<number, number> = {};
+
+    if (mode === 'IN') {
+      for (const it of items) {
+        qtyDefaults[it.id] = Math.max(0, (it.quantity || 0) - (it.received_qty || 0));
+      }
+    } else {
+      // OUT: fetch current master stock for each selected line and default qty to received_qty
+      try {
+        const { supabase } = await import('../../lib/supabase');
+        const groups: Record<string, number[]> = {};
+        for (const it of items) {
+          if (!it.part_type || !it.part_id) continue;
+          (groups[it.part_type] ||= []).push(it.part_id);
+        }
+        const stockByKey: Record<string, number> = {};
+        for (const [tbl, ids] of Object.entries(groups)) {
+          const { data } = await (supabase as any)
+            .from(tbl)
+            .select('id, stock_quantity')
+            .in('id', ids);
+          (data || []).forEach((row: any) => {
+            stockByKey[`${tbl}:${row.id}`] = row.stock_quantity || 0;
+          });
+        }
+        for (const it of items) {
+          const stock = stockByKey[`${it.part_type}:${it.part_id}`] || 0;
+          stockMap[it.id] = stock;
+          // Default to min(received_qty, stock) so users can issue what was just received
+          qtyDefaults[it.id] = Math.min(it.received_qty || 0, stock);
+        }
+      } catch (e) {
+        console.error('Failed to fetch stock for bulk OUT:', e);
+      }
+    }
+
+    setBulkQtys(qtyDefaults);
+    setBulkStockMap(stockMap);
+    setBulkDate(new Date().toISOString().split('T')[0]);
+    setBulkNotes('');
+    setBulkMode(mode);
+  };
+
+  const closeBulkModal = () => {
+    setBulkMode(null);
+    setBulkQtys({});
+    setBulkStockMap({});
+    setBulkNotes('');
+  };
+
+  const submitBulk = async () => {
+    if (!bulkMode) return;
+    const items = (po?.purchase_order_items || []).filter((i: any) => selectedItemIds.has(i.id));
+    const errors: string[] = [];
+    let okCount = 0;
+
+    setIsBulkRunning(true);
+    try {
+      for (const it of items) {
+        const qty = Math.floor(Number(bulkQtys[it.id] || 0));
+        if (!qty || qty <= 0) continue; // skip zero-qty rows silently
+
+        try {
+          if (bulkMode === 'IN') {
+            const pending = Math.max(0, (it.quantity || 0) - (it.received_qty || 0));
+            if (qty > pending) {
+              errors.push(`${it.part_number}: ${qty} exceeds pending ${pending}`);
+              continue;
+            }
+            await receivePoItem(String(it.id), qty, bulkDate, bulkNotes || undefined);
+          } else {
+            const stock = bulkStockMap[it.id] ?? 0;
+            if (qty > stock) {
+              errors.push(`${it.part_number}: ${qty} exceeds stock ${stock}`);
+              continue;
+            }
+            await issueOutPoItem(String(it.id), qty, bulkDate, bulkNotes || undefined);
+          }
+          okCount++;
+        } catch (err: any) {
+          errors.push(`${it.part_number}: ${err?.message || 'failed'}`);
+        }
+      }
+    } finally {
+      setIsBulkRunning(false);
+    }
+
+    if (okCount > 0) {
+      showToast('success', `${okCount} ${bulkMode === 'IN' ? 'received' : 'issued'}${errors.length ? `, ${errors.length} skipped` : ''}`);
+    } else if (errors.length > 0) {
+      showToast('error', `All rows failed: ${errors[0]}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`);
+    } else {
+      showToast('error', 'Nothing to do — all quantities were 0');
+    }
+    if (errors.length > 0) {
+      console.warn('Bulk operation errors:', errors);
+    }
+
+    closeBulkModal();
+    setSelectedItemIds(new Set());
+    await loadData();
+    if (onStatusUpdated) onStatusUpdated();
+  };
+
   const handleOpenReceiveModal = (item: any) => {
     setReceiveModalItem(item);
     setIsReceiveModalOpen(true);
@@ -676,10 +812,53 @@ export default function PODetailModal({
 
               {activeTab === 'items' && (
                 <div className="space-y-5">
+                  {/* Bulk action bar */}
+                  {selectedItemIds.size > 0 && (
+                    <div className="sticky top-0 z-10 bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-wrap items-center gap-3 px-5 py-3">
+                      <span className="text-[11px] font-black text-gray-700 uppercase tracking-widest">
+                        {selectedItemIds.size} selected
+                      </span>
+                      <div className="h-5 w-px bg-gray-200" />
+                      <button
+                        onClick={() => openBulkModal('IN')}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black rounded-lg uppercase tracking-widest shadow-sm shadow-blue-200 transition-all"
+                      >
+                        Bulk Data IN
+                      </button>
+                      <button
+                        onClick={() => openBulkModal('OUT')}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-[11px] font-black rounded-lg uppercase tracking-widest shadow-sm shadow-red-200 transition-all"
+                      >
+                        Bulk Issue Out
+                      </button>
+                      <button
+                        onClick={() => setSelectedItemIds(new Set())}
+                        className="ml-auto px-3 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 text-[11px] font-black rounded-lg uppercase tracking-widest"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+
                   <div className="border border-gray-100 rounded-3xl overflow-x-auto">
                     <table className="w-full text-left">
                       <thead className="bg-gray-50 pb-2">
                         <tr>
+                          <th className="px-4 py-4 w-10">
+                            <input
+                              type="checkbox"
+                              aria-label="Select all line items"
+                              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              checked={(po?.purchase_order_items?.length || 0) > 0 && selectedItemIds.size === (po?.purchase_order_items?.length || 0)}
+                              ref={el => {
+                                if (el) {
+                                  const total = po?.purchase_order_items?.length || 0;
+                                  el.indeterminate = selectedItemIds.size > 0 && selectedItemIds.size < total;
+                                }
+                              }}
+                              onChange={() => toggleSelectAll(po?.purchase_order_items || [])}
+                            />
+                          </th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Part</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Description</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest whitespace-nowrap">Unit Price</th>
@@ -692,7 +871,19 @@ export default function PODetailModal({
                       </thead>
                       <tbody className="divide-y divide-gray-50">
                         {(po?.purchase_order_items || []).map((item: any) => (
-                          <tr key={item.id} className="hover:bg-gray-50/50">
+                          <tr
+                            key={item.id}
+                            className={`hover:bg-gray-50/50 ${selectedItemIds.has(item.id) ? 'bg-blue-50/40' : ''}`}
+                          >
+                            <td className="px-4 py-4">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${item.part_number}`}
+                                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                checked={selectedItemIds.has(item.id)}
+                                onChange={() => toggleItemSelected(item.id)}
+                              />
+                            </td>
                             <td className="px-6 py-4">
                               <div className="font-black text-sm text-gray-900 font-mono">{item.part_number}</div>
                               {item.manufacturer_part_number && (
@@ -1118,6 +1309,136 @@ export default function PODetailModal({
           </button>
         </div>
       </div>
+
+      {/* BULK DATA-IN / ISSUE-OUT MODAL */}
+      {bulkMode && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full mx-4 overflow-hidden border border-gray-100 flex flex-col max-h-[85vh]">
+            <div className={`px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-white shrink-0`}>
+              <h3 className="font-black text-gray-900 tracking-tight text-lg">
+                {bulkMode === 'IN' ? 'Bulk Data IN' : 'Bulk Issue Out'}
+                <span className="ml-3 text-xs font-bold text-gray-400 uppercase tracking-widest">
+                  {(po?.purchase_order_items || []).filter((i: any) => selectedItemIds.has(i.id)).length} items
+                </span>
+              </h3>
+              <button
+                onClick={closeBulkModal}
+                disabled={isBulkRunning}
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors disabled:opacity-50"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto">
+              <div className={`p-4 rounded-2xl border ${bulkMode === 'IN' ? 'bg-blue-50/50 border-blue-100/50' : 'bg-red-50/50 border-red-100/50'}`}>
+                <p className={`text-[11px] font-black uppercase tracking-widest ${bulkMode === 'IN' ? 'text-blue-600' : 'text-red-600'}`}>
+                  {bulkMode === 'IN'
+                    ? 'Receive selected lines into stock. Quantities default to pending; edit per line. Rows with qty 0 are skipped.'
+                    : 'Issue selected lines out of stock. Quantities default to received-but-not-issued (capped at current stock). Rows with qty 0 are skipped.'}
+                </p>
+              </div>
+
+              <div className="border border-gray-100 rounded-2xl overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest">Part</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Ordered</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Received</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">
+                        {bulkMode === 'IN' ? 'Pending' : 'Stock'}
+                      </th>
+                      <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">
+                        Qty {bulkMode === 'IN' ? 'IN' : 'OUT'}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {(po?.purchase_order_items || [])
+                      .filter((i: any) => selectedItemIds.has(i.id))
+                      .map((it: any) => {
+                        const pending = Math.max(0, (it.quantity || 0) - (it.received_qty || 0));
+                        const stock = bulkStockMap[it.id] ?? 0;
+                        const cap = bulkMode === 'IN' ? pending : stock;
+                        return (
+                          <tr key={it.id}>
+                            <td className="px-4 py-3">
+                              <div className="font-black text-xs text-gray-900 font-mono">{it.part_number}</div>
+                              {it.description && (
+                                <div className="text-[10px] text-gray-500 max-w-[280px] truncate">{it.description}</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums text-xs font-bold text-gray-700">{it.quantity}</td>
+                            <td className="px-4 py-3 text-right tabular-nums text-xs font-bold text-gray-700">{it.received_qty || 0}</td>
+                            <td className="px-4 py-3 text-right tabular-nums text-xs font-black text-gray-900">{cap}</td>
+                            <td className="px-4 py-3 text-right">
+                              <input
+                                type="number"
+                                min={0}
+                                max={cap}
+                                value={bulkQtys[it.id] ?? 0}
+                                onChange={(e) => {
+                                  const v = parseInt(e.target.value, 10);
+                                  setBulkQtys(prev => ({ ...prev, [it.id]: isNaN(v) ? 0 : Math.max(0, Math.min(cap, v)) }));
+                                }}
+                                className="w-24 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold text-right tabular-nums focus:bg-white focus:ring-2 focus:ring-gray-900 focus:border-transparent outline-none"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                    {bulkMode === 'IN' ? 'Receipt Date' : 'Issue Date'}
+                  </label>
+                  <div className="relative">
+                    <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="date"
+                      value={bulkDate}
+                      onChange={(e) => setBulkDate(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-2xl pl-12 pr-5 py-3 text-sm font-bold focus:bg-white focus:ring-2 focus:ring-gray-900 focus:border-transparent outline-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Notes (applied to all)</label>
+                  <input
+                    type="text"
+                    value={bulkNotes}
+                    onChange={(e) => setBulkNotes(e.target.value)}
+                    placeholder={bulkMode === 'IN' ? 'GRN ref, invoice no, etc.' : 'Project / site / reason'}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-5 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-gray-900 focus:border-transparent outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5 bg-gray-50/80 border-t border-gray-100 flex gap-3 shrink-0">
+              <button
+                onClick={closeBulkModal}
+                disabled={isBulkRunning}
+                className="flex-1 py-3.5 px-4 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700 text-xs font-black rounded-2xl uppercase tracking-widest transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitBulk}
+                disabled={isBulkRunning}
+                className={`flex-1 py-3.5 px-4 ${bulkMode === 'IN' ? 'bg-blue-600 hover:bg-blue-700 hover:shadow-blue-200 focus:ring-blue-600' : 'bg-red-600 hover:bg-red-700 hover:shadow-red-200 focus:ring-red-600'} text-white text-xs font-black rounded-2xl uppercase tracking-widest transition-all hover:shadow-lg focus:ring-2 focus:ring-offset-2 disabled:opacity-60`}
+              >
+                {isBulkRunning ? 'Working…' : bulkMode === 'IN' ? 'Confirm Bulk Receipt' : 'Confirm Bulk Issue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* RECEIVE MODAL */}
       {isReceiveModalOpen && receiveModalItem && (

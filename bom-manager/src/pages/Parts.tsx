@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { partsApi, PartCategory } from '@/api/parts'
 import { useToast } from '@/context/ToastContext'
-import { 
-  Search, Plus, FileDown, MoreHorizontal, FileText, Image as ImageIcon, 
-  Trash2, Edit, Package, Upload, History, LayoutGrid, List, Filter, ChevronRight
+import {
+  Search, Plus, FileDown, MoreHorizontal, FileText, Image as ImageIcon,
+  Trash2, Edit, Package, Upload, History, LayoutGrid, List, Filter, ChevronRight,
+  ArrowUpDown
 } from 'lucide-react'
 import PartFormModal from '@/components/parts/PartFormModal'
 import PartImportModal from '@/components/parts/PartImportModal'
@@ -21,6 +22,35 @@ const TABS: { id: PartCategory; name: string }[] = [
   { id: 'pneumatic_bought_out', name: 'Pneumatic' },
 ]
 
+type SortKey =
+  | 'updated_desc'
+  | 'updated_asc'
+  | 'created_desc'
+  | 'created_asc'
+  | 'name_asc'
+  | 'name_desc'
+  | 'mfg_asc'
+  | 'mfg_desc'
+  | 'price_desc'
+  | 'price_asc'
+  | 'stock_desc'
+  | 'stock_asc'
+
+const SORT_OPTIONS: { id: SortKey; name: string }[] = [
+  { id: 'updated_desc', name: 'Date Modified · Newest' },
+  { id: 'updated_asc',  name: 'Date Modified · Oldest' },
+  { id: 'created_desc', name: 'Date Added · Newest' },
+  { id: 'created_asc',  name: 'Date Added · Oldest' },
+  { id: 'name_asc',     name: 'Internal ID · A→Z' },
+  { id: 'name_desc',    name: 'Internal ID · Z→A' },
+  { id: 'mfg_asc',      name: 'Manufacturer Part # · A→Z' },
+  { id: 'mfg_desc',     name: 'Manufacturer Part # · Z→A' },
+  { id: 'price_desc',   name: 'Unit Price · High → Low' },
+  { id: 'price_asc',    name: 'Unit Price · Low → High' },
+  { id: 'stock_desc',   name: 'Stock · High → Low' },
+  { id: 'stock_asc',    name: 'Stock · Low → High' },
+]
+
 const Parts = () => {
   const { error: showToastError } = useToast()
   const queryClient = useQueryClient()
@@ -31,6 +61,7 @@ const Parts = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [partToEdit, setPartToEdit] = useState<any | null>(null)
   const [selectedSupplier, setSelectedSupplier] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('updated_desc')
   const [detailModal, setDetailModal] = useState<{ id: number; category: PartCategory } | null>(null)
   
   const [historyModal, setHistoryModal] = useState<{
@@ -71,15 +102,40 @@ const Parts = () => {
   const uniqueSuppliers = Array.from(new Set((parts || []).map((p: any) => p.suppliers?.name).filter(Boolean))).sort()
 
   const filteredParts = (parts || []).filter((p: any) => {
-    const matchesSearch = 
+    const matchesSearch =
       p.part_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.manufacturer_part_number?.toLowerCase().includes(searchTerm.toLowerCase())
-    
+
     const matchesSupplier = selectedSupplier === '' || p.suppliers?.name === selectedSupplier
 
     return matchesSearch && matchesSupplier
   })
+
+  const sortedParts = (() => {
+    const arr = [...filteredParts]
+    const dateVal = (v: any) => (v ? new Date(v).getTime() : 0)
+    const strVal  = (v: any) => (v == null ? '' : String(v).toLowerCase())
+    const numVal  = (v: any) => (typeof v === 'number' ? v : parseFloat(v) || 0)
+    arr.sort((a: any, b: any) => {
+      switch (sortKey) {
+        case 'updated_desc': return (dateVal(b.updated_date) || dateVal(b.created_date)) - (dateVal(a.updated_date) || dateVal(a.created_date))
+        case 'updated_asc':  return (dateVal(a.updated_date) || dateVal(a.created_date)) - (dateVal(b.updated_date) || dateVal(b.created_date))
+        case 'created_desc': return dateVal(b.created_date) - dateVal(a.created_date)
+        case 'created_asc':  return dateVal(a.created_date) - dateVal(b.created_date)
+        case 'name_asc':     return strVal(a.part_number).localeCompare(strVal(b.part_number))
+        case 'name_desc':    return strVal(b.part_number).localeCompare(strVal(a.part_number))
+        case 'mfg_asc':      return strVal(a.manufacturer_part_number).localeCompare(strVal(b.manufacturer_part_number))
+        case 'mfg_desc':     return strVal(b.manufacturer_part_number).localeCompare(strVal(a.manufacturer_part_number))
+        case 'price_desc':   return numVal(b.base_price) - numVal(a.base_price)
+        case 'price_asc':    return numVal(a.base_price) - numVal(b.base_price)
+        case 'stock_desc':   return numVal(b.stock_quantity) - numVal(a.stock_quantity)
+        case 'stock_asc':    return numVal(a.stock_quantity) - numVal(b.stock_quantity)
+        default: return 0
+      }
+    })
+    return arr
+  })()
 
   const getStockBadgeCls = (stock: number, min: number) => {
     if (stock <= 0) return 'badge-danger'
@@ -187,7 +243,7 @@ const Parts = () => {
 
       {/* Toolbar */}
       <div className="section-card p-3 flex flex-col lg:flex-row items-center gap-4 mb-2">
-        <div className="flex-1 w-full lg:w-64">
+        <div className="w-full lg:w-64">
           <select
             className="input font-black uppercase tracking-widest text-[10px]"
             value={selectedSupplier}
@@ -201,7 +257,25 @@ const Parts = () => {
           </select>
         </div>
 
-        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 ml-auto shrink-0">
+        <div className="w-full lg:w-72 relative">
+          <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-tertiary pointer-events-none" />
+          <select
+            className="input font-black uppercase tracking-widest text-[10px] pl-9"
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            aria-label="Sort parts"
+          >
+            {SORT_OPTIONS.map(opt => (
+              <option key={opt.id} value={opt.id}>Sort: {opt.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="text-[10px] font-mono text-tertiary tracking-wider ml-auto shrink-0">
+          {sortedParts.length} of {(parts || []).length}
+        </div>
+
+        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
           <button
             onClick={() => setViewMode('grid')}
             className={`btn btn-icon btn-sm transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm border-white' : 'btn-ghost'}`}
@@ -223,7 +297,7 @@ const Parts = () => {
       {/* Assets Display explicitly scrollable */}
       <div className="flex-1 min-h-0 relative flex gap-6 px-4 sm:px-8 pb-8">
         <div id="parts-scroll-container" className="flex-1 overflow-y-auto hidden-scrollbar pr-2 pb-20 scroll-smooth">
-          {isLoading ? renderSkeletons() : filteredParts.length === 0 ? (
+          {isLoading ? renderSkeletons() : sortedParts.length === 0 ? (
           <div className="empty-state py-24">
             <div className="bg-slate-50 w-24 h-24 rounded-full flex items-center justify-center mb-6 border border-slate-100 shadow-inner">
               <Package size={40} className="text-tertiary" />
@@ -243,7 +317,7 @@ const Parts = () => {
           <>
             {viewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-8">
-                {filteredParts.map((part: any) => {
+                {sortedParts.map((part: any) => {
                   const stockCls = getStockBadgeCls(part.stock_quantity, part.min_stock_level || 0);
                   return (
                     <div
@@ -339,7 +413,7 @@ const Parts = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {filteredParts.map((part: any) => (
+                        {sortedParts.map((part: any) => (
                             <tr key={part.id} className="table-row-hover group" onClick={() => setDetailModal({ id: part.id, category: activeTab })}>
                                 <td>
                                     <div className="flex items-center gap-4">
