@@ -300,11 +300,23 @@ Steps:
        unless you tell me otherwise."
   5. After the user confirms, propose ALL writes in ONE assistant
      turn (do not split across turns):
-       - stock_in for every found line (use po_number, supplier name
-         in reference_notes; omit supplier_id since suppliers are not
-         being created).
-       - stock_out for the same line linked to project_id.
+       - stock_in for every found line. ALWAYS pass po_number — the
+         tool enforces the PO ordered-qty cap (you cannot stock_in
+         more than was ordered on that PO line). Carry the supplier
+         name in reference_notes; omit supplier_id since suppliers
+         are not being created.
+       - stock_out for the same line linked to project_id. ALWAYS
+         pass po_number too — the tool also enforces the cap on OUT
+         (cumulative issued for this PO+part cannot exceed ordered).
      The user Approves all from the chat panel in one click.
+
+PO QTY INTERLOCK (HARD RULE)
+   When a stock_in or stock_out is recorded against a PO (po_number
+   present), the total IN/OUT for that (PO, part) cannot exceed the
+   ordered quantity on that PO. The tool throws if you exceed it.
+   If the user genuinely received or issued more than was ordered,
+   tell them to adjust stock manually from Part Master — DO NOT
+   strip po_number to bypass the cap.
 
 If the user only says "stock in" (not "in and out"), skip the
 stock_out half. If they only say "stock out", skip the stock_in half.

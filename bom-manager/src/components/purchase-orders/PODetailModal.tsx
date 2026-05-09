@@ -7,7 +7,7 @@ import {
   Hash,
 } from 'lucide-react';
 import { purchaseOrdersApi } from '../../api/purchase-orders';
-import { poPaymentsApi, POPayment, PaymentType, PaymentMode, receivePoItem, issueOutPoItem } from '../../api/po-payments';
+import { poPaymentsApi, POPayment, PaymentType, PaymentMode, receivePoItem, issueOutPoItem, getPoRemainingForPart } from '../../api/po-payments';
 import { uploadFile, getSignedUrl } from '../../api/storage';
 import { useToast } from '../../context/ToastContext';
 
@@ -100,32 +100,29 @@ export default function PODetailModal({
         qtyDefaults[it.id] = Math.max(0, (it.quantity || 0) - (it.received_qty || 0));
       }
     } else {
-      // OUT: fetch current master stock for each selected line and default qty to received_qty
+      // OUT cap = PO ordered qty for this part minus already-issued
+      // against this PO. Master stock is intentionally NOT the cap —
+      // if users need to issue more than was ordered they can adjust
+      // stock from Part Master.
       try {
-        const { supabase } = await import('../../lib/supabase');
-        const groups: Record<string, number[]> = {};
         for (const it of items) {
-          if (!it.part_type || !it.part_id) continue;
-          (groups[it.part_type] ||= []).push(it.part_id);
-        }
-        const stockByKey: Record<string, number> = {};
-        for (const [tbl, ids] of Object.entries(groups)) {
-          const { data } = await (supabase as any)
-            .from(tbl)
-            .select('id, stock_quantity')
-            .in('id', ids);
-          (data || []).forEach((row: any) => {
-            stockByKey[`${tbl}:${row.id}`] = row.stock_quantity || 0;
+          if (!it.part_type || !it.part_id) {
+            stockMap[it.id] = 0;
+            qtyDefaults[it.id] = 0;
+            continue;
+          }
+          const { remaining } = await getPoRemainingForPart({
+            poNumber: po?.po_number,
+            poId,
+            partTable: it.part_type,
+            partId: it.part_id,
+            mode: 'OUT',
           });
-        }
-        for (const it of items) {
-          const stock = stockByKey[`${it.part_type}:${it.part_id}`] || 0;
-          stockMap[it.id] = stock;
-          // Default to min(received_qty, stock) so users can issue what was just received
-          qtyDefaults[it.id] = Math.min(it.received_qty || 0, stock);
+          stockMap[it.id] = remaining;
+          qtyDefaults[it.id] = remaining;
         }
       } catch (e) {
-        console.error('Failed to fetch stock for bulk OUT:', e);
+        console.error('Failed to compute PO remaining for bulk OUT:', e);
       }
     }
 
@@ -164,9 +161,9 @@ export default function PODetailModal({
             }
             await receivePoItem(String(it.id), qty, bulkDate, bulkNotes || undefined);
           } else {
-            const stock = bulkStockMap[it.id] ?? 0;
-            if (qty > stock) {
-              errors.push(`${it.part_number}: ${qty} exceeds stock ${stock}`);
+            const cap = bulkStockMap[it.id] ?? 0;
+            if (qty > cap) {
+              errors.push(`${it.part_number}: ${qty} exceeds PO remaining ${cap}`);
               continue;
             }
             await issueOutPoItem(String(it.id), qty, bulkDate, bulkNotes || undefined);
@@ -206,12 +203,21 @@ export default function PODetailModal({
     setIssueOutModalItem(item);
     setIsIssueOutModalOpen(true);
     setCurrentAvailableStock(0);
-    // Fetch live stock
+    // Cap is the PO ordered-qty remainder (not master stock): cumulative
+    // OUT against this PO+part cannot exceed the ordered total. Adjust
+    // stock manually from Part Master if more than ordered is needed.
     try {
-      const { supabase } = await import('../../lib/supabase');
-      const { data } = await supabase.from(item.part_type).select('stock_quantity').eq('id', item.part_id).single();
-      if (data) setCurrentAvailableStock(data.stock_quantity || 0);
-    } catch {}
+      const { remaining } = await getPoRemainingForPart({
+        poNumber: po?.po_number,
+        poId,
+        partTable: item.part_type,
+        partId: item.part_id,
+        mode: 'OUT',
+      });
+      setCurrentAvailableStock(remaining);
+    } catch {
+      setCurrentAvailableStock(0);
+    }
   };
   
   const handleIssueOutSubmit = async (formData: {
@@ -1370,7 +1376,7 @@ export default function PODetailModal({
                 <p className={`text-[11px] font-black uppercase tracking-widest ${bulkMode === 'IN' ? 'text-blue-600' : 'text-red-600'}`}>
                   {bulkMode === 'IN'
                     ? 'Receive selected lines into stock. Quantities default to pending; edit per line. Rows with qty 0 are skipped.'
-                    : 'Issue selected lines out of stock. Quantities default to received-but-not-issued (capped at current stock). Rows with qty 0 are skipped.'}
+                    : 'Issue selected lines out of stock. Capped at PO ordered − already issued per line. Adjust stock manually from Part Master if you need more. Rows with qty 0 are skipped.'}
                 </p>
               </div>
 
@@ -1382,7 +1388,7 @@ export default function PODetailModal({
                       <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Ordered</th>
                       <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Received</th>
                       <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">
-                        {bulkMode === 'IN' ? 'Pending' : 'Stock'}
+                        {bulkMode === 'IN' ? 'Pending' : 'PO Remaining'}
                       </th>
                       <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">
                         Qty {bulkMode === 'IN' ? 'IN' : 'OUT'}
@@ -1589,7 +1595,7 @@ export default function PODetailModal({
 
               <div>
                 <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
-                  Quantity to Issue Out <span className="text-red-600">(MAX {currentAvailableStock})</span>
+                  Quantity to Issue Out <span className="text-red-600">(MAX {currentAvailableStock} — PO remaining)</span>
                 </label>
                 <input
                   type="number"

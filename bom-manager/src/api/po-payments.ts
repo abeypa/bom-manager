@@ -86,8 +86,19 @@ export const poPaymentsApi = {
       const partTable = (poItem as any).part_type;
       const partId = (poItem as any).part_id;
       const poNumber = (poItem as any).po?.po_number;
+      const orderedQty = Number((poItem as any).quantity) || 0;
+      const alreadyReceived = Number((poItem as any).received_qty) || 0;
 
       if (!partTable || !partId) continue;
+
+      if (alreadyReceived + item.received_qty > orderedQty) {
+        const remaining = Math.max(0, orderedQty - alreadyReceived);
+        throw new Error(
+          `Cannot receive ${item.received_qty} for "${(poItem as any).part_number}": ordered ${orderedQty}, ` +
+          `already received ${alreadyReceived}, only ${remaining} remaining. ` +
+          `Adjust stock manually from Part Master if needed.`
+        );
+      }
 
       const { data: part } = await (supabase as any)
         .from(partTable)
@@ -181,6 +192,69 @@ export const poPaymentsApi = {
   },
 };
 
+/**
+ * Sum the ordered quantity for a (po, part) combination and how much
+ * has already moved against it via stock_movements (IN or OUT).
+ *
+ * Used as the cap for any IN/OUT recorded against a PO. Pass the
+ * po_number (preferred) or purchase_order_id; the helper will resolve
+ * the other side. Manual stock adjustments done from the Part Master
+ * page do NOT carry a po_number and therefore do not count against
+ * this remainder.
+ */
+export const getPoRemainingForPart = async (opts: {
+  poNumber?: string | null;
+  poId?: number | null;
+  partTable: string;
+  partId: number;
+  mode: 'IN' | 'OUT';
+}): Promise<{ ordered: number; completed: number; remaining: number }> => {
+  let { poNumber, poId } = opts;
+  const { partTable, partId, mode } = opts;
+
+  if (!poNumber && poId) {
+    const { data } = await supabase
+      .from('purchase_orders')
+      .select('po_number')
+      .eq('id', poId)
+      .maybeSingle();
+    poNumber = (data as any)?.po_number || null;
+  }
+  if (!poId && poNumber) {
+    const { data } = await supabase
+      .from('purchase_orders')
+      .select('id')
+      .eq('po_number', poNumber)
+      .maybeSingle();
+    poId = (data as any)?.id || null;
+  }
+
+  let ordered = 0;
+  if (poId) {
+    const { data: lines } = await (supabase as any)
+      .from('purchase_order_items')
+      .select('quantity')
+      .eq('purchase_order_id', poId)
+      .eq('part_type', partTable)
+      .eq('part_id', partId);
+    ordered = (lines || []).reduce((s: number, l: any) => s + (Number(l.quantity) || 0), 0);
+  }
+
+  let completed = 0;
+  if (poNumber) {
+    const { data: moves } = await (supabase as any)
+      .from('stock_movements')
+      .select('quantity')
+      .eq('po_number', poNumber)
+      .eq('part_table_name', partTable)
+      .eq('part_id', partId)
+      .eq('movement_type', mode);
+    completed = (moves || []).reduce((s: number, m: any) => s + (Number(m.quantity) || 0), 0);
+  }
+
+  return { ordered, completed, remaining: Math.max(0, ordered - completed) };
+};
+
 export const receivePoItem = async (
   poLineItemId: number | string,
   quantity: number,
@@ -206,8 +280,23 @@ export const receivePoItem = async (
   const partId = (poItem as any).part_id;
   const poNumber = (poItem as any).po?.po_number;
   const purchaseOrderId = (poItem as any).po?.id;
+  const orderedQty = Number((poItem as any).quantity) || 0;
+  const alreadyReceived = Number((poItem as any).received_qty) || 0;
 
   if (!partTable || !partId) throw new Error('Part metadata missing on line item');
+
+  // PO-ordered-qty interlock for IN: cumulative received on this line
+  // cannot exceed the line's ordered quantity. If the user genuinely
+  // received more than was ordered, they should adjust stock from the
+  // Part Master page, not from the PO page.
+  if (alreadyReceived + quantity > orderedQty) {
+    const remaining = Math.max(0, orderedQty - alreadyReceived);
+    throw new Error(
+      `Cannot receive ${quantity}: PO line "${(poItem as any).part_number}" is ordered for ${orderedQty}, ` +
+      `${alreadyReceived} already received, only ${remaining} remaining. ` +
+      `Adjust stock manually from Part Master if you really received more than ordered.`
+    );
+  }
 
   // 2. Fetch master Part
   const { data: part, error: partErr } = await (supabase as any)
@@ -308,8 +397,30 @@ export const issueOutPoItem = async (
   const partTable = (poItem as any).part_type;
   const partId = (poItem as any).part_id;
   const poNumber = (poItem as any).po?.po_number;
+  const purchaseOrderId = (poItem as any).po?.id;
 
   if (!partTable || !partId) throw new Error('Part metadata missing on line item');
+
+  // PO-ordered-qty interlock for OUT: cumulative issued out for this
+  // (po, part) combination cannot exceed the total ordered for that
+  // part across this PO. Same part can appear on multiple lines, so we
+  // sum across lines.
+  const { ordered: poOrderedTotal, completed: poIssuedTotal } =
+    await getPoRemainingForPart({
+      poId: purchaseOrderId,
+      poNumber,
+      partTable,
+      partId,
+      mode: 'OUT',
+    });
+  if (poIssuedTotal + quantity > poOrderedTotal) {
+    const remaining = Math.max(0, poOrderedTotal - poIssuedTotal);
+    throw new Error(
+      `Cannot issue ${quantity} from PO ${poNumber || ''}: total ordered for this part on this PO is ${poOrderedTotal}, ` +
+      `${poIssuedTotal} already issued, only ${remaining} remaining. ` +
+      `Adjust stock manually from Part Master if needed.`
+    );
+  }
 
   // 2. Fetch master Part
   const { data: part, error: partErr } = await (supabase as any)
