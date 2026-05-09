@@ -339,6 +339,32 @@ async function runLoop() {
         }
 
         if (tool.kind === 'write') {
+          // Run preflight (if any) BEFORE queueing for user approval.
+          // A failing preflight means the proposal would be rejected at
+          // approval time anyway (duplicate, missing master, etc.), so we
+          // suppress the approval card and feed the error back to the
+          // model so it can re-plan (e.g. switch from create_master_part
+          // to update_master_part_price).
+          if (tool.preflight) {
+            let args: any = {}
+            try { args = JSON.parse(tc.function.arguments || '{}') } catch {}
+            try {
+              await tool.preflight(args)
+            } catch (err: any) {
+              useAIStore.getState().pushMessage({
+                id: uid(),
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: JSON.stringify({
+                  error: err?.message || String(err),
+                  preflight_failed: true,
+                  hint: 'Re-plan based on this error. Do NOT propose the same write again — adjust the action or ask the user.',
+                }),
+                ts: Date.now(),
+              })
+              continue
+            }
+          }
           const p = pendingForCall(tc)
           if (p) writePendings.push(p)
           continue
