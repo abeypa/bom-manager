@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import {
   Bot, X, Send, Settings as SettingsIcon, Trash2, Check, X as XIcon,
-  Loader2, AlertTriangle, FileText, Paperclip, Image as ImageIcon, FileText as PdfIcon
+  Loader2, AlertTriangle, FileText, Paperclip, Image as ImageIcon, FileText as PdfIcon,
+  Square
 } from 'lucide-react'
 import { useAIStore, ChatMessage } from '@/store/useAIStore'
-import { sendUserMessage, approvePending, rejectPending } from '@/lib/ai-runner'
+import { sendUserMessage, approvePending, rejectPending, stopAI } from '@/lib/ai-runner'
 import { isConfigured, loadSettings, modelSupportsVision } from '@/lib/openrouter'
 import {
   fileToAttachment, isImageFile, isPDFFile,
@@ -264,16 +265,29 @@ export default function AIChat() {
               rows={1}
               className="flex-1 text-sm resize-none px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20 max-h-32"
             />
-            <button
-              onClick={submit}
-              disabled={busy || (!input.trim() && attachments.length === 0)}
-              className="p-2.5 bg-navy-700 hover:bg-navy-800 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Send size={14} />
-            </button>
+            {busy ? (
+              <button
+                onClick={stopAI}
+                className="p-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-sm shadow-red-200/50"
+                title="Stop the AI"
+                aria-label="Stop"
+              >
+                <Square size={14} className="fill-white" />
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={!input.trim() && attachments.length === 0}
+                className="p-2.5 bg-navy-700 hover:bg-navy-800 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Send"
+                aria-label="Send"
+              >
+                <Send size={14} />
+              </button>
+            )}
           </div>
           <p className="text-[10px] text-slate-400 mt-1.5 leading-tight">
-            Enter to send · Shift+Enter for newline · Drop / paste images & PDFs · Writes always need your approval.
+            Enter to send · Shift+Enter for newline · {busy ? 'Click ◼ to stop the AI' : 'Drop / paste images & PDFs'} · Writes always need your approval.
           </p>
         </div>
       </div>

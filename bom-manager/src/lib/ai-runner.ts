@@ -354,6 +354,17 @@ function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
+// Module-level abort controller for the in-flight runLoop. Replaced
+// every time the loop starts; stopAI() aborts the current one.
+let runController: AbortController | null = null
+
+export function stopAI() {
+  if (runController) {
+    runController.abort()
+    runController = null
+  }
+}
+
 export function ensureSystemMessage() {
   const { messages, setMessages } = useAIStore.getState()
   if (messages.some(m => m.role === 'system')) return
@@ -419,13 +430,18 @@ export async function feedToolResultAndContinue(p: PendingAction) {
 async function runLoop() {
   const store = useAIStore.getState()
   store.setBusy(true)
+  // Replace any prior controller — only the latest run is abortable.
+  runController = new AbortController()
+  const signal = runController.signal
   try {
     // Hard cap to stop runaway loops
     for (let step = 0; step < 8; step++) {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
       const wire = useAIStore.getState().asWireMessages() as ORMessage[]
       const resp = await chatCompletion({
         messages: wire,
         tools: toOpenAITools() as any,
+        signal,
       })
       const choice = resp.choices?.[0]?.message
       if (!choice) break
@@ -537,13 +553,15 @@ async function runLoop() {
       // else: read tools handled, continue loop so model can use the result
     }
   } catch (err: any) {
+    const isAbort = err?.name === 'AbortError' || /aborted/i.test(err?.message || '')
     useAIStore.getState().pushMessage({
       id: uid(),
       role: 'assistant',
-      content: `**Error:** ${err?.message || String(err)}`,
+      content: isAbort ? '_Stopped by user._' : `**Error:** ${err?.message || String(err)}`,
       ts: Date.now(),
     })
   } finally {
+    runController = null
     useAIStore.getState().setBusy(false)
   }
 }
