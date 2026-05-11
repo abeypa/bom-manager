@@ -555,7 +555,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'update_master_part_price',
     kind: 'write',
     description:
-      'Update price / discount / image / last_price_date on an EXISTING master part. Use when a new PO has the same item code at a different price.',
+      'Update price / discount / image / last_price_date / supplier on an EXISTING master part. Use when a new PO has the same item code at a different price, or when a different supplier is now sourcing the part (pass supplier_id to record the current/primary supplier — the same part can be supplied by multiple suppliers over time).',
     parameters: {
       type: 'object',
       required: ['part_type', 'part_id'],
@@ -568,12 +568,14 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         image_path: { type: 'string' },
         last_price_date: { type: 'string' },
         manufacturer_part_number: { type: 'string' },
+        supplier_id: { type: 'number', description: 'Optional. Update the master part\'s primary supplier when a different supplier is now sourcing this part. The supplier row must exist.' },
       },
     },
     summarize: (a) => {
       const bits = []
       if (a.base_price != null) bits.push(`price=${a.base_price}`)
       if (a.discount_percent != null) bits.push(`disc=${a.discount_percent}%`)
+      if (a.supplier_id != null) bits.push(`supplier=#${a.supplier_id}`)
       if (a.image_path) bits.push('image set')
       return `Update ${a.part_type} #${a.part_id}: ${bits.join(', ') || 'metadata'}`
     },
@@ -582,6 +584,10 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       if (a.base_price != null) assertNumberInRange('base_price', a.base_price, 0, MAX_PRICE)
       if (a.discount_percent != null) assertNumberInRange('discount_percent', a.discount_percent, 0, 100)
       await assertRowExists(a.part_type, a.part_id, `${a.part_type} master part`)
+      if (a.supplier_id != null) {
+        assertInteger('supplier_id', a.supplier_id)
+        await assertRowExists('suppliers', a.supplier_id, 'supplier')
+      }
 
       const patch: any = {}
       if (a.base_price != null) patch.base_price = a.base_price
@@ -589,10 +595,11 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       if (a.currency) patch.currency = a.currency
       if (a.image_path) patch.image_path = a.image_path
       if (a.manufacturer_part_number) patch.manufacturer_part_number = a.manufacturer_part_number
+      if (a.supplier_id != null) patch.supplier_id = a.supplier_id
       if (a.last_price_date) patch.updated_date = a.last_price_date
       else patch.updated_date = new Date().toISOString()
       if (Object.keys(patch).length === 1 /* only updated_date */) {
-        throw new Error('update_master_part_price: nothing to update — supply at least one of base_price, discount_percent, currency, image_path, manufacturer_part_number, last_price_date.')
+        throw new Error('update_master_part_price: nothing to update — supply at least one of base_price, discount_percent, currency, image_path, manufacturer_part_number, supplier_id, last_price_date.')
       }
       const { data, error } = await (supabase as any)
         .from(a.part_type)
@@ -993,11 +1000,12 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       'Create a DRAFT purchase order from an attached PO PDF/image, AFTER the matching project_parts have been saved. ' +
       'Status is locked to "Draft" — the AI can never release, send, confirm, partial-receive or cancel a PO; the user does that from the PO screen. ' +
       'GST / CGST / SGST is NEVER included as a line item or added to grand_total. ' +
-      'Each item must reference an existing project_part_id; the tool runs three interlocks per line: ' +
+      'Each item must reference an existing project_part_id; the tool runs interlocks per line: ' +
       '(a) project_part.unit_price equals the unit_price you pass; ' +
       '(b) the unit_price you pass equals expected_price_from_source (the price you read off the PDF); ' +
-      '(c) the master part for that project_part has supplier_id equal to the PO supplier_id. ' +
-      'Mismatches throw — fix the BOM mapping or re-read the PDF instead of forcing the PO through.',
+      '(c) discount_percent agrees with the BOM line. ' +
+      'One PO carries one supplier (purchase_orders.supplier_id) but the SAME PART can be supplied by DIFFERENT suppliers across POs — the master\'s supplier_id is informational and is NOT cross-checked against the PO supplier. ' +
+      'Mismatches in (a)-(c) throw — fix the BOM mapping or re-read the PDF instead of forcing the PO through.',
     parameters: {
       type: 'object',
       required: ['project_id', 'supplier_id', 'po_date', 'expected_supplier_name', 'items'],
@@ -1130,20 +1138,20 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           )
         }
 
-        // (4) the master part referenced by this BOM line must belong to the PO supplier
+        // (4) verify the master part exists. We do NOT require
+        // master.supplier_id to equal the PO supplier_id — a single
+        // part can legitimately be sourced from multiple suppliers
+        // over time. master.supplier_id is treated as the "primary /
+        // most recently used" supplier and is informational; it does
+        // not constrain who can supply this part on a new PO. The
+        // single-supplier-per-PO rule still holds via
+        // purchase_orders.supplier_id.
         const { data: master } = await (supabase as any)
           .from(pp.part_type)
           .select('id, part_number, supplier_id')
           .eq('id', pp.part_id)
           .maybeSingle()
         if (!master) throw new Error(`Master part ${pp.part_type} #${pp.part_id} does not exist.`)
-        if (master.supplier_id && master.supplier_id !== a.supplier_id) {
-          throw new Error(
-            `Supplier mismatch on project_part #${it.project_part_id} (${master.part_number}): ` +
-            `master record's supplier is #${master.supplier_id}, draft PO supplier is #${a.supplier_id}. ` +
-            `A PO can only contain lines from one supplier.`,
-          )
-        }
 
         // (5) build the wire row — GST is intentionally NOT applied
         const lineTotal = it.quantity * it.unit_price * (1 - itDisc / 100)
