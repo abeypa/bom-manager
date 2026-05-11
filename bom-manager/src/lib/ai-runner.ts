@@ -67,6 +67,15 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
    after reviewing the draft. Never imply you have set a status — the
    tool always lands the PO at status="Draft".
 
+10. A PART CAN HAVE MULTIPLE SUPPLIERS over time. The master part has
+    one supplier_id field — treat it as "primary / most-recent" and
+    NOT as the only allowed supplier. A new PO from a different
+    supplier for the same part is legal; in that case, queue
+    update_master_part_price with the new supplier_id (and any new
+    price/discount) so the master reflects the latest sourcing.
+    Never refuse to draft a PO just because the master records a
+    different supplier — the tool no longer enforces that match.
+
 ═══════════════════════════════════════════════════════════════════════
 INTENT DISPATCH — CHOOSE THE RIGHT WORKFLOW BEFORE DOING ANYTHING
 ═══════════════════════════════════════════════════════════════════════
@@ -241,9 +250,16 @@ F. DRAFT THE PO FROM THE SAME SOURCE PDF
             this is the unit price you read off the PDF. The tool
             rejects the draft if it differs from unit_price. This is
             the cross-check between (mapped BOM price) and (PDF price).
-          - The master part behind each project_part must have
-            supplier_id equal to the PO supplier_id; one PO = one
-            supplier. The tool rejects mixed-supplier drafts.
+          - One PO = one supplier (purchase_orders.supplier_id), but
+            the SAME part can be supplied by DIFFERENT suppliers
+            across POs. The tool does NOT require master.supplier_id
+            to equal the PO supplier_id — the master's supplier_id
+            is treated as the "primary / most-recent" supplier and
+            is informational. If a new PO comes from a different
+            supplier for an existing part, queue
+            update_master_part_price with the new supplier_id (and
+            new price if any) so the master reflects the latest
+            sourcing.
           - Each project_part_id may appear at most once in items[].
 
    Steps:
