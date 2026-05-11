@@ -414,6 +414,31 @@ export async function sendUserMessage(text: string, attachments?: Attachment[]) 
   await runLoop()
 }
 
+/**
+ * Are every tool_call from the most recent assistant turn answered by a
+ * matching tool message in the chat? If not, we must NOT re-enter the
+ * runLoop yet — OpenRouter requires every tool_call to have a tool
+ * response before the next assistant turn, and feeding a partial set
+ * makes the model emit fresh tool_calls that pile onto the queue.
+ */
+function allToolCallsResolved(): boolean {
+  const messages = useAIStore.getState().messages
+  let toolCalls: { id: string }[] | undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length) {
+      toolCalls = m.tool_calls
+      break
+    }
+  }
+  if (!toolCalls || toolCalls.length === 0) return true
+  const answered = new Set<string>()
+  for (const m of messages) {
+    if (m.role === 'tool' && m.tool_call_id) answered.add(m.tool_call_id)
+  }
+  return toolCalls.every(tc => answered.has(tc.id))
+}
+
 /** After a write tool is approved+executed, feed the result back to the model. */
 export async function feedToolResultAndContinue(p: PendingAction) {
   const store = useAIStore.getState()
@@ -424,6 +449,11 @@ export async function feedToolResultAndContinue(p: PendingAction) {
     content: JSON.stringify(p.error ? { error: p.error } : { ok: true, result: p.result }),
     ts: Date.now(),
   })
+  // Wait until every tool_call from the last assistant turn has a
+  // response. Otherwise the model would see an inconsistent state and
+  // emit new tool_calls on top of the existing queue (the bug where
+  // "Approve" makes the pending count grow instead of shrink).
+  if (!allToolCallsResolved()) return
   await runLoop()
 }
 
@@ -595,7 +625,10 @@ export async function rejectPending(p: PendingAction, reason = 'User rejected th
     content: JSON.stringify({ error: reason, rejected: true }),
     ts: Date.now(),
   })
-  // Re-enter loop so the model can react to the rejection
+  // Re-enter loop only when every tool_call from the last assistant
+  // turn has a response — otherwise the model would emit fresh
+  // tool_calls and the queue would grow on every approve/reject.
+  if (!allToolCallsResolved()) return
   await runLoop()
 }
 
