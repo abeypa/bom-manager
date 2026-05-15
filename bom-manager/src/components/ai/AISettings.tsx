@@ -9,7 +9,12 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
   const [showKey, setShowKey] = useState(false)
 
   const save = () => {
-    saveSettings({ apiKey: apiKey.trim(), model })
+    const trimmedModel = model.trim()
+    if (!trimmedModel) {
+      alert('Model id is required.')
+      return
+    }
+    saveSettings({ apiKey: apiKey.trim(), model: trimmedModel })
     onClose()
   }
 
@@ -52,16 +57,39 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
             <label className="text-xs font-bold text-slate-600 mb-2 flex items-center gap-2">
               <Cpu size={12} /> Model
             </label>
-            <select
+            <input
+              type="text"
               value={model}
               onChange={e => setModel(e.target.value)}
-              className="w-full text-sm px-3 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20"
-            >
-              {RECOMMENDED_MODELS.map(m => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
-            <p className="text-[11px] text-slate-500 mt-2">Tool/function calling required. Claude 3.5 Sonnet recommended.</p>
+              placeholder="provider/model-id (e.g. anthropic/claude-3.5-sonnet)"
+              className="w-full text-sm px-3 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20 font-mono"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <select
+                value={RECOMMENDED_MODELS.some(m => m.id === model) ? model : ''}
+                onChange={e => { if (e.target.value) setModel(e.target.value) }}
+                className="flex-1 text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20"
+              >
+                <option value="">Pick from recommended…</option>
+                {RECOMMENDED_MODELS.map(m => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+              <a
+                href="https://openrouter.ai/models"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-navy-600 hover:text-navy-800 underline whitespace-nowrap"
+              >
+                Browse models →
+              </a>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-2">
+              Type any OpenRouter model id, or pick a recommended one. Tool/function calling support is required — verify the model on
+              {' '}<a href="https://openrouter.ai/models" target="_blank" rel="noreferrer" className="text-navy-600 underline">openrouter.ai/models</a>.
+            </p>
           </div>
 
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-900 leading-relaxed">
