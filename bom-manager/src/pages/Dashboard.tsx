@@ -339,6 +339,17 @@ const Dashboard = () => {
           )}
         </div>
       </div>
+
+      {/* Build info footer */}
+      <div className="mt-6 flex items-center justify-end gap-3 px-1">
+        <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest">Build</span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-900 text-gray-100 rounded-full text-[11px] font-mono font-black tracking-tight select-all">
+          #{__GIT_HASH__}
+        </span>
+        <span className="text-[10px] text-gray-300 font-bold">
+          {new Date(__BUILD_TIME__).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </span>
+      </div>
     </div>
   )
 }
