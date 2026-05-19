@@ -35,6 +35,7 @@ import CreatePOFromBOMModal from '@/components/projects/CreatePOFromBOMModal'
 import ProjectSectionCopyModal from '@/components/projects/ProjectSectionCopyModal'
 import ProjectDocumentsTab from '@/components/projects/ProjectDocumentsTab'
 import JobOrderTab from '@/components/projects/JobOrderTab'
+import POPdfAuditCard from '@/components/projects/POPdfAuditCard'
 
 // New modular components
 import BOMSectionCard from '@/components/projects/BOMSectionCard'
@@ -698,6 +699,7 @@ const ProjectDetails = () => {
                   <ShoppingCart className="h-5 w-5 mr-2 text-primary-600" />
                   Project Purchase Orders
                 </h2>
+                <POPdfAuditCard projectId={projectId} projectPOs={projectPOs || []} />
                 {!projectPOs || projectPOs.length === 0 ? (
                   <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
                     <ShoppingCart className="mx-auto h-12 w-12 text-gray-300 mb-3" />

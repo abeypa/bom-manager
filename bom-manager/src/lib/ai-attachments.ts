@@ -153,6 +153,40 @@ export async function fileToPDFAttachment(f: File): Promise<PDFAttachment> {
   return { kind: 'pdf', name: f.name, size: f.size, pageCount, text, truncated }
 }
 
+export async function urlToPDFAttachment(url: string, name = 'purchase-order.pdf'): Promise<PDFAttachment> {
+  const pdfjs = await loadPdfJs()
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Failed to fetch PDF (${res.status})`)
+  const buf = await res.arrayBuffer()
+  const doc = await pdfjs.getDocument({ data: buf }).promise
+  const pageCount = doc.numPages
+  const parts: string[] = []
+  let truncated = false
+  for (let i = 1; i <= pageCount; i++) {
+    const page = await doc.getPage(i)
+    const tc = await page.getTextContent()
+    const txt = textContentToLines(tc.items || [])
+    parts.push(`\n\n----- Page ${i} -----\n${txt}`)
+    if (parts.join('').length > MAX_PDF_TEXT_CHARS) {
+      truncated = true
+      break
+    }
+  }
+  let text = parts.join('')
+  if (text.length > MAX_PDF_TEXT_CHARS) {
+    text = text.slice(0, MAX_PDF_TEXT_CHARS)
+    truncated = true
+  }
+  return {
+    kind: 'pdf',
+    name,
+    size: buf.byteLength,
+    pageCount,
+    text,
+    truncated,
+  }
+}
+
 export async function fileToAttachment(f: File): Promise<Attachment> {
   if (isImageFile(f)) return fileToImageAttachment(f)
   if (isPDFFile(f)) return fileToPDFAttachment(f)
