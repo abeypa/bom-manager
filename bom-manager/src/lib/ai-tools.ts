@@ -188,6 +188,46 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
   },
   {
+    name: 'list_parts_missing_images',
+    kind: 'read',
+    description:
+      'List master parts whose image_path is empty or missing. Use this before searching images for existing master parts. Can be scoped to EBO/MBO/PBO/etc by part_type.',
+    parameters: {
+      type: 'object',
+      properties: {
+        part_type: { type: 'string', enum: part_type_enum, description: 'Optional, restrict to one part_type such as electrical_bought_out for EBO.' },
+        limit: { type: 'number', default: 25 },
+      },
+    },
+    handler: async ({ part_type, limit = 25 }: any) => {
+      const types = part_type ? [part_type] : part_type_enum
+      const maxRows = Math.max(1, Math.min(Number(limit) || 25, 100))
+      const results: any[] = []
+      for (const pt of types) {
+        const { data, error } = await (supabase as any)
+          .from(pt)
+          .select('id, part_number, beperp_part_no, manufacturer, manufacturer_part_number, description, image_path')
+          .order('updated_date', { ascending: false, nullsFirst: false })
+          .limit(500)
+        if (error) throw error
+        for (const d of data || []) {
+          if (d.image_path && String(d.image_path).trim()) continue
+          results.push({
+            part_type: pt,
+            id: d.id,
+            part_number: d.part_number,
+            beperp_part_no: d.beperp_part_no,
+            manufacturer: d.manufacturer,
+            manufacturer_part_number: d.manufacturer_part_number,
+            description: d.description,
+          })
+          if (results.length >= maxRows) return results
+        }
+      }
+      return results
+    },
+  },
+  {
     name: 'list_suppliers',
     kind: 'read',
     description: 'List suppliers with id and name.',

@@ -181,7 +181,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Smart AI Command Center */}
+      {/* Smart dashboard signals */}
       <div className="card overflow-hidden mb-10 border-navy-100 shadow-lg">
         <div className="px-6 py-5 border-b border-slate-100 bg-navy-900 text-white flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="flex items-start gap-4">
