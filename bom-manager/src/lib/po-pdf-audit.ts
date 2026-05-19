@@ -66,6 +66,15 @@ function findLineForItem(item: any, lines: ParsedPOLine[]) {
   return lines.find((line) => normalize(line.description).includes(itemWords) || itemWords.includes(normalize(line.description).slice(0, 18))) || null
 }
 
+function pdfBasicComparableAmount(parsed: ReturnType<typeof parsePurchaseOrderText>) {
+  const lineTotal = parsed.lines.reduce((sum, line) => sum + Number(line.total_amount || 0), 0)
+  if (parsed.basic_amount != null) return { label: 'PDF Basic Amount', value: parsed.basic_amount }
+  if (parsed.subtotal != null) return { label: 'PDF subtotal/taxable value', value: parsed.subtotal }
+  if (lineTotal > 0) return { label: 'PDF line basic total', value: lineTotal }
+  if (parsed.total_amount != null) return { label: 'PDF total amount', value: parsed.total_amount }
+  return null
+}
+
 export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> {
   const issues: POPdfAuditIssue[] = []
   const poNumber = po.po_number || `PO #${po.id}`
@@ -171,12 +180,13 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
       }
     }
 
-    if (parsed.total_amount != null && po.grand_total != null && !closeEnough(po.grand_total, parsed.total_amount, 1)) {
+    const pdfBasicAmount = pdfBasicComparableAmount(parsed)
+    if (pdfBasicAmount && po.grand_total != null && !closeEnough(po.grand_total, pdfBasicAmount.value, 1)) {
       issues.push({
         severity: 'warning',
-        label: 'Total value',
+        label: 'Basic amount',
         expected: money(po.grand_total),
-        actual: money(parsed.total_amount),
+        actual: `${money(pdfBasicAmount.value)} (${pdfBasicAmount.label})`,
       })
     }
 

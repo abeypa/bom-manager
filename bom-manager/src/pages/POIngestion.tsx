@@ -151,6 +151,7 @@ export default function POIngestion() {
             supplier_name: null,
             po_date: null,
             currency: 'INR',
+            basic_amount: null,
             subtotal: null,
             total_amount: null,
             parse_status: 'needs_ocr',

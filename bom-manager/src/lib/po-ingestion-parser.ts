@@ -18,6 +18,7 @@ export interface ParsedPODocument {
   supplier_name: string | null
   po_date: string | null
   currency: string
+  basic_amount: number | null
   subtotal: number | null
   total_amount: number | null
   parse_status: 'parsed' | 'needs_review' | 'needs_ocr' | 'failed'
@@ -376,6 +377,7 @@ export function parsePurchaseOrderText(args: {
       supplier_name: null,
       po_date: null,
       currency: 'INR',
+      basic_amount: null,
       subtotal: null,
       total_amount: null,
       parse_status: 'needs_ocr',
@@ -391,6 +393,11 @@ export function parsePurchaseOrderText(args: {
     /\bgrand\s+total\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
     /\btotal\s+amount\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
     /\bnet\s+amount\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
+  ])
+  const basicRaw = firstMatch(rawText, [
+    /\bbasic\s+amount\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
+    /\bbasic\s+value\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
+    /\bbasic\s+total\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
   ])
   const subtotalRaw = firstMatch(rawText, [
     /\bsubtotal\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
@@ -418,6 +425,7 @@ export function parsePurchaseOrderText(args: {
     supplier_name: supplierName,
     po_date: poDate,
     currency: detectCurrency(rawText),
+    basic_amount: parseNumber(basicRaw),
     subtotal: parseNumber(subtotalRaw),
     total_amount: parseNumber(totalRaw),
     parse_status: warnings.length ? 'needs_review' : 'parsed',
