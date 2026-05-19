@@ -73,6 +73,7 @@ export const PREFIX_BY_PART_TYPE: Record<string, string> = Object.fromEntries(
 const MAX_QTY = 1_000_000
 const MAX_PRICE = 1_000_000_000
 const MAX_DESC_LEN = 2000
+const IMAGE_EXT_RE = /\.(jpg|jpeg|png|webp)(\?|$)/i
 
 function assertNonEmpty(field: string, v: any) {
   if (v == null || (typeof v === 'string' && v.trim() === '')) {
@@ -95,6 +96,57 @@ function assertMaxLen(field: string, v: any, max: number) {
 async function assertRowExists(table: string, id: number, label?: string) {
   const { data } = await (supabase as any).from(table).select('id').eq('id', id).maybeSingle()
   if (!data) throw new Error(`${label || table} #${id} does not exist.`)
+}
+
+function extractLikelyCatalogNumbers(text: string): string[] {
+  const matches = String(text || '').match(/\b[A-Z0-9]{2,}(?:[-/][A-Z0-9]+){1,}\b/gi) || []
+  return Array.from(new Set(matches.map((m) => m.toUpperCase()).filter((m) => m.length >= 5))).slice(0, 5)
+}
+
+function buildProductImageQueries(query: string): string[] {
+  const raw = String(query || '').trim()
+  const normalized = raw.replace(/\s+/g, ' ')
+  const catalogNumbers = extractLikelyCatalogNumbers(normalized)
+  const derivedBrand =
+    /\b(1732E|1734|20G|20-750|PowerFlex|PF750|ArmorBlock)\b/i.test(normalized) ? 'Allen Bradley' :
+    /\bLIYCY\b/i.test(normalized) ? 'LAPP' :
+    /\b(MS3102|MS3106|3101F|3106F)\b/i.test(normalized) ? 'Amphenol' :
+    ''
+  const queries = [
+    normalized,
+    ...catalogNumbers.flatMap((code) => [
+      `${derivedBrand} ${code} product image`.trim(),
+      `${code} product photo`,
+      `${code} ${normalized}`,
+    ]),
+  ].filter(Boolean)
+  return Array.from(new Set(queries)).slice(0, 8)
+}
+
+function industrialImageCandidates(query: string) {
+  const codes = extractLikelyCatalogNumbers(query)
+  const candidates: Array<{ url: string; source: string }> = []
+  for (const code of codes) {
+    if (/^(1732E|1734|20G|20-750)/i.test(code)) {
+      candidates.push({
+        url: `https://gesrepair.com/wp-content/uploads/2020/AB_Images/Allen-Bradley_${code}.jpg`,
+        source: 'gesrepair-direct',
+      })
+    }
+  }
+  return candidates
+}
+
+function decodeImageUrl(url: string) {
+  return url
+    .replace(/\\u0026/g, '&')
+    .replace(/\\/g, '')
+}
+
+function isUsefulImageUrl(url: string) {
+  if (!url || url.includes('duckduckgo.com')) return false
+  if (/logo|sprite|icon|placeholder|loading|no-image/i.test(url)) return false
+  return IMAGE_EXT_RE.test(url) || /cloudinary|cdn|images|image|products|wp-content/i.test(url)
 }
 
 export const TOOL_REGISTRY: ToolSpec[] = [
@@ -364,11 +416,18 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       },
     },
     handler: async ({ query }: any) => {
+      const queries = buildProductImageQueries(query)
+
+      for (const candidate of industrialImageCandidates(query)) {
+        return { found: true, image_url: candidate.url, source: candidate.source, query: String(query) }
+      }
+
       // ── Strategy 1: DuckDuckGo via corsproxy.io ──────────────────────────
       // DuckDuckGo image results embed actual product images from manufacturer
       // and distributor sites — far better for industrial parts than Wikimedia.
       try {
-        const ddgUrl = 'https://duckduckgo.com/?q=' + encodeURIComponent(query) + '&iax=images&ia=images'
+        const searchQuery = queries[0] || String(query || '')
+        const ddgUrl = 'https://duckduckgo.com/?q=' + encodeURIComponent(searchQuery) + '&iax=images&ia=images'
         const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(ddgUrl), {
           signal: AbortSignal.timeout(7000),
           headers: { 'Accept': 'text/html' },
@@ -378,17 +437,48 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           // DDG embeds image data in its page as JSON-like fragments
           const matches = [...html.matchAll(/"image":"(https:[^"]+)"/g)]
           for (const m of matches) {
-            const url = m[1].replace(/\\u0026/g, '&')
+            const url = decodeImageUrl(m[1])
             // Skip DDG's own thumbnails; prefer direct product image hosts
-            if (url.includes('duckduckgo.com')) continue
-            if (/\.(jpg|jpeg|png|webp)(\?|$)/i.test(url)) {
-              return { found: true, image_url: url, source: 'duckduckgo' }
+            if (isUsefulImageUrl(url)) {
+              return { found: true, image_url: url, source: 'duckduckgo-html', query: searchQuery }
             }
           }
         }
       } catch { /* proxy unavailable — fall through */ }
 
       // ── Strategy 2: Wikimedia Commons (native CORS, last resort) ─────────
+      for (const searchQuery of queries) {
+        try {
+          const pageUrl = 'https://duckduckgo.com/?q=' + encodeURIComponent(searchQuery) + '&iax=images&ia=images'
+          const pageRes = await fetch('https://corsproxy.io/?' + encodeURIComponent(pageUrl), {
+            signal: AbortSignal.timeout(7000),
+            headers: { Accept: 'text/html' },
+          })
+          if (!pageRes.ok) continue
+          const html = await pageRes.text()
+          const vqd = html.match(/vqd=['"]?([^'"&\s]+)['"]?/)?.[1]
+          if (!vqd) continue
+          const apiUrl =
+            'https://duckduckgo.com/i.js?o=json&q=' +
+            encodeURIComponent(searchQuery) +
+            '&vqd=' +
+            encodeURIComponent(vqd) +
+            '&f=,,,&p=1'
+          const imgRes = await fetch('https://corsproxy.io/?' + encodeURIComponent(apiUrl), {
+            signal: AbortSignal.timeout(7000),
+            headers: { Accept: 'application/json' },
+          })
+          if (!imgRes.ok) continue
+          const json = await imgRes.json()
+          for (const item of json?.results || []) {
+            const url = decodeImageUrl(item?.image || item?.thumbnail || '')
+            if (isUsefulImageUrl(url)) {
+              return { found: true, image_url: url, source: 'duckduckgo-images', query: searchQuery, title: item?.title }
+            }
+          }
+        } catch { /* continue to next query */ }
+      }
+
       try {
         const wmUrl =
           'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*' +
