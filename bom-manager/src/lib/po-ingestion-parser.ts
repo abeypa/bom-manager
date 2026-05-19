@@ -284,13 +284,14 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
 }
 
 function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
-  const headerStart = lines.findIndex(line =>
-    /\bSL\b/i.test(line) &&
-    /\bITEM CODE\b/i.test(line) &&
-    /\bITEM DESCRIPTION\b/i.test(line) &&
-    /\bUNIT PRICE\b/i.test(line) &&
-    /\bAMOUNT\b/i.test(line),
-  )
+  const headerStart = lines.findIndex((line, index) => {
+    const windowText = lines.slice(index, index + 4).join(' ')
+    return /\bSL\b/i.test(windowText) &&
+      /\bITEM CODE\b/i.test(windowText) &&
+      /\bITEM DESCRIPTION\b/i.test(windowText) &&
+      /\bUNIT PRICE\b/i.test(windowText) &&
+      /\bAMOUNT\b/i.test(windowText)
+  })
   if (headerStart < 0) return []
 
   const tableEnd = lines.findIndex((line, index) =>
@@ -298,13 +299,35 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
   )
   const rows = lines.slice(headerStart + 1, tableEnd > headerStart ? tableEnd : lines.length)
   const parsed: ParsedPOLine[] = []
+  const rowChunks: string[] = []
+  let current = ''
 
   for (const raw of rows) {
     const line = raw.trim()
+    if (!line || /\b(SL|ITEM CODE|ITEM DESCRIPTION|UNIT PRICE|AMOUNT)\b/i.test(line)) continue
+    if (/^\d+\s+\d{6,}\b/.test(line)) {
+      if (current) rowChunks.push(current)
+      current = line
+    } else if (current) {
+      current += ' ' + line
+    }
+  }
+  if (current) rowChunks.push(current)
+
+  for (const raw of rowChunks) {
+    const line = raw.replace(/\s+/g, ' ').trim()
     const match = line.match(
-      /^(\d+)\s+(\d{6,})\s+(.+?)\s+(\d+(?:\.\d+)?)\s+([A-Z][A-Z./-]*)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/i,
+      /^(\d+)\s+(\d{6,})\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s+(NOS?|NO\.?|SET|SETS|PCS?|PIECES?|MTR|METER|METRE|KG|LTR|LOT)\s+([\d,]+(?:\.\d+)?)\s+(.+?)\s+([\d,]+(?:\.\d+)?)$/i,
     )
     if (!match) continue
+
+    const discountText = match[7]
+    const discountAtRate = discountText.match(/@\s*([\d,]+(?:\.\d+)?)\s*%?/i)?.[1]
+    const discountPercent = discountAtRate
+      ? parseDiscountPercent(discountAtRate)
+      : /%/.test(discountText)
+        ? parseDiscountPercent(discountText)
+        : null
 
     parsed.push({
       line_no: Number(match[1]),
@@ -312,7 +335,7 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
       description: cleanDescription([match[3]]),
       quantity: parseNumber(match[4]),
       unit_price: parseNumber(match[6]),
-      discount_percent: parseDiscountPercent(match[7]),
+      discount_percent: discountPercent,
       total_amount: parseNumber(match[8]),
       raw_line: line,
     })
