@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import {
   Bot, X, Send, Settings as SettingsIcon, Trash2, Check, X as XIcon,
   Loader2, AlertTriangle, FileText, Paperclip, Image as ImageIcon, FileText as PdfIcon,
-  Square, ClipboardList, FolderKanban, Tags, Table2, Sparkles, ShoppingCart
+  Square, ClipboardList, FolderKanban, Tags, Table2, Sparkles, ShoppingCart,
+  Zap, ChevronRight,
 } from 'lucide-react'
 import { useAIStore, ChatMessage } from '@/store/useAIStore'
 import { sendUserMessage, approvePending, rejectPending, stopAI } from '@/lib/ai-runner'
@@ -12,6 +13,16 @@ import {
   type Attachment, type ImageAttachment
 } from '@/lib/ai-attachments'
 import AISettings from './AISettings'
+import { supabase } from '@/lib/supabase'
+
+// ── Part categories ────────────────────────────────────────────────────────────
+const PART_CATEGORIES = [
+  { label: 'Electrical Bought-Out',   prefix: 'EBO', value: 'electrical_bought_out',   color: 'bg-blue-50 border-blue-200 text-blue-800' },
+  { label: 'Electrical Manufacture',  prefix: 'EMF', value: 'electrical_manufacture',   color: 'bg-indigo-50 border-indigo-200 text-indigo-800' },
+  { label: 'Mechanical Bought-Out',   prefix: 'MBO', value: 'mechanical_bought_out',    color: 'bg-amber-50 border-amber-200 text-amber-800' },
+  { label: 'Mechanical Manufacture',  prefix: 'MMF', value: 'mechanical_manufacture',   color: 'bg-orange-50 border-orange-200 text-orange-800' },
+  { label: 'Pneumatic',               prefix: 'PBO', value: 'pneumatic_bought_out',     color: 'bg-teal-50 border-teal-200 text-teal-800' },
+]
 
 const SMART_COMMANDS = [
   {
@@ -120,6 +131,17 @@ export default function AIChat() {
     setAttachments([])
     setAttachError(null)
     await sendUserMessage(text, atts)
+  }
+
+  // Send a quick-reply as a user message without typing
+  const sendReply = async (text: string) => {
+    if (busy) return
+    if (!isConfigured()) {
+      const dbSettings = await loadSettingsFromDB()
+      if (dbSettings?.apiKey) saveSettings(dbSettings)
+    }
+    if (!isConfigured()) { setShowSettings(true); return }
+    await sendUserMessage(text, undefined)
   }
 
   const visionOk = modelSupportsVision(loadSettings().model)
@@ -257,6 +279,14 @@ export default function AIChat() {
           )}
         </div>
 
+        {/* Quick-reply chips (context-aware, shown when AI has replied) */}
+        {visibleMessages.length > 0 && !busy && (
+          <QuickReplies
+            lastMessage={visibleMessages.filter(m => m.role === 'assistant').at(-1)}
+            onReply={sendReply}
+          />
+        )}
+
         {/* Footer / input */}
         <div className="border-t border-slate-100 p-3 bg-white">
           {/* Attachment chips */}
@@ -390,6 +420,122 @@ function SmartCommandPanel({
         <p>4. Approved actions appear here, then the draft PO is created.</p>
       </div>
     </div>
+  )
+}
+
+// ── Context-aware quick replies ───────────────────────────────────────────────
+function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | undefined; onReply: (t: string) => void }) {
+  const [projects, setProjects] = useState<any[]>([])
+  const [sections, setSections] = useState<any[]>([])
+
+  const msg = lastMessage?.content?.toLowerCase() ?? ''
+
+  const wantsProject  = /which project|select.*project|target project|project.*should|what project|choose.*project|project.*name|list.*project/i.test(msg)
+  const wantsCategory = /part.*(type|category)|category|classify|electrical|mechanical|pneumatic|which type|what type|part classification/i.test(msg)
+  const wantsSection  = /which section|which table|subsection|target.*section|section.*for|where.*should|map.*to|place.*in|add.*to.*section/i.test(msg)
+  const wantsYesNo    = /shall i|should i|confirm|proceed|go ahead|correct\?|ok\?|ready|approve|want me to|continue/i.test(msg)
+  const wantsSkip     = /skip|leave.*blank|not sure|don't know|unsure/i.test(msg)
+
+  useEffect(() => {
+    if (wantsProject) {
+      ;(supabase as any)
+        .from('projects')
+        .select('id, project_name, project_number, status')
+        .not('status', 'eq', 'cancelled')
+        .order('project_number', { ascending: false })
+        .limit(10)
+        .then(({ data }: any) => setProjects(data || []))
+    }
+  }, [wantsProject])
+
+  useEffect(() => {
+    if (wantsSection) {
+      // Extract a project_id from recent messages if the AI mentioned one
+      const numMatch = msg.match(/project[^\d]*(\d+)/)
+      const projectId = numMatch ? parseInt(numMatch[1]) : null
+      const q = (supabase as any)
+        .from('project_subsections')
+        .select('id, section_name, description, project_id')
+        .order('sort_order', { ascending: true })
+        .limit(20)
+      ;(projectId ? q.eq('project_id', projectId) : q).then(({ data }: any) => setSections(data || []))
+    }
+  }, [wantsSection, msg])
+
+  const hasAnything = wantsProject || wantsCategory || wantsSection || wantsYesNo || wantsSkip
+
+  if (!hasAnything && !lastMessage) return null
+  if (!hasAnything) return null
+
+  return (
+    <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 space-y-2">
+      <div className="flex items-center gap-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+        <Zap size={9} className="text-navy-400" /> Quick replies
+      </div>
+
+      {/* Yes / No / Skip */}
+      {wantsYesNo && (
+        <div className="flex flex-wrap gap-1.5">
+          <QuickChip label="✓  Yes, proceed" color="bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100" onClick={() => onReply('Yes, proceed.')} />
+          <QuickChip label="✗  No, stop" color="bg-red-50 border-red-200 text-red-700 hover:bg-red-100" onClick={() => onReply('No, stop.')} />
+          {wantsSkip && <QuickChip label="Skip this" color="bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200" onClick={() => onReply('Skip this item.')} />}
+        </div>
+      )}
+
+      {/* Project list */}
+      {wantsProject && projects.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {projects.map(p => (
+            <QuickChip
+              key={p.id}
+              label={`${p.project_name} (${p.project_number})`}
+              color="bg-navy-50 border-navy-200 text-navy-800 hover:bg-navy-100"
+              onClick={() => onReply(`Use project: ${p.project_name} (${p.project_number}), id ${p.id}`)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Part categories */}
+      {wantsCategory && (
+        <div className="flex flex-wrap gap-1.5">
+          {PART_CATEGORIES.map(c => (
+            <QuickChip
+              key={c.value}
+              label={`${c.prefix} — ${c.label}`}
+              color={`${c.color} hover:opacity-80`}
+              onClick={() => onReply(`Part type: ${c.label} (${c.value})`)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Section list */}
+      {wantsSection && sections.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {sections.map(s => (
+            <QuickChip
+              key={s.id}
+              label={s.section_name}
+              color="bg-violet-50 border-violet-200 text-violet-800 hover:bg-violet-100"
+              onClick={() => onReply(`Use section/table: "${s.section_name}" (subsection id ${s.id})`)}
+            />
+          ))}
+          <QuickChip label="+ Create new section" color="bg-white border-dashed border-slate-300 text-slate-500 hover:border-navy-400 hover:text-navy-700" onClick={() => onReply('Please create a new section for these parts.')} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function QuickChip({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 px-2.5 py-1 border rounded-lg text-[11px] font-semibold transition-all ${color}`}
+    >
+      {label}
+    </button>
   )
 }
 

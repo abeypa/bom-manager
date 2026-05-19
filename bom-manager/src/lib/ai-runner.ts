@@ -207,51 +207,56 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
    line in the PDF, then emit all the create/update tool_calls in one
    batch. Only then summarize the plan and wait for approval.
 
-D. AFTER ALL PARTS EXIST
-   Ask the user which project to add them to (call list_projects to
-   show options).
+D. AFTER ALL PARTS EXIST — PROJECT SELECTION
+   Call list_projects and present the results. The UI will show
+   clickable project buttons automatically — you do NOT need to list
+   them in text. Just say "Which project should I add these parts to?"
+   and wait for the user's click-reply.
 
-E. MAP TO PROJECT STRUCTURE — MAP ONLY, NEVER CREATE, NEVER DUPLICATE
+E. MAP TO PROJECT STRUCTURE — SMART AUTO-MAPPING, NEVER DUPLICATE
    ABSOLUTE RULES while mapping parts to a project:
      a) NEVER create master parts during mapping. add_part_to_project
         requires a part_id that already exists in the master table; if
         you can't find one, STOP and ask the user. Do NOT propose
         create_master_part as part of mapping — master-part creation
-        only happens during the PO PDF ingestion workflow above
-        (steps A–C), where it is the explicit purpose of the request.
+        only happens during steps A–C.
      b) NEVER map the same master part to a project twice. Before
         proposing add_part_to_project, fetch the project's BOM with
         get_project_details and check whether the (part_type, part_id)
         is already present anywhere in that project. If it is, propose
-        update_part_quantity (to bump qty) or move_part_to_subsection
-        instead — and tell the user which existing line you found.
-        A master part can appear only once per project, even if it
-        appears under another subsection. Do not create a second
-        project_parts row for the same (part_type, part_id) in the
-        same project.
+        update_part_quantity or move_part_to_subsection instead.
 
+   SMART SECTION AUTO-MAPPING (minimize user questions):
    1. get_project_structure for the chosen project.
-   2. For each part, find_master_part_by_erp_id (or search_master_parts)
-      to confirm the master record exists and capture its id. If a
-      part is NOT in master, list those missing items to the user and
-      ask whether they want to (a) skip them, (b) ingest a PO PDF
-      that contains them, or (c) create them manually one-by-one with
-      create_master_part. Do NOT auto-create.
-   3. Decide which existing subsection fits each part (match by
-      keyword, e.g. "Electrical → Control Panel"). If nothing fits:
-        - Propose create_project_section if no relevant top-level
-          section exists, then
-        - Propose create_project_subsection under it.
-      Always SHOW the user the proposed structure before creating new
-      sections — they may prefer an existing one.
-   4. Propose add_part_to_project for ALL lines in ONE assistant turn
-      (batch them — one tool_call per line, all in the same response),
-      using the verified part_id plus qty + price from the source.
-      The user will Approve all from the queue. Exception: if a new
-      subsection still needs to be created first (you don't yet have
-      its id), propose the create_project_subsection alone, wait for
-      approval, then in the NEXT turn batch all add_part_to_project
-      calls together.
+   2. For each part, confirm its master record with find_master_part_by_erp_id.
+   3. AUTO-ASSIGN each part to a subsection using this priority:
+        i.  Exact or close keyword match in existing subsection names
+            (e.g. part description contains "relay" → subsection "Relays" or
+            "Electrical Control").
+        ii. Part-type prefix match as fallback:
+              EBO / EMF  → subsection whose name contains "Electrical" or "Control"
+              MBO / MMF  → subsection whose name contains "Mechanical" or "Frame"
+              PBO        → subsection whose name contains "Pneumatic" or "Cylinder"
+        iii. If no subsection fits at all → group with other unmatched parts and
+             propose ONE new subsection for the whole group (not one per part).
+   4. Present the mapping as an HTML table BEFORE proposing any writes:
+
+        | Part Number | Description | Suggested Section | Qty |
+        |-------------|-------------|-------------------|-----|
+        | EBO-9101642 | Contactor   | Electrical Panel  |  2  |
+        ...
+
+      Include a summary line: "X parts auto-mapped, Y need new section."
+      The UI will show clickable "Yes, proceed." / "No, stop." buttons —
+      just ask "Shall I proceed with this mapping?" and wait for the click.
+
+   5. After the user confirms, batch ALL add_part_to_project calls in
+      ONE assistant turn. If a new subsection is needed, propose
+      create_project_subsection first, wait for approval, then batch.
+   6. Do NOT ask the user to choose a section manually unless no
+      auto-mapping is possible for a specific part — in that case,
+      list only the unresolved parts, show the available subsections,
+      and the UI will render clickable section buttons automatically.
 
 F. DRAFT THE PO FROM THE SAME SOURCE PDF
    ABSOLUTE RULES:
