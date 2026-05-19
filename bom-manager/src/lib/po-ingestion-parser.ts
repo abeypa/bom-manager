@@ -98,6 +98,15 @@ function metadataFromFilename(fileName: string) {
   }
 }
 
+function cleanSupplierName(value: string | null) {
+  if (!value) return null
+  return value
+    .replace(/\bBEP INDIA AUTOMOTIVE SYSTEMS\b.*$/i, '')
+    .replace(/\bDOCUMENT DETAILS\b.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim() || null
+}
+
 function valueAfterLabel(lines: string[], label: RegExp) {
   const idx = lines.findIndex(line => label.test(line))
   if (idx < 0) return null
@@ -152,7 +161,7 @@ function detectSupplier(lines: string[]) {
     const next = lines.slice(vendorIdx + 1, vendorIdx + 4).find(l =>
       l.length > 3 && !/address|gst|phone|email|date|po\b/i.test(l),
     )
-    if (next) return next
+    if (next) return cleanSupplierName(next)
   }
   return null
 }
@@ -267,9 +276,48 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
   return parsed
 }
 
+function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
+  const headerStart = lines.findIndex(line =>
+    /\bSL\b/i.test(line) &&
+    /\bITEM CODE\b/i.test(line) &&
+    /\bITEM DESCRIPTION\b/i.test(line) &&
+    /\bUNIT PRICE\b/i.test(line) &&
+    /\bAMOUNT\b/i.test(line),
+  )
+  if (headerStart < 0) return []
+
+  const tableEnd = lines.findIndex((line, index) =>
+    index > headerStart && /^tax description\b/i.test(line),
+  )
+  const rows = lines.slice(headerStart + 1, tableEnd > headerStart ? tableEnd : lines.length)
+  const parsed: ParsedPOLine[] = []
+
+  for (const raw of rows) {
+    const line = raw.trim()
+    const match = line.match(
+      /^(\d+)\s+(\d{6,})\s+(.+?)\s+(\d+(?:\.\d+)?)\s+([A-Z][A-Z./-]*)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/i,
+    )
+    if (!match) continue
+
+    parsed.push({
+      line_no: Number(match[1]),
+      item_code: match[2],
+      description: cleanDescription([match[3]]),
+      quantity: parseNumber(match[4]),
+      unit_price: parseNumber(match[6]),
+      discount_percent: parseNumber(match[7]) || 0,
+      total_amount: parseNumber(match[8]),
+      raw_line: line,
+    })
+  }
+
+  return parsed
+}
+
 function parseLine(raw: string, index: number): ParsedPOLine | null {
   const line = raw.trim()
   if (line.length < 8) return null
+  if (!/^\d+\s+\d{6,}\s+/.test(line)) return null
   if (/^(subtotal|total|grand total|cgst|sgst|igst|tax|terms|amount in words)\b/i.test(line)) return null
   if (/\b(description|quantity|unit price|rate|amount|item code)\b/i.test(line)) return null
 
@@ -349,14 +397,16 @@ export function parsePurchaseOrderText(args: {
     /\btaxable\s+value\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
   ])
 
-  const columnLines = parseBepColumnTable(lines)
+  const visualLines = parseBepVisualTable(lines)
+  const columnLines = visualLines.length > 0 ? visualLines : parseBepColumnTable(lines)
   const parsedLines = columnLines.length > 0 ? columnLines : lines
     .map((line, i) => parseLine(line, i))
     .filter((line): line is ParsedPOLine => Boolean(line))
 
   if (!poNumber) warnings.push('PO number was not detected.')
   if (!poDate) warnings.push('PO date was not detected.')
-  if (!detectSupplier(lines) && !filenameMeta.supplier) warnings.push('Supplier name was not detected.')
+  const supplierName = cleanSupplierName(detectSupplier(lines)) || cleanSupplierName(filenameMeta.supplier)
+  if (!supplierName) warnings.push('Supplier name was not detected.')
   if (parsedLines.length === 0) warnings.push('No line items were detected from the extracted text.')
 
   return {
@@ -365,7 +415,7 @@ export function parsePurchaseOrderText(args: {
     mime_type: args.mimeType,
     page_count: args.pageCount,
     po_number: poNumber,
-    supplier_name: detectSupplier(lines) || filenameMeta.supplier,
+    supplier_name: supplierName,
     po_date: poDate,
     currency: detectCurrency(rawText),
     subtotal: parseNumber(subtotalRaw),
