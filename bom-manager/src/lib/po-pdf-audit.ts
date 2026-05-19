@@ -162,6 +162,19 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
         })
         continue
       }
+
+      // Primary check: if the DB line total matches the PDF line total, accept the line.
+      // The BEP PO DISC column contains two numbers ("419.00 @ 2.00%") which can cause
+      // generic parsers to swap qty and unit_price. The total_amount is unambiguous.
+      const dbLineAmount =
+        Number(item.quantity || 0) *
+        Number(item.unit_price || 0) *
+        (1 - Number(item.discount_percent || 0) / 100)
+      if (line.total_amount != null && dbLineAmount > 0 && closeEnough(dbLineAmount, line.total_amount, 1)) {
+        continue // line total matches — data is correct
+      }
+
+      // Secondary checks — only run when line totals differ or aren't available
       if (line.quantity != null && !closeEnough(item.quantity, line.quantity)) {
         issues.push({
           severity: 'error',
@@ -189,7 +202,7 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
     }
 
     const pdfBasicAmount = pdfBasicComparableAmount(parsed)
-    if (pdfBasicAmount && po.grand_total != null && !closeEnough(po.grand_total, pdfBasicAmount.value, 1)) {
+    if (pdfBasicAmount && po.grand_total != null && !closeEnough(po.grand_total, pdfBasicAmount.value, 5)) {
       issues.push({
         severity: 'warning',
         label: 'Basic amount',
