@@ -19,7 +19,8 @@ import Admin from './pages/Admin';
 import ChangeLog from './pages/ChangeLog';
 import ProcurementDashboard from './pages/ProcurementDashboard';
 import Reports from './pages/Reports';
-import POIngestion from './pages/POIngestion';
+// PO ingestion is handled through AI chat for now.
+// import POIngestion from './pages/POIngestion';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -124,11 +125,12 @@ function App() {
                   </RoleGuard>
                 } />
 
-                <Route path="/po-ingestion" element={
+                {/* Standalone PO ingestion route paused. Use AI chat PO ingest instead. */}
+                {/* <Route path="/po-ingestion" element={
                   <RoleGuard>
                     <POIngestion />
                   </RoleGuard>
-                } />
+                } /> */}
 
                 <Route path="/suppliers" element={
                   <RoleGuard>

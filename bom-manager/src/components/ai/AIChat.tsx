@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import {
   Bot, X, Send, Settings as SettingsIcon, Trash2, Check, X as XIcon,
   Loader2, AlertTriangle, FileText, Paperclip, Image as ImageIcon, FileText as PdfIcon,
-  Square
+  Square, ClipboardList, FolderKanban, Tags, Table2, Sparkles, ShoppingCart
 } from 'lucide-react'
 import { useAIStore, ChatMessage } from '@/store/useAIStore'
 import { sendUserMessage, approvePending, rejectPending, stopAI } from '@/lib/ai-runner'
@@ -12,6 +12,39 @@ import {
   type Attachment, type ImageAttachment
 } from '@/lib/ai-attachments'
 import AISettings from './AISettings'
+
+const SMART_COMMANDS = [
+  {
+    label: 'PO Ingest',
+    icon: ClipboardList,
+    prompt:
+      'PO ingest: I will attach one or more PO PDFs. Ask me for the target project if not clear. For each PO, resolve or create the supplier, create missing master parts, update existing part prices with the PO date, ask me when part category or project table is uncertain, map each part only once in the project, then draft the matching PO after mapping.',
+  },
+  {
+    label: 'Select Project',
+    icon: FolderKanban,
+    prompt:
+      'Help me select the target project for PO ingestion. List matching projects and ask me to choose one before creating or mapping any parts.',
+  },
+  {
+    label: 'Part Category',
+    icon: Tags,
+    prompt:
+      'Help me classify the PO line items into part categories. Use electrical, mechanical, and pneumatic heuristics, but ask me to choose when there is doubt.',
+  },
+  {
+    label: 'Project Table',
+    icon: Table2,
+    prompt:
+      'Help me map the PO parts to the correct project section/subsection table. Show existing project structure and suggest the best target table for each line.',
+  },
+  {
+    label: 'Draft PO',
+    icon: ShoppingCart,
+    prompt:
+      'After the PO parts are mapped to the project, draft the matching PO from the same source PDF. Exclude GST/tax lines and keep the PO in Draft status for review.',
+  },
+]
 
 export default function AIChat() {
   const open = useAIStore(s => s.open)
@@ -53,6 +86,20 @@ export default function AIChat() {
 
   const removeAttachment = (i: number) =>
     setAttachments(a => a.filter((_, idx) => idx !== i))
+
+  const runSmartCommand = async (prompt: string) => {
+    if (busy) return
+    if (!isConfigured()) {
+      const dbSettings = await loadSettingsFromDB()
+      if (dbSettings?.apiKey) saveSettings(dbSettings)
+    }
+    if (!isConfigured()) { setShowSettings(true); return }
+    const atts = attachments
+    setInput('')
+    setAttachments([])
+    setAttachError(null)
+    await sendUserMessage(prompt, atts.length ? atts : undefined)
+  }
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -120,7 +167,8 @@ export default function AIChat() {
 
         {/* Body */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
-          {visibleMessages.length === 0 && (
+          {visibleMessages.length === 0 && <SmartCommandPanel busy={busy} runSmartCommand={runSmartCommand} />}
+          {false && visibleMessages.length === 0 && (
             <div className="text-center py-12 text-slate-400 text-xs space-y-2">
               <Bot size={28} className="mx-auto text-slate-300" />
               <p className="text-sm font-semibold text-slate-500">Ask me anything about your BOMs</p>
@@ -299,6 +347,49 @@ export default function AIChat() {
 
       {showSettings && <AISettings onClose={() => setShowSettings(false)} />}
     </>
+  )
+}
+
+function SmartCommandPanel({
+  busy,
+  runSmartCommand,
+}: {
+  busy: boolean
+  runSmartCommand: (prompt: string) => void
+}) {
+  return (
+    <div className="py-6 text-slate-500 text-xs space-y-4">
+      <div className="text-center">
+        <Bot size={28} className="mx-auto text-slate-300" />
+        <p className="text-sm font-semibold text-slate-600 mt-2">Smart BOM assistant</p>
+        <p className="text-[11px] text-slate-400 mt-1">Attach PO PDFs, then choose a command or type naturally.</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {SMART_COMMANDS.map(({ label, icon: Icon, prompt }) => (
+          <button
+            key={label}
+            onClick={() => runSmartCommand(prompt)}
+            disabled={busy}
+            className="flex items-center gap-2 px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-left hover:border-navy-300 hover:bg-navy-50 transition-all disabled:opacity-50"
+          >
+            <Icon size={14} className="text-navy-600 shrink-0" />
+            <span className="text-[11px] font-bold text-slate-700">{label}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-1.5">
+        <div className="flex items-center gap-2 text-slate-700 font-bold">
+          <Sparkles size={13} className="text-navy-600" />
+          Smart PO flow
+        </div>
+        <p>1. Attach one or more PO PDFs.</p>
+        <p>2. Click PO Ingest.</p>
+        <p>3. I will ask for project, supplier, category, and table choices only when needed.</p>
+        <p>4. Approved actions appear here, then the draft PO is created.</p>
+      </div>
+    </div>
   )
 }
 
