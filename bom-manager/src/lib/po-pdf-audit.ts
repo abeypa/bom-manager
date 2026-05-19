@@ -33,6 +33,9 @@ const money = (value: any) =>
 const closeEnough = (a: any, b: any, tolerance = 0.05) =>
   Math.abs(Number(a || 0) - Number(b || 0)) <= tolerance
 
+const isSystemGeneratedPONumber = (value: any) =>
+  /^(?:PO|CPO)-?\d+$/i.test(String(value || '').trim())
+
 function resolveDisplayUrl(stored: string) {
   if (!stored) return Promise.resolve('')
   if (!stored.startsWith('http')) return getSignedUrl(stored, 3600).then((fresh) => fresh || stored)
@@ -111,7 +114,12 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
       text: pdf.text,
     })
 
-    if (parsed.po_number && normalize(parsed.po_number) !== normalize(po.po_number)) {
+    if (
+      parsed.po_number &&
+      po.po_number &&
+      !isSystemGeneratedPONumber(po.po_number) &&
+      normalize(parsed.po_number) !== normalize(po.po_number)
+    ) {
       issues.push({
         severity: 'error',
         label: 'PO number',

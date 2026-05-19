@@ -4,7 +4,7 @@ export interface ParsedPOLine {
   description: string
   quantity: number | null
   unit_price: number | null
-  discount_percent: number
+  discount_percent: number | null
   total_amount: number | null
   raw_line: string
 }
@@ -51,6 +51,12 @@ function parseNumber(value: string | undefined | null): number | null {
   if (!cleaned || cleaned === '-' || cleaned === '.') return null
   const n = Number(cleaned)
   return Number.isFinite(n) ? n : null
+}
+
+function parseDiscountPercent(value: string | undefined | null): number | null {
+  const parsed = parseNumber(value)
+  if (parsed == null || parsed < 0 || parsed > 100) return null
+  return parsed
 }
 
 function parseDate(value: string | undefined | null): string | null {
@@ -265,7 +271,7 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
       description: description || itemCode,
       quantity: parseNumber(lines[qtyIndex]),
       unit_price: parseNumber(lines[priceIndex]),
-      discount_percent: parseNumber(lines[discountIndex]) || 0,
+      discount_percent: parseDiscountPercent(lines[discountIndex]),
       total_amount: parseNumber(lines[amountIndex]),
       raw_line: lines.slice(cursor, amountIndex + 1).join(' | '),
     })
@@ -306,7 +312,7 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
       description: cleanDescription([match[3]]),
       quantity: parseNumber(match[4]),
       unit_price: parseNumber(match[6]),
-      discount_percent: parseNumber(match[7]) || 0,
+      discount_percent: parseDiscountPercent(match[7]),
       total_amount: parseNumber(match[8]),
       raw_line: line,
     })
@@ -349,7 +355,7 @@ function parseLine(raw: string, index: number): ParsedPOLine | null {
     description: description || itemCode || '',
     quantity: qty?.value ?? null,
     unit_price: unit.value,
-    discount_percent: discount?.value ?? 0,
+    discount_percent: discount?.value != null && discount.value >= 0 && discount.value <= 100 ? discount.value : null,
     total_amount: total.value,
     raw_line: line,
   }
