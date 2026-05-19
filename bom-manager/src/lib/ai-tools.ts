@@ -339,20 +339,96 @@ export const TOOL_REGISTRY: ToolSpec[] = [
   {
     name: 'list_purchase_orders',
     kind: 'read',
-    description: 'List purchase orders, optionally filtered by status or project.',
+    description: 'List purchase orders. Filter by po_number (exact or partial match), status, or project_id. Use po_number to look up a specific PO by its number.',
     parameters: {
       type: 'object',
       properties: {
+        po_number: { type: 'string', description: 'Search by PO number (partial match, e.g. "PO-56741134").' },
         status: { type: 'string' },
         project_id: { type: 'number' },
       },
     },
-    handler: async ({ status, project_id }: any) => {
+    handler: async ({ status, project_id, po_number }: any) => {
       let q = (supabase as any).from('purchase_orders').select('id, po_number, status, project_id, supplier_id, grand_total, total_items, po_date, expected_delivery_date')
+      if (po_number) q = q.ilike('po_number', `%${po_number}%`)
       if (status) q = q.eq('status', status)
       if (project_id) q = q.eq('project_id', project_id)
-      const { data } = await q.order('po_date', { ascending: false }).limit(200)
-      return data
+      const { data, error } = await q.order('po_date', { ascending: false }).limit(200)
+      if (error) return { error: error.message }
+      return data ?? []
+    },
+  },
+  {
+    name: 'get_po_details',
+    kind: 'read',
+    description: 'Get full details of a single PO including all line items with ordered, received, and pending quantities. Use this to answer questions like "what is received / pending for PO-XXXXX".',
+    parameters: {
+      type: 'object',
+      properties: {
+        po_number: { type: 'string', description: 'The PO number, e.g. "PO-56741134".' },
+        po_id: { type: 'number', description: 'The numeric PO id (alternative to po_number).' },
+      },
+    },
+    handler: async ({ po_number, po_id }: any) => {
+      // Resolve id from po_number if needed
+      let id = po_id
+      if (!id && po_number) {
+        const { data: rows } = await (supabase as any)
+          .from('purchase_orders')
+          .select('id')
+          .ilike('po_number', `%${po_number}%`)
+          .limit(1)
+        if (!rows?.length) return { error: `No PO found matching "${po_number}"` }
+        id = rows[0].id
+      }
+      if (!id) return { error: 'Provide po_number or po_id.' }
+
+      // Fetch PO + items + supplier
+      const { data: po, error } = await (supabase as any)
+        .from('purchase_orders')
+        .select(`*, suppliers(name), purchase_order_items(*)`)
+        .eq('id', id)
+        .single()
+      if (error || !po) return { error: error?.message || 'PO not found' }
+
+      // Fetch receipt history for audit trail
+      const { data: receipts } = await (supabase as any)
+        .from('po_receipts')
+        .select('id, receipt_date, quantity, notes, purchase_order_item_id')
+        .eq('purchase_order_id', id)
+        .order('receipt_date', { ascending: false })
+
+      const receiptsByItem: Record<number, any[]> = {}
+      for (const r of receipts || []) {
+        if (!receiptsByItem[r.purchase_order_item_id]) receiptsByItem[r.purchase_order_item_id] = []
+        receiptsByItem[r.purchase_order_item_id].push({ date: r.receipt_date, qty: r.quantity, notes: r.notes })
+      }
+
+      const items = (po.purchase_order_items || []).map((it: any) => ({
+        part_number: it.part_number,
+        part_type: it.part_type,
+        ordered: it.quantity,
+        received: it.received_qty ?? 0,
+        pending: Math.max(0, it.quantity - (it.received_qty ?? 0)),
+        unit_price: it.unit_price,
+        discount_percent: it.discount_percent,
+        receipts: receiptsByItem[it.id] || [],
+      }))
+
+      return {
+        po_number: po.po_number,
+        supplier: po.suppliers?.name,
+        status: po.status,
+        po_date: po.po_date,
+        grand_total: po.grand_total,
+        items,
+        summary: {
+          total_lines: items.length,
+          fully_received: items.filter((i: any) => i.pending === 0).length,
+          partially_received: items.filter((i: any) => i.received > 0 && i.pending > 0).length,
+          not_received: items.filter((i: any) => i.received === 0).length,
+        },
+      }
     },
   },
 
