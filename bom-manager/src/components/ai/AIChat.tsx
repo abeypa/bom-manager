@@ -460,11 +460,12 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
     }
   }, [wantsSection, msg])
 
-  // Build visible groups — each group is independent and clearly labelled
-  const groups: Array<{ label: string; color: string; children: React.ReactNode }> = []
+  // Show only ONE group — the first match in priority order
+  type Group = { label: string; color: string; children: React.ReactNode }
+  let activeGroup: Group | null = null
 
   if (wantsYesNo) {
-    groups.push({
+    activeGroup = {
       label: 'Confirm action',
       color: 'border-emerald-200 bg-emerald-50/60',
       children: (
@@ -473,11 +474,9 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
           <QuickChip label="✗  No, stop" color="bg-white border-red-300 text-red-600 hover:bg-red-50" onClick={() => onReply('No, stop.')} />
         </div>
       ),
-    })
-  }
-
-  if (wantsProject && projects.length > 0) {
-    groups.push({
+    }
+  } else if (wantsProject && projects.length > 0) {
+    activeGroup = {
       label: 'Select project',
       color: 'border-navy-200 bg-navy-50/40',
       children: (
@@ -492,11 +491,9 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
           ))}
         </div>
       ),
-    })
-  }
-
-  if (wantsCategory) {
-    groups.push({
+    }
+  } else if (wantsCategory) {
+    activeGroup = {
       label: 'Select part category',
       color: 'border-slate-200 bg-white',
       children: (
@@ -511,11 +508,9 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
           ))}
         </div>
       ),
-    })
-  }
-
-  if (wantsSection && sections.length > 0) {
-    groups.push({
+    }
+  } else if (wantsSection && sections.length > 0) {
+    activeGroup = {
       label: 'Select section / table',
       color: 'border-violet-200 bg-violet-50/40',
       children: (
@@ -531,22 +526,20 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
           <QuickChip label="+ Create new" color="bg-white border-dashed border-slate-300 text-slate-500 hover:border-navy-400 hover:text-navy-700" onClick={() => onReply('Please create a new section for these parts.')} />
         </div>
       ),
-    })
+    }
   }
 
-  if (groups.length === 0) return null
+  if (!activeGroup) return null
 
   return (
-    <div className="border-t border-slate-200 bg-slate-50 px-3 py-2 space-y-2">
-      {groups.map(g => (
-        <div key={g.label} className={`rounded-xl border ${g.color} px-3 py-2 space-y-1.5`}>
-          <div className="flex items-center gap-1.5">
-            <Zap size={9} className="text-slate-400 shrink-0" />
-            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{g.label}</span>
-          </div>
-          {g.children}
+    <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
+      <div className={`rounded-xl border ${activeGroup.color} px-3 py-2 space-y-1.5`}>
+        <div className="flex items-center gap-1.5">
+          <Zap size={9} className="text-slate-400 shrink-0" />
+          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{activeGroup.label}</span>
         </div>
-      ))}
+        {activeGroup.children}
+      </div>
     </div>
   )
 }
