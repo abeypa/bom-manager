@@ -2,9 +2,11 @@
  * Minimal OpenRouter chat-completions client with tool calling.
  * Docs: https://openrouter.ai/docs
  *
- * The user supplies their own API key via Settings; the key is stored in
- * localStorage and sent only to https://openrouter.ai/api/v1.
+ * API key is stored in Supabase app_settings (admin-configured, shared across
+ * all users). localStorage is used as a session cache so chatCompletion() stays
+ * synchronous. On app load AppLayout syncs DB → localStorage automatically.
  */
+import { supabase } from './supabase'
 
 export type ORContentPart =
   | { type: 'text'; text: string }
@@ -86,6 +88,31 @@ export function saveSettings(s: AISettings) {
 
 export function isConfigured(): boolean {
   return !!loadSettings().apiKey
+}
+
+/** Load AI settings from Supabase app_settings (async, used on app mount). */
+export async function loadSettingsFromDB(): Promise<AISettings | null> {
+  try {
+    const { data, error } = await (supabase as any)
+      .from('app_settings')
+      .select('key, value')
+      .in('key', ['ai_api_key', 'ai_model'])
+    if (error || !data?.length) return null
+    const kv: Record<string, string> = {}
+    for (const row of data) kv[row.key] = row.value
+    if (!kv['ai_api_key']) return null
+    return { apiKey: kv['ai_api_key'], model: kv['ai_model'] || DEFAULT_MODEL }
+  } catch {
+    return null
+  }
+}
+
+/** Persist AI settings to Supabase app_settings (admin only, RLS enforced). */
+export async function saveSettingsToDB(s: AISettings): Promise<void> {
+  await (supabase as any).from('app_settings').upsert([
+    { key: 'ai_api_key', value: s.apiKey, updated_at: new Date().toISOString() },
+    { key: 'ai_model',   value: s.model,  updated_at: new Date().toISOString() },
+  ])
 }
 
 export async function chatCompletion(opts: {

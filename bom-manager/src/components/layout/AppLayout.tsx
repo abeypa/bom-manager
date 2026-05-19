@@ -13,6 +13,7 @@ import CreatePOFromBOMModal from '@/components/projects/CreatePOFromBOMModal';
 import { usePOBasketStore } from '@/store/usePOBasketStore';
 import AIChat from '@/components/ai/AIChat';
 import { useAIStore } from '@/store/useAIStore';
+import { loadSettingsFromDB, saveSettings } from '@/lib/openrouter';
 
 const NAV_SECTIONS = [
   {
@@ -167,6 +168,12 @@ export default function AppLayout() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Sync admin-configured AI key from DB into localStorage so all users can use AI
+  useEffect(() => {
+    if (!user) return
+    loadSettingsFromDB().then(s => { if (s?.apiKey) saveSettings(s) })
+  }, [user])
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
