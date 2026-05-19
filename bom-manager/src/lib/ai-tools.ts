@@ -310,30 +310,62 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'search_image_url',
     kind: 'read',
     description:
-      'Search Wikimedia Commons (CORS-friendly, free, no key) for an image matching the query and return the first usable image URL. May return empty if nothing relevant is found — that is OK, the part can be created without an image.',
+      'Find a product image URL for a bought-out part. Uses DuckDuckGo (via CORS proxy) as primary — gives real product photos. Falls back to Wikimedia. ' +
+      'Only call this for bought-out parts (EBO, MBO, PBO). Skip for manufactured parts (EMF, MMF) — those are custom and have no web image. ' +
+      'Build the query as: "<manufacturer> <manufacturer_part_number> <short description>" for best results.',
     parameters: {
       type: 'object',
       required: ['query'],
-      properties: { query: { type: 'string', description: 'e.g. "Siemens 5ST3010 auxiliary switch"' } },
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Product search string, e.g. "Siemens 3RT2015-1AB02 contactor 7A" or "Phoenix Contact 2967120 terminal block"',
+        },
+      },
     },
     handler: async ({ query }: any) => {
-      const url =
-        'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=5&gsrnamespace=6' +
-        '&prop=imageinfo&iiprop=url&iiurlwidth=400&gsrsearch=' +
-        encodeURIComponent(`filetype:bitmap ${query}`)
+      // ── Strategy 1: DuckDuckGo via corsproxy.io ──────────────────────────
+      // DuckDuckGo image results embed actual product images from manufacturer
+      // and distributor sites — far better for industrial parts than Wikimedia.
       try {
-        const res = await fetch(url)
+        const ddgUrl = 'https://duckduckgo.com/?q=' + encodeURIComponent(query) + '&iax=images&ia=images'
+        const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(ddgUrl), {
+          signal: AbortSignal.timeout(7000),
+          headers: { 'Accept': 'text/html' },
+        })
+        if (res.ok) {
+          const html = await res.text()
+          // DDG embeds image data in its page as JSON-like fragments
+          const matches = [...html.matchAll(/"image":"(https:[^"]+)"/g)]
+          for (const m of matches) {
+            const url = m[1].replace(/\\u0026/g, '&')
+            // Skip DDG's own thumbnails; prefer direct product image hosts
+            if (url.includes('duckduckgo.com')) continue
+            if (/\.(jpg|jpeg|png|webp)(\?|$)/i.test(url)) {
+              return { found: true, image_url: url, source: 'duckduckgo' }
+            }
+          }
+        }
+      } catch { /* proxy unavailable — fall through */ }
+
+      // ── Strategy 2: Wikimedia Commons (native CORS, last resort) ─────────
+      try {
+        const wmUrl =
+          'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*' +
+          '&generator=search&gsrlimit=5&gsrnamespace=6' +
+          '&prop=imageinfo&iiprop=url&iiurlwidth=400&gsrsearch=' +
+          encodeURIComponent('filetype:bitmap ' + query)
+        const res = await fetch(wmUrl)
         const json = await res.json()
         const pages = json?.query?.pages || {}
         for (const id of Object.keys(pages)) {
           const ii = pages[id]?.imageinfo?.[0]
           if (ii?.thumburl) return { found: true, image_url: ii.thumburl, source: 'wikimedia' }
-          if (ii?.url) return { found: true, image_url: ii.url, source: 'wikimedia' }
+          if (ii?.url)      return { found: true, image_url: ii.url,      source: 'wikimedia' }
         }
-        return { found: false, image_url: null, source: 'wikimedia' }
-      } catch (e: any) {
-        return { found: false, image_url: null, error: e?.message }
-      }
+      } catch { /* ignore */ }
+
+      return { found: false, image_url: null }
     },
   },
   {

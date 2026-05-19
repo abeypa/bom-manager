@@ -194,9 +194,15 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
             part_number = "EBO-9101689"
       The create_master_part tool computes this automatically from
       part_type + beperp_part_no — DO NOT pass part_number yourself.
-   4. search_image_url with a short query like
-      "<manufacturer> <manufacturer_part_number> <description first words>".
-      If found, use that URL for image_path. If not, leave image_path null.
+   4. IMAGE SEARCH — bought-out parts only (EBO, MBO, PBO):
+      Call search_image_url with query = "<manufacturer> <manufacturer_part_number> <first 3 words of description>".
+      Examples:
+        "Siemens 3RT2015-1AB02 contactor 7A"
+        "Phoenix Contact 2967120 terminal block"
+        "SMC CDQ2B50-50D cylinder"
+      If found, use that URL for image_path.
+      If not found or part_type is EMF/MMF (manufactured — no web image exists), leave image_path null.
+      Run all search_image_url calls in PARALLEL with the find_master_part_by_erp_id calls to save time.
    5. Try to extract a manufacturer_part_number from the description
       (e.g. "5ST3010" or "5SY1...FP/FR"). Put it in
       manufacturer_part_number; the Item Code goes in beperp_part_no.
