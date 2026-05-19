@@ -121,8 +121,19 @@ export async function chatCompletion(opts: {
   toolChoice?: 'auto' | 'none' | 'required'
   signal?: AbortSignal
 }): Promise<ORCompletionResponse> {
-  const { apiKey, model } = loadSettings()
-  if (!apiKey) throw new Error('OpenRouter API key not configured')
+  let { apiKey, model } = loadSettings()
+
+  // If key missing from localStorage, attempt one DB sync before failing
+  if (!apiKey) {
+    const dbSettings = await loadSettingsFromDB()
+    if (dbSettings?.apiKey) {
+      saveSettings(dbSettings)
+      apiKey = dbSettings.apiKey
+      model = dbSettings.model
+    }
+  }
+
+  if (!apiKey) throw new Error('AI not configured — ask your admin to set the API key in AI Settings.')
 
   const res = await fetch(API_URL, {
     method: 'POST',
@@ -144,6 +155,12 @@ export async function chatCompletion(opts: {
 
   if (!res.ok) {
     const text = await res.text()
+    // 401 means the stored key is invalid/expired — clear it so the next
+    // attempt re-fetches from the DB rather than reusing a bad cached key
+    if (res.status === 401) {
+      localStorage.removeItem(STORAGE_KEY)
+      throw new Error('AI API key is invalid or expired. Ask your admin to update it in AI Settings.')
+    }
     throw new Error(`OpenRouter ${res.status}: ${text}`)
   }
   return (await res.json()) as ORCompletionResponse

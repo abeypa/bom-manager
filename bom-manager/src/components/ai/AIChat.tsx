@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useAIStore, ChatMessage } from '@/store/useAIStore'
 import { sendUserMessage, approvePending, rejectPending, stopAI } from '@/lib/ai-runner'
-import { isConfigured, loadSettings, modelSupportsVision } from '@/lib/openrouter'
+import { isConfigured, loadSettings, loadSettingsFromDB, saveSettings, modelSupportsVision } from '@/lib/openrouter'
 import {
   fileToAttachment, isImageFile, isPDFFile,
   type Attachment, type ImageAttachment
@@ -61,6 +61,11 @@ export default function AIChat() {
   const submit = async () => {
     const t = input.trim()
     if ((!t && attachments.length === 0) || busy) return
+    // If key not in localStorage yet, try DB sync before giving up
+    if (!isConfigured()) {
+      const dbSettings = await loadSettingsFromDB()
+      if (dbSettings?.apiKey) saveSettings(dbSettings)
+    }
     if (!isConfigured()) { setShowSettings(true); return }
     const text = t || '(see attached file)'
     const atts = attachments
