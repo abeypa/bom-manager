@@ -24,6 +24,8 @@ export interface ParsedPODocument {
   parse_warnings: string[]
   raw_text: string
   lines: ParsedPOLine[]
+  supplier_id?: number | null
+  new_supplier_name?: string | null
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -65,6 +67,12 @@ function parseDate(value: string | undefined | null): string | null {
   return null
 }
 
+function parseCompactDate(value: string | undefined | null): string | null {
+  const raw = value?.trim()
+  if (!raw || !/^\d{8}$/.test(raw)) return null
+  return parseDate(`${raw.slice(0, 2)}/${raw.slice(2, 4)}/${raw.slice(4)}`)
+}
+
 function firstMatch(text: string, patterns: RegExp[]) {
   for (const p of patterns) {
     const m = text.match(p)
@@ -77,6 +85,57 @@ function detectCurrency(text: string) {
   if (/[₹]|(?:\bINR\b)|(?:\bRs\.?\b)/i.test(text)) return 'INR'
   const found = text.match(/\b(INR|USD|EUR|GBP)\b/i)?.[1]?.toUpperCase()
   return CURRENCY_SYMBOLS[found || ''] || 'INR'
+}
+
+function metadataFromFilename(fileName: string) {
+  const baseName = fileName.replace(/\.[^.]+$/, '')
+  const match = baseName.match(/^(.*?)_POP(\d{2})-(\d{2})(\d+)_([0-9]{8})$/i)
+  if (!match) return { supplier: null, poNumber: null, poDate: null }
+  return {
+    supplier: match[1].replace(/\s+/g, ' ').trim(),
+    poNumber: `PO/P/${match[2]}-${match[3]}/${match[4]}`,
+    poDate: parseCompactDate(match[5]),
+  }
+}
+
+function valueAfterLabel(lines: string[], label: RegExp) {
+  const idx = lines.findIndex(line => label.test(line))
+  if (idx < 0) return null
+  const sameLineValue = lines[idx].split(':').slice(1).join(':').trim()
+  if (sameLineValue) return sameLineValue
+  return lines.slice(idx + 1, idx + 5).find(line => line && !/^[:\s]+$/.test(line)) || null
+}
+
+function detectPONumber(text: string, lines: string[], fileName: string) {
+  const filenameMeta = metadataFromFilename(fileName)
+  const documentNo = valueAfterLabel(lines, /^document\s+no\b/i)
+  const fromDocumentNo = documentNo?.match(/\b(PO\/[A-Z0-9/_.-]+)/i)?.[1]
+  if (fromDocumentNo) return fromDocumentNo
+
+  const explicit = firstMatch(text, [
+    /\b(PO\/[A-Z0-9/_.-]+)/i,
+    /\bp\.?\s*o\.?\s*(?:no|number|#)\s*[:\-]?\s*([A-Z0-9][A-Z0-9/_.-]{3,})/i,
+  ])
+  return explicit || filenameMeta.poNumber
+}
+
+function detectPODate(text: string, lines: string[], fileName: string) {
+  const filenameMeta = metadataFromFilename(fileName)
+  const detailsIdx = lines.findIndex(line => /^document details\b/i.test(line))
+  const searchLines = detailsIdx >= 0 ? lines.slice(detailsIdx, detailsIdx + 20) : lines
+  const dateLabelIdx = searchLines.findIndex(line => /^date\s*:?\s*$/i.test(line) || /^date\s*:/i.test(line))
+  if (dateLabelIdx >= 0) {
+    const sameLine = searchLines[dateLabelIdx].split(':').slice(1).join(':').trim()
+    const value = sameLine || searchLines.slice(dateLabelIdx + 1, dateLabelIdx + 5).find(line => /\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}/.test(line))
+    const parsed = parseDate(value)
+    if (parsed) return parsed
+  }
+
+  const explicit = firstMatch(text, [
+    /\b(?:po\s*)?date\s*[:\-]\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/i,
+    /\b(?:dated?)\s*[:\-]\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/i,
+  ])
+  return parseDate(explicit) || filenameMeta.poDate
 }
 
 function detectSupplier(lines: string[]) {
@@ -96,6 +155,116 @@ function detectSupplier(lines: string[]) {
     if (next) return next
   }
   return null
+}
+
+function nextNonEmptyIndex(lines: string[], start: number, end: number) {
+  for (let i = start; i < end; i++) {
+    if (lines[i]?.trim()) return i
+  }
+  return -1
+}
+
+function isIntegerLine(value: string | undefined) {
+  return /^\d+$/.test(value?.trim() || '')
+}
+
+function isUnitLine(value: string | undefined) {
+  return /^(nos?|no\.?|set|sets|pcs?|piece|pieces|mtr|meter|metre|kg|ltr|lot)$/i.test(value?.trim() || '')
+}
+
+function cleanDescription(lines: string[]) {
+  const cleaned: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line) continue
+    if (/^hsn\s+code\s*:?$/i.test(line)) {
+      i += 1
+      continue
+    }
+    cleaned.push(line)
+  }
+  return cleaned.join(' ').replace(/\s+/g, ' ').trim()
+}
+
+function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
+  const headerStart = lines.findIndex((line, index) =>
+    /^sl$/i.test(line) &&
+    /^item code$/i.test(lines[index + 1] || '') &&
+    /^item description$/i.test(lines[index + 2] || ''),
+  )
+  if (headerStart < 0) return []
+
+  const tableStart = headerStart + 8
+  const tableEnd = lines.findIndex((line, index) =>
+    index > tableStart && /^tax description$/i.test(line),
+  )
+  const end = tableEnd > tableStart ? tableEnd : lines.length
+  const parsed: ParsedPOLine[] = []
+  let cursor = tableStart
+
+  while (cursor < end) {
+    if (!isIntegerLine(lines[cursor])) {
+      cursor += 1
+      continue
+    }
+
+    const lineNo = Number(lines[cursor])
+    const codeIndex = nextNonEmptyIndex(lines, cursor + 1, end)
+    if (codeIndex < 0) break
+    const itemCode = lines[codeIndex]
+    let qtyIndex = -1
+    let unitIndex = -1
+    let priceIndex = -1
+    let discountIndex = -1
+    let amountIndex = -1
+
+    for (let i = codeIndex + 1; i < end; i++) {
+      const qty = parseNumber(lines[i])
+      if (qty == null) continue
+      const maybeUnit = nextNonEmptyIndex(lines, i + 1, end)
+      if (maybeUnit < 0 || !isUnitLine(lines[maybeUnit])) continue
+      const maybePrice = nextNonEmptyIndex(lines, maybeUnit + 1, end)
+      const maybeDiscount = nextNonEmptyIndex(lines, maybePrice + 1, end)
+      const maybeAmount = nextNonEmptyIndex(lines, maybeDiscount + 1, end)
+      if (
+        maybePrice > 0 &&
+        maybeDiscount > 0 &&
+        maybeAmount > 0 &&
+        parseNumber(lines[maybePrice]) != null &&
+        parseNumber(lines[maybeDiscount]) != null &&
+        parseNumber(lines[maybeAmount]) != null
+      ) {
+        qtyIndex = i
+        unitIndex = maybeUnit
+        priceIndex = maybePrice
+        discountIndex = maybeDiscount
+        amountIndex = maybeAmount
+        break
+      }
+    }
+
+    if (qtyIndex < 0) {
+      cursor = codeIndex + 1
+      continue
+    }
+
+    const description = cleanDescription(lines.slice(codeIndex + 1, qtyIndex))
+    parsed.push({
+      line_no: lineNo,
+      item_code: itemCode,
+      description: description || itemCode,
+      quantity: parseNumber(lines[qtyIndex]),
+      unit_price: parseNumber(lines[priceIndex]),
+      discount_percent: parseNumber(lines[discountIndex]) || 0,
+      total_amount: parseNumber(lines[amountIndex]),
+      raw_line: lines.slice(cursor, amountIndex + 1).join(' | '),
+    })
+
+    cursor = amountIndex + 1
+    if (unitIndex < 0) cursor += 1
+  }
+
+  return parsed
 }
 
 function parseLine(raw: string, index: number): ParsedPOLine | null {
@@ -147,6 +316,7 @@ export function parsePurchaseOrderText(args: {
   const rawText = cleanText(args.text || '')
   const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
   const warnings: string[] = []
+  const filenameMeta = metadataFromFilename(args.fileName)
 
   if (!rawText) {
     return {
@@ -167,14 +337,8 @@ export function parsePurchaseOrderText(args: {
     }
   }
 
-  const poNumber = firstMatch(rawText, [
-    /\b(?:purchase\s*order|po|p\.o\.|order)\s*(?:no|number|#)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9/_.-]{3,})/i,
-    /\b(PO\/[A-Z0-9/_.-]+)/i,
-  ])
-  const poDateRaw = firstMatch(rawText, [
-    /\b(?:po\s*)?date\s*[:\-]\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/i,
-    /\b(?:dated?)\s*[:\-]\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/i,
-  ])
+  const poNumber = detectPONumber(rawText, lines, args.fileName)
+  const poDate = detectPODate(rawText, lines, args.fileName)
   const totalRaw = firstMatch(rawText, [
     /\bgrand\s+total\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
     /\btotal\s+amount\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
@@ -185,13 +349,14 @@ export function parsePurchaseOrderText(args: {
     /\btaxable\s+value\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
   ])
 
-  const parsedLines = lines
+  const columnLines = parseBepColumnTable(lines)
+  const parsedLines = columnLines.length > 0 ? columnLines : lines
     .map((line, i) => parseLine(line, i))
     .filter((line): line is ParsedPOLine => Boolean(line))
 
   if (!poNumber) warnings.push('PO number was not detected.')
-  if (!poDateRaw) warnings.push('PO date was not detected.')
-  if (!detectSupplier(lines)) warnings.push('Supplier name was not detected.')
+  if (!poDate) warnings.push('PO date was not detected.')
+  if (!detectSupplier(lines) && !filenameMeta.supplier) warnings.push('Supplier name was not detected.')
   if (parsedLines.length === 0) warnings.push('No line items were detected from the extracted text.')
 
   return {
@@ -200,8 +365,8 @@ export function parsePurchaseOrderText(args: {
     mime_type: args.mimeType,
     page_count: args.pageCount,
     po_number: poNumber,
-    supplier_name: detectSupplier(lines),
-    po_date: parseDate(poDateRaw),
+    supplier_name: detectSupplier(lines) || filenameMeta.supplier,
+    po_date: poDate,
     currency: detectCurrency(rawText),
     subtotal: parseNumber(subtotalRaw),
     total_amount: parseNumber(totalRaw),
