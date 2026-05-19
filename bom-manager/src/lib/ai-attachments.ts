@@ -103,6 +103,31 @@ async function loadPdfJs(): Promise<any> {
   return pdfjsLoadingPromise
 }
 
+function textContentToLines(items: any[]) {
+  const rows: Array<{ y: number; items: Array<{ x: number; text: string }> }> = []
+  const yTolerance = 3
+
+  for (const item of items) {
+    const text = String(item?.str || '').trim()
+    if (!text) continue
+    const transform = item?.transform || []
+    const x = Number(transform[4] || 0)
+    const y = Number(transform[5] || 0)
+    let row = rows.find(r => Math.abs(r.y - y) <= yTolerance)
+    if (!row) {
+      row = { y, items: [] }
+      rows.push(row)
+    }
+    row.items.push({ x, text })
+  }
+
+  return rows
+    .sort((a, b) => b.y - a.y)
+    .map(row => row.items.sort((a, b) => a.x - b.x).map(item => item.text).join(' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
 export async function fileToPDFAttachment(f: File): Promise<PDFAttachment> {
   const pdfjs = await loadPdfJs()
   const buf = await f.arrayBuffer()
@@ -113,7 +138,7 @@ export async function fileToPDFAttachment(f: File): Promise<PDFAttachment> {
   for (let i = 1; i <= pageCount; i++) {
     const page = await doc.getPage(i)
     const tc = await page.getTextContent()
-    const txt = tc.items.map((it: any) => it.str).join(' ')
+    const txt = textContentToLines(tc.items || [])
     parts.push(`\n\n----- Page ${i} -----\n${txt}`)
     if (parts.join('').length > MAX_PDF_TEXT_CHARS) {
       truncated = true
