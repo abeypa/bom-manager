@@ -429,18 +429,20 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
   const [sections, setSections] = useState<any[]>([])
 
   const fullContent = lastMessage?.content ?? ''
-
-  // Only look at the last non-empty line — that's where the AI puts its question.
-  // Scanning the full message causes false matches from earlier paragraphs.
-  const lastLine = fullContent.trim().split('\n').filter(l => l.trim()).at(-1)?.toLowerCase() ?? ''
-
-  // Also keep full content (lowercase) only for extracting context data (project id)
   const fullMsg = fullContent.toLowerCase()
 
-  const wantsYesNo    = /shall i|should i|confirm|proceed|go ahead|correct\?|ok\?|ready|approve|want me to|continue\?|like me to/i.test(lastLine)
-  const wantsProject  = !wantsYesNo && /which project|select.*project|target project|project.*should|what project|choose.*project|add.*to.*project/i.test(lastLine)
-  const wantsCategory = !wantsYesNo && !wantsProject && /part.*(type|category)|which category|classify|which type|what type/i.test(lastLine)
-  const wantsSection  = !wantsYesNo && !wantsProject && !wantsCategory && /which section|which table|which subsection|target.*section|section.*should|map.*to/i.test(lastLine)
+  // Scan the last 3 non-empty lines — the AI's question may span a line or
+  // end with a trailing word like "below:" that isn't the real question.
+  const nonEmptyLines = fullContent.trim().split('\n').map(l => l.trim()).filter(Boolean)
+  const tail = nonEmptyLines.slice(-3).join(' ').toLowerCase()
+
+  // Yes/No: only fire for action-confirmation phrases, NOT "should I add/map/place"
+  // which is the AI asking the user to *choose*, not asking for approval.
+  const wantsYesNo = /shall i (proceed|continue|go ahead|start|draft|create|run|batch|propose|map|add|update)|should i (proceed|continue|go ahead|start|draft|create|run|batch|propose)|(proceed|continue|go ahead)\?|correct\?|ok\?|approve all|want me to proceed|like me to proceed/i.test(tail)
+
+  const wantsProject  = !wantsYesNo && /which project|select.*project|target project|what project|choose.*project|add.*to.*project|project.*should i add|project.*list/i.test(tail)
+  const wantsCategory = !wantsYesNo && !wantsProject && /part.*(type|category)|which category|classify|which type|what type/i.test(tail)
+  const wantsSection  = !wantsYesNo && !wantsProject && !wantsCategory && /which section|which table|which subsection|target.*section|section.*should|map.*to/i.test(tail)
 
   useEffect(() => {
     if (wantsProject) {
