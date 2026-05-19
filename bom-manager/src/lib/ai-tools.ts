@@ -20,6 +20,7 @@ import { purchaseOrdersApi } from '@/api/purchase-orders'
 import { stockMovementsApi } from '@/api/stock-movements'
 import { getPoRemainingForPart } from '@/api/po-payments'
 import { supabase } from '@/lib/supabase'
+import { auditPurchaseOrderPdf } from '@/lib/po-pdf-audit'
 
 export type ToolKind = 'read' | 'write'
 
@@ -644,6 +645,69 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       const { data, error } = await q.order('po_date', { ascending: false }).limit(200)
       if (error) return { error: error.message }
       return data ?? []
+    },
+  },
+  {
+    name: 'audit_project_po_pdfs',
+    kind: 'read',
+    description:
+      'Run a read-only PO/PDF match audit for purchase orders in one project. Use after the project is selected. Compares attached BEP PO PDFs against stored PO number, supplier, line count, item codes, quantities, unit prices, discounts, and total value.',
+    parameters: {
+      type: 'object',
+      required: ['project_id'],
+      properties: {
+        project_id: { type: 'number', description: 'Project id whose purchase orders should be audited.' },
+        po_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional specific PO ids to audit. If omitted, audit all POs in the project.',
+        },
+      },
+    },
+    handler: async ({ project_id, po_ids }: any) => {
+      assertInteger('project_id', project_id)
+      const scopedIds = Array.isArray(po_ids)
+        ? po_ids.filter((id) => Number.isInteger(id)).slice(0, 100)
+        : []
+
+      const { data: project } = await (supabase as any)
+        .from('projects')
+        .select('id, project_number, project_name')
+        .eq('id', project_id)
+        .maybeSingle()
+      if (!project) return { error: `Project #${project_id} not found.` }
+
+      let q = (supabase as any)
+        .from('purchase_orders')
+        .select('*, suppliers(name), purchase_order_items(*)')
+        .eq('project_id', project_id)
+        .order('po_date', { ascending: false })
+        .limit(100)
+      if (scopedIds.length) q = q.in('id', scopedIds)
+
+      const { data, error } = await q
+      if (error) throw error
+
+      const results = []
+      for (const po of data || []) {
+        const result = await auditPurchaseOrderPdf(po)
+        results.push({
+          ...result,
+          issues: result.issues.slice(0, 25),
+          issue_count: result.issues.length,
+          has_more_issues: result.issues.length > 25,
+        })
+      }
+
+      const byStatus = (status: string) => results.filter((r) => r.status === status).length
+      return {
+        project,
+        checked: results.length,
+        matched: byStatus('match'),
+        needs_review: byStatus('warning') + byStatus('error'),
+        missing_pdf: byStatus('missing_pdf'),
+        results,
+      }
     },
   },
   {

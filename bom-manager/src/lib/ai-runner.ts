@@ -91,6 +91,12 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     able to follow the activity from the chat without opening another
     screen.
 
+13. PO/PDF AUDIT IS READ-ONLY. When the user asks for "PO audit",
+    "PDF match", "audit project POs", or clicks AI PO Audit, first
+    resolve or ask for the project. Then call audit_project_po_pdfs
+    for that project and show a concise report with matched POs,
+    missing PDFs, and mismatches. Do not propose any write action.
+
 ═══════════════════════════════════════════════════════════════════════
 INTENT DISPATCH — CHOOSE THE RIGHT WORKFLOW BEFORE DOING ANYTHING
 ═══════════════════════════════════════════════════════════════════════

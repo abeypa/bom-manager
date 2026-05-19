@@ -3,7 +3,7 @@ import {
   Bot, X, Send, Settings as SettingsIcon, Trash2, Check, X as XIcon,
   Loader2, AlertTriangle, FileText, Paperclip, Image as ImageIcon, FileText as PdfIcon,
   Square, ClipboardList, FolderKanban, Tags, Table2, Sparkles, ShoppingCart,
-  Zap, ChevronRight,
+  Zap, FileSearch,
 } from 'lucide-react'
 import { useAIStore, ChatMessage } from '@/store/useAIStore'
 import { sendUserMessage, approvePending, rejectPending, stopAI } from '@/lib/ai-runner'
@@ -54,6 +54,12 @@ const SMART_COMMANDS = [
     icon: ShoppingCart,
     prompt:
       'After the PO parts are mapped to the project, draft the matching PO from the same source PDF. Exclude GST/tax lines and keep the PO in Draft status for review.',
+  },
+  {
+    label: 'AI PO Audit',
+    icon: FileSearch,
+    prompt:
+      'AI PO audit: First ask me to select the target project if it is not already clear. After I select the project, run the PO/PDF match audit for all POs in that project that have an attached BEP PO PDF. Compare PO number, supplier, line count, item codes, quantities, unit prices, discounts, and totals. Show matched, missing PDF, and mismatch results as a concise report. Do not change any data.',
   },
 ]
 
@@ -418,6 +424,7 @@ function SmartCommandPanel({
         <p>2. Click PO Ingest.</p>
         <p>3. I will ask for project, supplier, category, and table choices only when needed.</p>
         <p>4. Approved actions appear here, then the draft PO is created.</p>
+        <p>5. Use AI PO Audit to select a project and check stored POs against attached PDFs.</p>
       </div>
     </div>
   )
