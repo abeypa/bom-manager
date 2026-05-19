@@ -14,6 +14,7 @@
  */
 
 import { reportsApi } from '@/api/reports'
+import { dashboardApi } from '@/api/dashboard'
 import { projectsApi } from '@/api/projects'
 import { suppliersApi } from '@/api/suppliers'
 import { purchaseOrdersApi } from '@/api/purchase-orders'
@@ -172,6 +173,210 @@ function pickBestValue(keepValue: any, removeValue: any) {
   return hasValue(keepValue) ? keepValue : (hasValue(removeValue) ? removeValue : keepValue)
 }
 
+const BOUGHT_OUT_PART_TYPES = new Set(['mechanical_bought_out', 'electrical_bought_out', 'pneumatic_bought_out'])
+const ACTIVE_PO_STATUSES = new Set(['Draft', 'Released', 'Pending', 'Sent', 'Confirmed', 'Partial', 'Received'])
+
+const lineValue = (row: any) => {
+  const qty = Number(row?.quantity || 0)
+  const price = Number(row?.unit_price || 0)
+  const disc = Number(row?.discount_percent || 0)
+  return qty * price * (1 - disc / 100)
+}
+
+function percentChange(oldPrice: any, newPrice: any) {
+  const oldValue = Number(oldPrice || 0)
+  const newValue = Number(newPrice || 0)
+  if (!oldValue || !Number.isFinite(oldValue) || !Number.isFinite(newValue)) return null
+  return ((newValue - oldValue) / oldValue) * 100
+}
+
+async function fetchMasterDetailsByType(projectParts: any[]) {
+  const idsByType: Record<string, number[]> = {}
+  for (const part of projectParts) {
+    if (!part.part_type || !part.part_id || !part_type_enum.includes(part.part_type)) continue
+    if (!idsByType[part.part_type]) idsByType[part.part_type] = []
+    idsByType[part.part_type].push(part.part_id)
+  }
+
+  const details: Record<string, Record<number, any>> = {}
+  for (const [partType, ids] of Object.entries(idsByType)) {
+    const uniqueIds = Array.from(new Set(ids))
+    if (!uniqueIds.length) continue
+    const { data, error } = await (supabase as any)
+      .from(partType)
+      .select('id, part_number, beperp_part_no, manufacturer_part_number, description, supplier_id, image_path, base_price, currency, updated_date, suppliers:supplier_id(name)')
+      .in('id', uniqueIds)
+    if (error) throw error
+    details[partType] = Object.fromEntries((data || []).map((row: any) => [row.id, row]))
+  }
+  return details
+}
+
+async function buildBomHealthAudit(projectId?: number) {
+  const projectQuery = (supabase as any)
+    .from('projects')
+    .select('id, project_name, project_number, status')
+    .order('created_date', { ascending: false })
+  const { data: projects, error: projectError } = projectId
+    ? await projectQuery.eq('id', projectId)
+    : await projectQuery.limit(50)
+  if (projectError) throw projectError
+  const projectRows = projects || []
+  if (projectId && projectRows.length === 0) return { error: `Project #${projectId} not found.` }
+
+  const projectIds = projectRows.map((p: any) => p.id)
+  if (!projectIds.length) {
+    return { checked_projects: 0, summary: {}, issues: {}, projects: [] }
+  }
+
+  const { data: subsections, error: subsectionError } = await (supabase as any)
+    .from('project_subsections')
+    .select('id, project_id, section_name')
+    .in('project_id', projectIds)
+  if (subsectionError) throw subsectionError
+
+  const subsectionRows = subsections || []
+  const subsectionIds = subsectionRows.map((s: any) => s.id)
+  const subsectionToProject = new Map<number, any>(subsectionRows.map((s: any) => [s.id, s]))
+
+  let projectParts: any[] = []
+  if (subsectionIds.length) {
+    const { data, error } = await (supabase as any)
+      .from('project_parts')
+      .select('id, project_section_id, part_type, part_id, quantity, unit_price, discount_percent')
+      .in('project_section_id', subsectionIds)
+    if (error) throw error
+    projectParts = data || []
+  }
+
+  let poItems: any[] = []
+  if (projectParts.length) {
+    const { data } = await (supabase as any)
+      .from('purchase_order_items')
+      .select('id, project_part_id, purchase_orders(status, po_number)')
+      .in('project_part_id', projectParts.map((p) => p.id))
+    poItems = data || []
+  }
+
+  const masterDetails = await fetchMasterDetailsByType(projectParts)
+  const orderedPartIds = new Set(
+    poItems
+      .filter((item: any) => ACTIVE_PO_STATUSES.has(item.purchase_orders?.status))
+      .map((item: any) => item.project_part_id)
+      .filter(Boolean)
+  )
+
+  const issues = {
+    missing_images: [] as any[],
+    missing_suppliers: [] as any[],
+    zero_prices: [] as any[],
+    duplicate_project_mappings: [] as any[],
+    parts_without_po: [] as any[],
+  }
+
+  const projectSummaries = new Map<number, any>()
+  for (const project of projectRows) {
+    projectSummaries.set(project.id, {
+      project_id: project.id,
+      project_number: project.project_number,
+      project_name: project.project_name,
+      status: project.status,
+      part_count: 0,
+      bom_value: 0,
+      issue_count: 0,
+    })
+  }
+
+  const mappingGroups = new Map<string, any[]>()
+  for (const part of projectParts) {
+    const subsection = subsectionToProject.get(part.project_section_id)
+    const project = projectSummaries.get(subsection?.project_id)
+    const master = masterDetails[part.part_type]?.[part.part_id]
+    if (!project) continue
+    project.part_count += 1
+    project.bom_value += lineValue(part)
+
+    const issueBase = {
+      project_id: project.project_id,
+      project_number: project.project_number,
+      project_name: project.project_name,
+      project_part_id: part.id,
+      part_type: part.part_type,
+      part_id: part.part_id,
+      part_number: master?.part_number || `${part.part_type} #${part.part_id}`,
+      description: master?.description || '',
+      subsection: subsection?.section_name || 'Unassigned',
+    }
+
+    if (BOUGHT_OUT_PART_TYPES.has(part.part_type) && !hasValue(master?.image_path)) {
+      issues.missing_images.push(issueBase)
+      project.issue_count += 1
+    }
+    if (!master?.supplier_id) {
+      issues.missing_suppliers.push(issueBase)
+      project.issue_count += 1
+    }
+    if (Number(part.unit_price || 0) <= 0 || Number(master?.base_price || 0) <= 0) {
+      issues.zero_prices.push({ ...issueBase, project_price: part.unit_price || 0, master_price: master?.base_price || 0 })
+      project.issue_count += 1
+    }
+    if (!orderedPartIds.has(part.id)) {
+      issues.parts_without_po.push(issueBase)
+      project.issue_count += 1
+    }
+
+    const groupKey = `${project.project_id}:${part.part_type}:${part.part_id}`
+    if (!mappingGroups.has(groupKey)) mappingGroups.set(groupKey, [])
+    mappingGroups.get(groupKey)!.push(issueBase)
+  }
+
+  for (const rows of mappingGroups.values()) {
+    if (rows.length < 2) continue
+    const project = projectSummaries.get(rows[0].project_id)
+    if (project) project.issue_count += rows.length - 1
+    issues.duplicate_project_mappings.push({
+      project_id: rows[0].project_id,
+      project_number: rows[0].project_number,
+      project_name: rows[0].project_name,
+      part_type: rows[0].part_type,
+      part_id: rows[0].part_id,
+      part_number: rows[0].part_number,
+      occurrences: rows.length,
+      project_part_ids: rows.map((r) => r.project_part_id),
+      subsections: rows.map((r) => r.subsection),
+    })
+  }
+
+  const trim = (rows: any[]) => rows.slice(0, 30)
+  return {
+    checked_projects: projectRows.length,
+    checked_project_parts: projectParts.length,
+    summary: {
+      missing_images: issues.missing_images.length,
+      missing_suppliers: issues.missing_suppliers.length,
+      zero_prices: issues.zero_prices.length,
+      duplicate_project_mappings: issues.duplicate_project_mappings.length,
+      parts_without_po: issues.parts_without_po.length,
+      total_issues:
+        issues.missing_images.length +
+        issues.missing_suppliers.length +
+        issues.zero_prices.length +
+        issues.duplicate_project_mappings.length +
+        issues.parts_without_po.length,
+    },
+    projects: Array.from(projectSummaries.values())
+      .sort((a, b) => b.issue_count - a.issue_count || b.bom_value - a.bom_value)
+      .slice(0, 20),
+    issues: {
+      missing_images: trim(issues.missing_images),
+      missing_suppliers: trim(issues.missing_suppliers),
+      zero_prices: trim(issues.zero_prices),
+      duplicate_project_mappings: trim(issues.duplicate_project_mappings),
+      parts_without_po: trim(issues.parts_without_po),
+    },
+  }
+}
+
 async function getMasterPartForMerge(partType: string, partId: number) {
   assertInteger('part_id', partId)
   if (!part_type_enum.includes(partType)) throw new Error(`Unknown part_type: ${partType}`)
@@ -245,6 +450,182 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     handler: async (args: any) => {
       const rows = await reportsApi.getReconciliation(args.project_id)
       return rows.filter(r => r.issue !== 'OK')
+    },
+  },
+  {
+    name: 'audit_bom_health',
+    kind: 'read',
+    description:
+      'Run a smart read-only BOM health audit. Checks project parts for missing images, missing suppliers, zero prices, duplicate project mappings, and parts not linked to any active PO. Use project_id when the user selects a project; omit it for a cross-project scan.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'number', description: 'Optional project id to audit one project.' },
+      },
+    },
+    handler: async ({ project_id }: any) => {
+      if (project_id != null) assertInteger('project_id', project_id)
+      return await buildBomHealthAudit(project_id)
+    },
+  },
+  {
+    name: 'analyze_price_changes',
+    kind: 'read',
+    description:
+      'Analyze recent part price history and return the biggest price increases/decreases. Use this for price watch, price spike, latest PO price intelligence, or procurement cost risk questions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        days: { type: 'number', default: 90, description: 'How many recent days to scan.' },
+        threshold_percent: { type: 'number', default: 10, description: 'Minimum absolute price change percentage to include.' },
+        limit: { type: 'number', default: 25 },
+      },
+    },
+    handler: async ({ days = 90, threshold_percent = 10, limit = 25 }: any) => {
+      const scanDays = Math.max(1, Math.min(Number(days) || 90, 730))
+      const threshold = Math.max(0, Math.min(Number(threshold_percent) || 10, 500))
+      const maxRows = Math.max(1, Math.min(Number(limit) || 25, 100))
+      const since = new Date(Date.now() - scanDays * 24 * 60 * 60 * 1000).toISOString()
+      const { data, error } = await (supabase as any)
+        .from('part_price_history')
+        .select('id, part_table_name, part_id, part_number, old_price, new_price, old_currency, new_currency, old_discount_percent, new_discount_percent, change_reason, changed_at, changed_by')
+        .gte('changed_at', since)
+        .order('changed_at', { ascending: false })
+        .limit(500)
+      if (error) throw error
+
+      const rows = (data || [])
+        .map((row: any) => {
+          const pct = percentChange(row.old_price, row.new_price)
+          return {
+            ...row,
+            percent_change: pct == null ? null : Number(pct.toFixed(2)),
+            direction: pct == null ? 'unknown' : pct > 0 ? 'increase' : pct < 0 ? 'decrease' : 'flat',
+          }
+        })
+        .filter((row: any) => row.percent_change != null && Math.abs(row.percent_change) >= threshold)
+        .sort((a: any, b: any) => Math.abs(b.percent_change) - Math.abs(a.percent_change))
+        .slice(0, maxRows)
+
+      return {
+        scanned_days: scanDays,
+        threshold_percent: threshold,
+        spike_count: rows.length,
+        increases: rows.filter((r: any) => r.direction === 'increase').length,
+        decreases: rows.filter((r: any) => r.direction === 'decrease').length,
+        price_changes: rows,
+      }
+    },
+  },
+  {
+    name: 'analyze_supplier_intelligence',
+    kind: 'read',
+    description:
+      'Analyze supplier procurement exposure: open PO value, draft value, overdue POs, PO count, and top follow-up suppliers. Can be filtered by supplier_id or project_id.',
+    parameters: {
+      type: 'object',
+      properties: {
+        supplier_id: { type: 'number' },
+        project_id: { type: 'number' },
+        limit: { type: 'number', default: 10 },
+      },
+    },
+    handler: async ({ supplier_id, project_id, limit = 10 }: any) => {
+      if (supplier_id != null) assertInteger('supplier_id', supplier_id)
+      if (project_id != null) assertInteger('project_id', project_id)
+      const maxRows = Math.max(1, Math.min(Number(limit) || 10, 50))
+      let q = (supabase as any)
+        .from('purchase_orders')
+        .select('id, po_number, supplier_id, project_id, status, grand_total, po_date, expected_delivery_date, suppliers(name), project:projects(project_name, project_number)')
+        .order('po_date', { ascending: false })
+        .limit(500)
+      if (supplier_id) q = q.eq('supplier_id', supplier_id)
+      if (project_id) q = q.eq('project_id', project_id)
+      const { data, error } = await q
+      if (error) throw error
+
+      const today = new Date().toISOString().split('T')[0]
+      const supplierMap = new Map<string, any>()
+      for (const po of data || []) {
+        const key = String(po.supplier_id || po.suppliers?.name || 'unknown')
+        const current = supplierMap.get(key) || {
+          supplier_id: po.supplier_id || null,
+          supplier_name: po.suppliers?.name || 'Unassigned supplier',
+          total_po_value: 0,
+          open_po_value: 0,
+          draft_po_value: 0,
+          po_count: 0,
+          open_po_count: 0,
+          draft_po_count: 0,
+          overdue_po_count: 0,
+          overdue_pos: [] as any[],
+          latest_po_date: null as string | null,
+        }
+        const value = Number(po.grand_total || 0)
+        const isOpen = ACTIVE_PO_STATUSES.has(po.status)
+        const isDraft = po.status === 'Draft'
+        const isOverdue = isOpen && po.expected_delivery_date && po.expected_delivery_date < today
+        current.total_po_value += value
+        current.po_count += 1
+        if (isOpen) {
+          current.open_po_value += value
+          current.open_po_count += 1
+        }
+        if (isDraft) {
+          current.draft_po_value += value
+          current.draft_po_count += 1
+        }
+        if (isOverdue) {
+          current.overdue_po_count += 1
+          current.overdue_pos.push({
+            po_id: po.id,
+            po_number: po.po_number,
+            expected_delivery_date: po.expected_delivery_date,
+            project: po.project?.project_number || po.project?.project_name || null,
+            value,
+          })
+        }
+        if (!current.latest_po_date || (po.po_date && po.po_date > current.latest_po_date)) current.latest_po_date = po.po_date
+        supplierMap.set(key, current)
+      }
+
+      const suppliers = Array.from(supplierMap.values())
+        .sort((a, b) => b.overdue_po_count - a.overdue_po_count || b.open_po_value - a.open_po_value)
+        .slice(0, maxRows)
+        .map((supplier) => ({ ...supplier, overdue_pos: supplier.overdue_pos.slice(0, 10) }))
+
+      return {
+        supplier_count: suppliers.length,
+        total_open_value: suppliers.reduce((sum, s) => sum + s.open_po_value, 0),
+        total_overdue_pos: suppliers.reduce((sum, s) => sum + s.overdue_po_count, 0),
+        suppliers,
+      }
+    },
+  },
+  {
+    name: 'score_project_procurement_risk',
+    kind: 'read',
+    description:
+      'Return dashboard-grade project procurement risk scores, including health score, BOM/PO gap, overdue POs, and parts needing PO coverage. Use this for risk score or smart dashboard questions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'number', description: 'Optional project id to return one project risk signal.' },
+        limit: { type: 'number', default: 10 },
+      },
+    },
+    handler: async ({ project_id, limit = 10 }: any) => {
+      if (project_id != null) assertInteger('project_id', project_id)
+      const maxRows = Math.max(1, Math.min(Number(limit) || 10, 50))
+      const dashboard = await dashboardApi.getSmartDashboard()
+      const projects = (dashboard.priority_projects || [])
+        .filter((project: any) => !project_id || project.project_id === project_id)
+        .slice(0, maxRows)
+      return {
+        generated_at: dashboard.generated_at,
+        kpis: dashboard.kpis,
+        projects,
+      }
     },
   },
   {

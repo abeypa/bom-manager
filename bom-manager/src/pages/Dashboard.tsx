@@ -10,6 +10,9 @@ import { dashboardApi } from '@/api/dashboard'
 import { useRole } from '@/hooks/useRole'
 import { partsApi } from '@/api/parts'
 import { useToast } from '@/context/ToastContext'
+import { useAIStore } from '@/store/useAIStore'
+import { sendUserMessage } from '@/lib/ai-runner'
+import { isConfigured, loadSettingsFromDB, saveSettings } from '@/lib/openrouter'
 
 const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
   planning:  { cls: 'badge-slate',   label: 'Planning' },
@@ -62,6 +65,8 @@ const Dashboard = () => {
   const [healResult, setHealResult] = useState<{ sync: number; err: number } | null>(null)
   const { showToast } = useToast()
   const queryClient = useQueryClient()
+  const setAIOpen = useAIStore(s => s.setOpen)
+  const aiBusy = useAIStore(s => s.busy)
   useEffect(() => {
     document.title = 'Dashboard | BOM Manager'
   }, [])
@@ -104,6 +109,24 @@ const Dashboard = () => {
   ]
   const totalPartsCount = PART_BREAKDOWN.reduce((s, r) => s + r.value, 0) || 1
   PART_BREAKDOWN.forEach(r => { r.pct = Math.round((r.value / totalPartsCount) * 100) })
+
+  const runDashboardAI = async (prompt: string) => {
+    if (aiBusy) {
+      setAIOpen(true)
+      return
+    }
+    if (!isConfigured()) {
+      const dbSettings = await loadSettingsFromDB()
+      if (dbSettings?.apiKey) saveSettings(dbSettings)
+    }
+    if (!isConfigured()) {
+      setAIOpen(true)
+      showToast('error', 'Configure AI settings before running dashboard intelligence.')
+      return
+    }
+    setAIOpen(true)
+    await sendUserMessage(prompt)
+  }
 
   return (
     <div className="page-container py-8 page-enter">
@@ -208,13 +231,17 @@ const Dashboard = () => {
         </div>
 
         <div className="p-6 space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {[
               { label: 'Draft PO Value', value: formatCurrency(smartDashboard?.kpis.draft_po_value), icon: FileText },
               { label: 'Overdue POs', value: smartDashboard?.kpis.overdue_pos ?? 0, icon: AlertTriangle },
               { label: 'Parts Need PO', value: smartDashboard?.kpis.pending_procurement_parts ?? 0, icon: Package },
               { label: 'BOM/PO Gap', value: formatCurrency(smartDashboard?.kpis.bom_po_gap_value), icon: TrendingUp },
               { label: 'Projects at Risk', value: smartDashboard?.kpis.projects_at_risk ?? 0, icon: Activity },
+              { label: 'BOM Health Issues', value: smartDashboard?.kpis.bom_health_issues ?? 0, icon: Zap },
+              { label: 'Price Spikes', value: smartDashboard?.kpis.price_spikes ?? 0, icon: TrendingUp },
+              { label: 'Duplicate Risks', value: smartDashboard?.kpis.duplicate_part_groups ?? 0, icon: AlertTriangle },
+              { label: 'PO PDFs Missing', value: smartDashboard?.kpis.po_pdf_missing ?? 0, icon: FileText },
             ].map(({ label, value, icon: Icon }) => (
               <div key={label} className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -484,6 +511,47 @@ const Dashboard = () => {
                   <ChevronRight size={14} className="text-slate-200 group-hover:text-navy-400 group-hover:translate-x-1 transition-all" />
                 </Link>
               ))}
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <p className="px-3 mb-2 text-[10px] font-black uppercase tracking-widest text-tertiary">AI Intelligence</p>
+                {[
+                  {
+                    label: 'BOM Health Audit',
+                    icon: Activity,
+                    prompt: 'Run a cross-project smart BOM health audit. Check missing images, missing suppliers, zero prices, duplicate project mappings, and parts without PO coverage. Show the highest-risk projects first. Do not change any data.',
+                  },
+                  {
+                    label: 'Price Watch',
+                    icon: TrendingUp,
+                    prompt: 'Run price change intelligence for the last 90 days with a 10% threshold. Show biggest increases/decreases and what should be reviewed first. Do not change any data.',
+                  },
+                  {
+                    label: 'Supplier Intel',
+                    icon: ShoppingCart,
+                    prompt: 'Run supplier intelligence across open POs. Show overdue suppliers, open PO value, draft exposure, and follow-up priorities. Do not change any data.',
+                  },
+                  {
+                    label: 'Risk Score',
+                    icon: AlertTriangle,
+                    prompt: 'Run project procurement risk scoring. Show low-health projects, BOM/PO gaps, overdue POs, parts needing PO coverage, and the first project to fix. Do not change any data.',
+                  },
+                ].map(({ label, icon: Icon, prompt }) => (
+                  <button
+                    key={label}
+                    onClick={() => runDashboardAI(prompt)}
+                    disabled={aiBusy}
+                    className="w-full flex items-center gap-4 p-3 rounded-2xl hover:bg-navy-50 transition-all group disabled:opacity-60"
+                  >
+                    <div className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center shrink-0 shadow-sm group-hover:shadow-md transition-all group-hover:bg-amber-500">
+                      <Icon size={16} className="text-amber-600 group-hover:text-white transition-colors" />
+                    </div>
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="text-xs font-black text-navy-900 group-hover:text-amber-700 transition-colors uppercase tracking-tight">{label}</div>
+                      <div className="text-[10px] font-bold text-tertiary opacity-70 truncate">Open assistant and run analysis</div>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-200 group-hover:text-navy-400 group-hover:translate-x-1 transition-all" />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

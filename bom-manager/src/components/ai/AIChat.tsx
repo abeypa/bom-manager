@@ -3,7 +3,7 @@ import {
   Bot, X, Send, Settings as SettingsIcon, Trash2, Check, X as XIcon,
   Loader2, AlertTriangle, FileText, Paperclip, Image as ImageIcon, FileText as PdfIcon,
   Square, ClipboardList, FolderKanban, Tags, Table2, Sparkles, ShoppingCart,
-  Zap, FileSearch,
+  Zap, FileSearch, HeartPulse, TrendingUp, Truck, ShieldAlert,
 } from 'lucide-react'
 import { useAIStore, ChatMessage } from '@/store/useAIStore'
 import { sendUserMessage, approvePending, rejectPending, stopAI } from '@/lib/ai-runner'
@@ -60,6 +60,30 @@ const SMART_COMMANDS = [
     icon: FileSearch,
     prompt:
       'AI PO audit: First ask me to select the target project if it is not already clear. After I select the project, run the PO/PDF match audit for all POs in that project that have an attached BEP PO PDF. Compare PO number, supplier, line count, item codes, quantities, unit prices, discounts, and totals. Show matched, missing PDF, and mismatch results as a concise report. Do not change any data.',
+  },
+  {
+    label: 'BOM Health',
+    icon: HeartPulse,
+    prompt:
+      'Run a smart BOM health audit. If a project is not clear, ask me to select one. Check missing images, missing suppliers, zero prices, duplicate project mappings, and parts not connected to any PO. Show a concise issue summary and recommended next actions. Do not change any data.',
+  },
+  {
+    label: 'Price Watch',
+    icon: TrendingUp,
+    prompt:
+      'Run price change intelligence for recent part price history. Show parts with price changes above 10%, supplier/date context when available, and the highest risk increases first. Do not change any data.',
+  },
+  {
+    label: 'Supplier Intel',
+    icon: Truck,
+    prompt:
+      'Run supplier intelligence. Summarize open PO value, overdue POs, draft exposure, top suppliers by value, and supplier follow-up priorities. Ask for project or supplier only if needed. Do not change any data.',
+  },
+  {
+    label: 'Risk Score',
+    icon: ShieldAlert,
+    prompt:
+      'Run project procurement risk scoring. Show projects with low health score, BOM/PO value gap, overdue POs, and parts needing PO coverage. Recommend which project to fix first. Do not change any data.',
   },
 ]
 

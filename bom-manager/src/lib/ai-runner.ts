@@ -97,6 +97,17 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     for that project and show a concise report with matched POs,
     missing PDFs, and mismatches. Do not propose any write action.
 
+14. SMART DASHBOARD / HEALTH INTELLIGENCE: When the user asks for
+    BOM health, price watch, supplier intelligence, project risk,
+    duplicate mapping, missing image, zero price, or procurement risk,
+    use the dedicated read tools first:
+      - audit_bom_health
+      - analyze_price_changes
+      - analyze_supplier_intelligence
+      - score_project_procurement_risk
+    Ask for a project only when the requested scope is unclear. Summarize
+    findings by severity and recommend next actions, but do not write.
+
 ═══════════════════════════════════════════════════════════════════════
 INTENT DISPATCH — CHOOSE THE RIGHT WORKFLOW BEFORE DOING ANYTHING
 ═══════════════════════════════════════════════════════════════════════

@@ -64,6 +64,10 @@ export interface SmartDashboard {
     pending_procurement_parts: number
     bom_po_gap_value: number
     projects_at_risk: number
+    bom_health_issues: number
+    price_spikes: number
+    duplicate_part_groups: number
+    po_pdf_missing: number
   }
   insights: SmartDashboardInsight[]
   priority_projects: SmartProjectSignal[]
@@ -71,6 +75,14 @@ export interface SmartDashboard {
 }
 
 const OPEN_PO_STATUSES = new Set(['Draft', 'Released', 'Pending', 'Sent', 'Confirmed', 'Partial'])
+const PART_TABLES = [
+  'mechanical_manufacture',
+  'mechanical_bought_out',
+  'electrical_manufacture',
+  'electrical_bought_out',
+  'pneumatic_bought_out',
+]
+const BOUGHT_OUT_TABLES = new Set(['mechanical_bought_out', 'electrical_bought_out', 'pneumatic_bought_out'])
 
 const calcLineValue = (row: any) => {
   const quantity = Number(row?.quantity || 0)
@@ -83,6 +95,13 @@ const moneyMetric = (value: number) => {
   if (value >= 10000000) return `INR ${(value / 10000000).toFixed(1)}Cr`
   if (value >= 100000) return `INR ${(value / 100000).toFixed(1)}L`
   return `INR ${Math.round(value).toLocaleString('en-IN')}`
+}
+
+const getPercentChange = (oldPrice: any, newPrice: any) => {
+  const oldValue = Number(oldPrice || 0)
+  const newValue = Number(newPrice || 0)
+  if (!oldValue || !Number.isFinite(oldValue) || !Number.isFinite(newValue)) return null
+  return ((newValue - oldValue) / oldValue) * 100
 }
 
 export const dashboardApi = {
@@ -164,6 +183,10 @@ export const dashboardApi = {
           pending_procurement_parts: 0,
           bom_po_gap_value: 0,
           projects_at_risk: 0,
+          bom_health_issues: 0,
+          price_spikes: 0,
+          duplicate_part_groups: 0,
+          po_pdf_missing: 0,
         },
         insights: [{
           id: 'no-projects',
@@ -194,6 +217,7 @@ export const dashboardApi = {
           grand_total,
           po_date,
           expected_delivery_date,
+          bep_po_pdf_url,
           suppliers (name)
         `)
         .in('project_id', projectIds),
@@ -209,9 +233,26 @@ export const dashboardApi = {
     if (subsectionIds.length > 0) {
       const { data: partsData } = await (supabase as any)
         .from('project_parts')
-        .select('id, project_section_id, quantity, unit_price, discount_percent')
+        .select('id, project_section_id, part_type, part_id, quantity, unit_price, discount_percent')
         .in('project_section_id', subsectionIds)
       projectParts = partsData || []
+    }
+
+    const detailsByType: Record<string, Record<number, any>> = {}
+    const idsByType: Record<string, number[]> = {}
+    for (const part of projectParts) {
+      if (!part.part_type || !part.part_id || !PART_TABLES.includes(part.part_type)) continue
+      if (!idsByType[part.part_type]) idsByType[part.part_type] = []
+      idsByType[part.part_type].push(part.part_id)
+    }
+    for (const [partType, ids] of Object.entries(idsByType)) {
+      const uniqueIds = Array.from(new Set(ids))
+      if (!uniqueIds.length) continue
+      const { data } = await (supabase as any)
+        .from(partType)
+        .select('id, part_number, supplier_id, image_path, base_price')
+        .in('id', uniqueIds)
+      detailsByType[partType] = Object.fromEntries((data || []).map((row: any) => [row.id, row]))
     }
 
     let poItems: any[] = []
@@ -227,6 +268,35 @@ export const dashboardApi = {
     }
 
     const orderedProjectPartIds = new Set(poItems.map((item: any) => item.project_part_id).filter(Boolean))
+    const duplicateMap = new Map<string, number>()
+    let missingImages = 0
+    let missingSuppliers = 0
+    let zeroPrices = 0
+    for (const part of projectParts) {
+      const projectIdForPart = subsectionToProject.get(part.project_section_id)
+      const master = detailsByType[part.part_type]?.[part.part_id]
+      if (projectIdForPart && part.part_type && part.part_id) {
+        const key = `${projectIdForPart}:${part.part_type}:${part.part_id}`
+        duplicateMap.set(key, (duplicateMap.get(key) || 0) + 1)
+      }
+      if (BOUGHT_OUT_TABLES.has(part.part_type) && !master?.image_path) missingImages += 1
+      if (!master?.supplier_id) missingSuppliers += 1
+      if (Number(part.unit_price || 0) <= 0 || Number(master?.base_price || 0) <= 0) zeroPrices += 1
+    }
+    const duplicateGroups = Array.from(duplicateMap.values()).filter((count) => count > 1).length
+
+    const recentPriceSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+    const { data: recentPriceRows } = await (supabase as any)
+      .from('part_price_history')
+      .select('old_price, new_price, changed_at')
+      .gte('changed_at', recentPriceSince)
+      .order('changed_at', { ascending: false })
+      .limit(300)
+    const priceSpikes = (recentPriceRows || []).filter((row: any) => {
+      const pct = getPercentChange(row.old_price, row.new_price)
+      return pct != null && Math.abs(pct) >= 10
+    }).length
+
     const today = new Date().toISOString().split('T')[0]
     const isOpenPO = (po: any) => OPEN_PO_STATUSES.has(po.status)
     const isOverdue = (po: any) => isOpenPO(po) && po.expected_delivery_date && po.expected_delivery_date < today
@@ -276,6 +346,8 @@ export const dashboardApi = {
     const pendingParts = projectSignals.reduce((sum, p) => sum + p.pending_parts, 0)
     const bomPoGap = projectSignals.reduce((sum, p) => sum + p.gap_value, 0)
     const projectsAtRisk = projectSignals.filter((p) => p.health_score < 70 || p.overdue_pos > 0 || p.pending_parts > 0).length
+    const missingPoPdfCount = purchaseOrders.filter((po: any) => !po.bep_po_pdf_url).length
+    const bomHealthIssues = missingImages + missingSuppliers + zeroPrices + duplicateGroups + pendingParts + missingPoPdfCount
 
     const supplierMap = new Map<string, SupplierFocusSignal>()
     for (const po of openPOs) {
@@ -338,6 +410,50 @@ export const dashboardApi = {
         to: '/reports',
       })
     }
+    if (duplicateGroups > 0) {
+      insights.push({
+        id: 'duplicate-project-parts',
+        severity: 'critical',
+        title: 'Duplicate project mapping risk',
+        message: 'The same master part appears more than once inside one or more project BOMs. Ask AI to audit duplicates before drafting more POs.',
+        metric: `${duplicateGroups} groups`,
+        action_label: 'Open Projects',
+        to: '/projects',
+      })
+    }
+    if (missingImages > 0 || missingSuppliers > 0 || zeroPrices > 0) {
+      insights.push({
+        id: 'bom-health-issues',
+        severity: 'warning',
+        title: 'BOM master data needs cleanup',
+        message: 'Some mapped parts are missing images, suppliers, or usable pricing. Use AI BOM Health to get the exact list.',
+        metric: `${missingImages + missingSuppliers + zeroPrices} issues`,
+        action_label: 'Open Parts',
+        to: '/parts',
+      })
+    }
+    if (priceSpikes > 0) {
+      insights.push({
+        id: 'price-spikes',
+        severity: 'info',
+        title: 'Price changes need review',
+        message: 'Recent price history contains changes above 10%. Use AI Price Watch to review supplier and part impact.',
+        metric: `${priceSpikes} spikes`,
+        action_label: 'Review Parts',
+        to: '/parts',
+      })
+    }
+    if (missingPoPdfCount > 0) {
+      insights.push({
+        id: 'missing-po-pdfs',
+        severity: 'info',
+        title: 'PO PDF audit coverage gap',
+        message: 'Some purchase orders do not have a BEP PO PDF attached, so AI cannot match them against source documents.',
+        metric: `${missingPoPdfCount} POs`,
+        action_label: 'Review POs',
+        to: '/purchase-orders',
+      })
+    }
     if (insights.length === 0) {
       insights.push({
         id: 'healthy-flow',
@@ -359,6 +475,10 @@ export const dashboardApi = {
         pending_procurement_parts: pendingParts,
         bom_po_gap_value: bomPoGap,
         projects_at_risk: projectsAtRisk,
+        bom_health_issues: bomHealthIssues,
+        price_spikes: priceSpikes,
+        duplicate_part_groups: duplicateGroups,
+        po_pdf_missing: missingPoPdfCount,
       },
       insights: insights.slice(0, 4),
       priority_projects: projectSignals
