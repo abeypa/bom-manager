@@ -428,12 +428,19 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
   const [projects, setProjects] = useState<any[]>([])
   const [sections, setSections] = useState<any[]>([])
 
-  const msg = lastMessage?.content?.toLowerCase() ?? ''
+  const fullContent = lastMessage?.content ?? ''
 
-  const wantsProject  = /which project|select.*project|target project|project.*should|what project|choose.*project|project.*name|list.*project/i.test(msg)
-  const wantsCategory = /part.*(type|category)|category|classify|electrical|mechanical|pneumatic|which type|what type|part classification/i.test(msg)
-  const wantsSection  = /which section|which table|subsection|target.*section|section.*for|where.*should|map.*to|place.*in|add.*to.*section/i.test(msg)
-  const wantsYesNo    = /shall i|should i|confirm|proceed|go ahead|correct\?|ok\?|ready|approve|want me to|continue/i.test(msg)
+  // Only look at the last non-empty line — that's where the AI puts its question.
+  // Scanning the full message causes false matches from earlier paragraphs.
+  const lastLine = fullContent.trim().split('\n').filter(l => l.trim()).at(-1)?.toLowerCase() ?? ''
+
+  // Also keep full content (lowercase) only for extracting context data (project id)
+  const fullMsg = fullContent.toLowerCase()
+
+  const wantsYesNo    = /shall i|should i|confirm|proceed|go ahead|correct\?|ok\?|ready|approve|want me to|continue\?|like me to/i.test(lastLine)
+  const wantsProject  = !wantsYesNo && /which project|select.*project|target project|project.*should|what project|choose.*project|add.*to.*project/i.test(lastLine)
+  const wantsCategory = !wantsYesNo && !wantsProject && /part.*(type|category)|which category|classify|which type|what type/i.test(lastLine)
+  const wantsSection  = !wantsYesNo && !wantsProject && !wantsCategory && /which section|which table|which subsection|target.*section|section.*should|map.*to/i.test(lastLine)
 
   useEffect(() => {
     if (wantsProject) {
@@ -449,7 +456,7 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
 
   useEffect(() => {
     if (wantsSection) {
-      const numMatch = msg.match(/project[^\d]*(\d+)/)
+      const numMatch = fullMsg.match(/project[^\d]*(\d+)/)
       const projectId = numMatch ? parseInt(numMatch[1]) : null
       const q = (supabase as any)
         .from('project_subsections')
@@ -458,7 +465,7 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
         .limit(20)
       ;(projectId ? q.eq('project_id', projectId) : q).then(({ data }: any) => setSections(data || []))
     }
-  }, [wantsSection, msg])
+  }, [wantsSection, fullMsg])
 
   // Show only ONE group — the first match in priority order
   type Group = { label: string; color: string; children: React.ReactNode }
