@@ -149,6 +149,40 @@ function isUsefulImageUrl(url: string) {
   return IMAGE_EXT_RE.test(url) || /cloudinary|cdn|images|image|products|wp-content/i.test(url)
 }
 
+function normalizePartKey(value: any) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function normalizeDescriptionKey(value: any) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 8)
+    .join(' ')
+}
+
+function hasValue(value: any) {
+  return value != null && String(value).trim() !== ''
+}
+
+function pickBestValue(keepValue: any, removeValue: any) {
+  return hasValue(keepValue) ? keepValue : (hasValue(removeValue) ? removeValue : keepValue)
+}
+
+async function getMasterPartForMerge(partType: string, partId: number) {
+  assertInteger('part_id', partId)
+  if (!part_type_enum.includes(partType)) throw new Error(`Unknown part_type: ${partType}`)
+  const { data, error } = await (supabase as any)
+    .from(partType)
+    .select('*')
+    .eq('id', partId)
+    .single()
+  if (error || !data) throw new Error(`${partType} #${partId} does not exist.`)
+  return data
+}
+
 export const TOOL_REGISTRY: ToolSpec[] = [
   // ── READ ────────────────────────────────────────────────────────────────
   {
@@ -277,6 +311,98 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         }
       }
       return results
+    },
+  },
+  {
+    name: 'find_duplicate_master_parts',
+    kind: 'read',
+    description:
+      'Find likely duplicate master parts by normalized ERP code, internal part number, manufacturer part number, and description. Use this before proposing any merge/delete.',
+    parameters: {
+      type: 'object',
+      properties: {
+        part_type: { type: 'string', enum: part_type_enum, description: 'Optional, restrict to one part table such as electrical_bought_out.' },
+        query: { type: 'string', description: 'Optional part number, ERP code, manufacturer part number, or description fragment to focus the scan.' },
+        limit: { type: 'number', default: 20 },
+      },
+    },
+    handler: async ({ part_type, query, limit = 20 }: any) => {
+      const types = part_type ? [part_type] : part_type_enum
+      const maxGroups = Math.max(1, Math.min(Number(limit) || 20, 100))
+      const queryKey = normalizePartKey(query)
+      const queryText = String(query || '').trim().toLowerCase()
+      const rows: any[] = []
+
+      for (const pt of types) {
+        const { data, error } = await (supabase as any)
+          .from(pt)
+          .select('id, part_number, beperp_part_no, manufacturer_part_number, description, manufacturer, image_path, stock_quantity, base_price, currency, updated_date, supplier_id')
+          .limit(2000)
+        if (error) throw error
+        for (const row of data || []) {
+          const searchBlob = [
+            row.part_number,
+            row.beperp_part_no,
+            row.manufacturer_part_number,
+            row.description,
+            row.manufacturer,
+          ].filter(Boolean).join(' ').toLowerCase()
+          if (queryKey) {
+            const keys = [
+              normalizePartKey(row.part_number),
+              normalizePartKey(row.beperp_part_no),
+              normalizePartKey(row.manufacturer_part_number),
+            ]
+            if (!keys.some((key) => key.includes(queryKey) || queryKey.includes(key)) && !searchBlob.includes(queryText)) continue
+          }
+          rows.push({ part_type: pt, ...row })
+        }
+      }
+
+      const groups = new Map<string, any[]>()
+      const addKey = (key: string, row: any) => {
+        if (!key || key.length < 4) return
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(row)
+      }
+
+      for (const row of rows) {
+        addKey(`erp:${normalizePartKey(row.beperp_part_no)}`, row)
+        addKey(`part:${normalizePartKey(row.part_number)}`, row)
+        addKey(`mfg:${normalizePartKey(row.manufacturer_part_number)}`, row)
+        addKey(`desc:${normalizeDescriptionKey(row.description)}`, row)
+      }
+
+      const seen = new Set<string>()
+      const duplicates: any[] = []
+      for (const [match_key, members] of groups.entries()) {
+        const unique = Array.from(new Map(members.map((m) => [`${m.part_type}:${m.id}`, m])).values())
+        if (unique.length < 2) continue
+        const signature = unique.map((m) => `${m.part_type}:${m.id}`).sort().join('|')
+        if (seen.has(signature)) continue
+        seen.add(signature)
+        duplicates.push({
+          match_key,
+          confidence: match_key.startsWith('erp:') || match_key.startsWith('part:') || match_key.startsWith('mfg:') ? 'high' : 'review',
+          candidates: unique.map((m) => ({
+            part_type: m.part_type,
+            id: m.id,
+            part_number: m.part_number,
+            beperp_part_no: m.beperp_part_no,
+            manufacturer_part_number: m.manufacturer_part_number,
+            description: m.description,
+            manufacturer: m.manufacturer,
+            has_image: Boolean(m.image_path),
+            stock_quantity: m.stock_quantity || 0,
+            base_price: m.base_price || 0,
+            currency: m.currency || 'INR',
+            updated_date: m.updated_date,
+            supplier_id: m.supplier_id,
+          })),
+        })
+        if (duplicates.length >= maxGroups) break
+      }
+      return duplicates
     },
   },
   {
@@ -847,6 +973,179 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .single()
       if (error) throw error
       return data
+    },
+  },
+  {
+    name: 'merge_duplicate_master_parts',
+    kind: 'write',
+    description:
+      'Merge two duplicate master part rows in the SAME part table. Repoints project BOM lines, PO items, stock movements, and price history from remove_part_id to keep_part_id, combines useful metadata/stock, then deletes the duplicate. Use only after find_duplicate_master_parts and after telling the user exactly which row will be kept.',
+    parameters: {
+      type: 'object',
+      required: ['part_type', 'keep_part_id', 'remove_part_id'],
+      properties: {
+        part_type: { type: 'string', enum: part_type_enum },
+        keep_part_id: { type: 'number', description: 'The canonical master part row to keep.' },
+        remove_part_id: { type: 'number', description: 'The duplicate master part row to merge and delete.' },
+        reason: { type: 'string', description: 'Short audit reason shown to the user.' },
+      },
+    },
+    summarize: (a) => `Merge duplicate ${a.part_type}: keep #${a.keep_part_id}, remove #${a.remove_part_id}`,
+    preflight: async (a: any) => {
+      if (!part_type_enum.includes(a.part_type)) throw new Error(`Unknown part_type: ${a.part_type}`)
+      assertInteger('keep_part_id', a.keep_part_id)
+      assertInteger('remove_part_id', a.remove_part_id)
+      if (a.keep_part_id === a.remove_part_id) throw new Error('keep_part_id and remove_part_id must be different.')
+      const keep = await getMasterPartForMerge(a.part_type, a.keep_part_id)
+      const remove = await getMasterPartForMerge(a.part_type, a.remove_part_id)
+      const keepKeys = [
+        normalizePartKey(keep.part_number),
+        normalizePartKey(keep.beperp_part_no),
+        normalizePartKey(keep.manufacturer_part_number),
+      ].filter(Boolean)
+      const removeKeys = [
+        normalizePartKey(remove.part_number),
+        normalizePartKey(remove.beperp_part_no),
+        normalizePartKey(remove.manufacturer_part_number),
+      ].filter(Boolean)
+      const hasStrongMatch = keepKeys.some((key) => removeKeys.includes(key))
+      const descMatch = normalizeDescriptionKey(keep.description) && normalizeDescriptionKey(keep.description) === normalizeDescriptionKey(remove.description)
+      if (!hasStrongMatch && !descMatch) {
+        throw new Error(
+          `These rows do not have a strong duplicate match. Keep #${keep.id} (${keep.part_number}) and remove #${remove.id} (${remove.part_number}) need manual review.`,
+        )
+      }
+    },
+    handler: async (a: any) => {
+      if (!part_type_enum.includes(a.part_type)) throw new Error(`Unknown part_type: ${a.part_type}`)
+      assertInteger('keep_part_id', a.keep_part_id)
+      assertInteger('remove_part_id', a.remove_part_id)
+      if (a.keep_part_id === a.remove_part_id) throw new Error('keep_part_id and remove_part_id must be different.')
+
+      const keep = await getMasterPartForMerge(a.part_type, a.keep_part_id)
+      const remove = await getMasterPartForMerge(a.part_type, a.remove_part_id)
+      const removeStock = Number(remove.stock_quantity || 0)
+      const keepStock = Number(keep.stock_quantity || 0)
+      const removeUpdated = remove.updated_date || remove.created_date
+      const keepUpdated = keep.updated_date || keep.created_date
+      const useRemovePrice = removeUpdated && (!keepUpdated || new Date(removeUpdated).getTime() > new Date(keepUpdated).getTime())
+
+      const mergedPatch: any = {
+        description: pickBestValue(keep.description, remove.description),
+        manufacturer: pickBestValue(keep.manufacturer, remove.manufacturer),
+        make: pickBestValue(keep.make, remove.make),
+        manufacturer_part_number: pickBestValue(keep.manufacturer_part_number, remove.manufacturer_part_number),
+        vendor_part_number: pickBestValue(keep.vendor_part_number, remove.vendor_part_number),
+        specifications: pickBestValue(keep.specifications, remove.specifications),
+        image_path: pickBestValue(keep.image_path, remove.image_path),
+        datasheet_url: pickBestValue(keep.datasheet_url, remove.datasheet_url),
+        pdf_path: pickBestValue(keep.pdf_path, remove.pdf_path),
+        pdf2_path: pickBestValue(keep.pdf2_path, remove.pdf2_path),
+        pdf3_path: pickBestValue(keep.pdf3_path, remove.pdf3_path),
+        stock_quantity: keepStock + removeStock,
+        received_qty: Number(keep.received_qty || 0) + Number(remove.received_qty || 0),
+        order_qty: Math.max(Number(keep.order_qty || 0), Number(remove.order_qty || 0)),
+        total_stock: Number(keep.total_stock || 0) + Number(remove.total_stock || 0),
+        updated_date: new Date().toISOString(),
+      }
+      if (useRemovePrice) {
+        mergedPatch.base_price = remove.base_price
+        mergedPatch.currency = remove.currency || keep.currency || 'INR'
+        mergedPatch.discount_percent = remove.discount_percent || 0
+        mergedPatch.supplier_id = remove.supplier_id || keep.supplier_id
+      } else {
+        mergedPatch.supplier_id = keep.supplier_id || remove.supplier_id
+      }
+
+      const { data: projectPartRows } = await (supabase as any)
+        .from('project_parts')
+        .select('id, project_section_id, part_id, quantity, unit_price, discount_percent')
+        .eq('part_type', a.part_type)
+        .in('part_id', [a.keep_part_id, a.remove_part_id])
+
+      const keepProjectParts = (projectPartRows || []).filter((row: any) => row.part_id === a.keep_part_id)
+      const removeProjectParts = (projectPartRows || []).filter((row: any) => row.part_id === a.remove_part_id)
+      let projectPartsRepointed = 0
+      let projectPartsMerged = 0
+
+      for (const row of removeProjectParts) {
+        const existing = keepProjectParts.find((k: any) => k.project_section_id === row.project_section_id)
+        if (existing) {
+          await (supabase as any)
+            .from('purchase_order_items')
+            .update({ project_part_id: existing.id, part_id: a.keep_part_id, part_type: a.part_type, part_number: keep.part_number })
+            .eq('project_part_id', row.id)
+          await (supabase as any)
+            .from('project_parts')
+            .update({
+              quantity: Number(existing.quantity || 0) + Number(row.quantity || 0),
+              unit_price: useRemovePrice ? Number(remove.base_price || existing.unit_price || 0) : existing.unit_price,
+              discount_percent: useRemovePrice ? Number(remove.discount_percent || 0) : existing.discount_percent,
+              updated_date: new Date().toISOString(),
+            })
+            .eq('id', existing.id)
+          await (supabase as any).from('project_parts').delete().eq('id', row.id)
+          projectPartsMerged += 1
+        } else {
+          await (supabase as any)
+            .from('project_parts')
+            .update({
+              part_id: a.keep_part_id,
+              unit_price: useRemovePrice ? Number(remove.base_price || row.unit_price || 0) : row.unit_price,
+              discount_percent: useRemovePrice ? Number(remove.discount_percent || 0) : row.discount_percent,
+              updated_date: new Date().toISOString(),
+            })
+            .eq('id', row.id)
+          projectPartsRepointed += 1
+        }
+      }
+
+      const [{ count: poItemsUpdated }, { count: stockRowsUpdated }, { count: priceRowsUpdated }] = await Promise.all([
+        (supabase as any)
+          .from('purchase_order_items')
+          .update({ part_id: a.keep_part_id, part_type: a.part_type, part_number: keep.part_number })
+          .eq('part_type', a.part_type)
+          .eq('part_id', a.remove_part_id)
+          .select('id', { count: 'exact', head: true }),
+        (supabase as any)
+          .from('stock_movements')
+          .update({ part_id: a.keep_part_id, part_table_name: a.part_type, part_number: keep.part_number })
+          .eq('part_table_name', a.part_type)
+          .eq('part_id', a.remove_part_id)
+          .select('id', { count: 'exact', head: true }),
+        (supabase as any)
+          .from('part_price_history')
+          .update({ part_id: a.keep_part_id, part_table_name: a.part_type, part_number: keep.part_number })
+          .eq('part_table_name', a.part_type)
+          .eq('part_id', a.remove_part_id)
+          .select('id', { count: 'exact', head: true }),
+      ])
+
+      const { data: updatedKeep, error: keepErr } = await (supabase as any)
+        .from(a.part_type)
+        .update(mergedPatch)
+        .eq('id', a.keep_part_id)
+        .select()
+        .single()
+      if (keepErr) throw keepErr
+
+      const { error: deleteErr } = await (supabase as any)
+        .from(a.part_type)
+        .delete()
+        .eq('id', a.remove_part_id)
+      if (deleteErr) throw deleteErr
+
+      return {
+        kept: { part_type: a.part_type, id: a.keep_part_id, part_number: keep.part_number },
+        removed: { id: a.remove_part_id, part_number: remove.part_number },
+        merged_stock_quantity: updatedKeep.stock_quantity,
+        project_parts_repointed: projectPartsRepointed,
+        project_parts_merged: projectPartsMerged,
+        purchase_order_items_updated: poItemsUpdated || 0,
+        stock_movements_updated: stockRowsUpdated || 0,
+        price_history_rows_updated: priceRowsUpdated || 0,
+        reason: a.reason || 'duplicate master part merge',
+      }
     },
   },
   {
