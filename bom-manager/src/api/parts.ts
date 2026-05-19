@@ -286,6 +286,17 @@ export const partsApi = {
     }
   },
 
+  // Fetch a single part by id (all fields)
+  getPartById: async (category: PartCategory, id: number) => {
+    const { data, error } = await (supabase as any)
+      .from(category)
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
   // New: Get price history for a specific part
   getPriceHistory: async (category: PartCategory, partId: number) => {
     const { data, error } = await supabase

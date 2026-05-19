@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   X, Truck, IndianRupee, Calendar, Upload, FileText,
@@ -10,6 +10,9 @@ import { purchaseOrdersApi } from '../../api/purchase-orders';
 import { poPaymentsApi, POPayment, PaymentType, PaymentMode, receivePoItem, issueOutPoItem, getPoRemainingForPart } from '../../api/po-payments';
 import { uploadFile, getSignedUrl } from '../../api/storage';
 import { useToast } from '../../context/ToastContext';
+import { partsApi } from '../../api/parts';
+import PartDetailModal from '../parts/PartDetailModal';
+import PartQuickView from './PartQuickView';
 
 interface PODetailModalProps {
   isOpen: boolean;
@@ -69,6 +72,13 @@ export default function PODetailModal({
   const [isBulkRunning, setIsBulkRunning] = useState(false);
   // Issued-out totals for this PO, keyed by `${part_table_name}:${part_id}`
   const [issuedMap, setIssuedMap] = useState<Record<string, number>>({});
+
+  // Part quick-view popover (hover) and full detail modal (click)
+  const [partPreviewCache, setPartPreviewCache] = useState<Record<string, any>>({});
+  const [hoveredPartKey, setHoveredPartKey] = useState<string | null>(null);
+  const [hoveredAnchorRect, setHoveredAnchorRect] = useState<DOMRect | null>(null);
+  const [clickedPart, setClickedPart] = useState<{ part: any; category: string } | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleItemSelected = (id: number) => {
     setSelectedItemIds(prev => {
@@ -139,6 +149,44 @@ export default function PODetailModal({
     setBulkStockMap({});
     setBulkNotes('');
   };
+
+  const handlePartHoverEnter = useCallback((item: any, rect: DOMRect) => {
+    if (!item.part_type || !item.part_id) return;
+    const key = `${item.part_type}:${item.part_id}`;
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(async () => {
+      setHoveredAnchorRect(rect);
+      setHoveredPartKey(key);
+      if (!partPreviewCache[key]) {
+        try {
+          const data = await partsApi.getPartById(item.part_type, item.part_id);
+          setPartPreviewCache(prev => ({ ...prev, [key]: data }));
+        } catch {
+          // silently ignore fetch errors for the preview
+        }
+      }
+    }, 300);
+  }, [partPreviewCache]);
+
+  const handlePartHoverLeave = useCallback(() => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    // popover itself handles onMouseLeave to close
+  }, []);
+
+  const handlePartClick = useCallback(async (item: any) => {
+    if (!item.part_type || !item.part_id) return;
+    const key = `${item.part_type}:${item.part_id}`;
+    let part = partPreviewCache[key];
+    if (!part) {
+      try {
+        part = await partsApi.getPartById(item.part_type, item.part_id);
+        setPartPreviewCache(prev => ({ ...prev, [key]: part }));
+      } catch {
+        return;
+      }
+    }
+    setClickedPart({ part, category: item.part_type });
+  }, [partPreviewCache]);
 
   const submitBulk = async () => {
     if (!bulkMode) return;
@@ -916,13 +964,26 @@ export default function PODetailModal({
                                 onChange={() => toggleItemSelected(item.id)}
                               />
                             </td>
-                            <td className="px-6 py-4">
-                              <div className="font-black text-sm text-gray-900 font-mono">{item.part_number}</div>
-                              {item.manufacturer_part_number && (
-                                <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest mt-1">
-                                  MPN: {item.manufacturer_part_number}
+                            <td
+                              className="px-6 py-4"
+                              onMouseEnter={(e) => handlePartHoverEnter(item, (e.currentTarget as HTMLElement).getBoundingClientRect())}
+                              onMouseLeave={handlePartHoverLeave}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handlePartClick(item)}
+                                className="text-left group"
+                                title="Click to view full part details"
+                              >
+                                <div className="font-black text-sm text-gray-900 font-mono group-hover:text-blue-600 transition-colors underline-offset-2 group-hover:underline">
+                                  {item.part_number}
                                 </div>
-                              )}
+                                {item.manufacturer_part_number && (
+                                  <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest mt-1">
+                                    MPN: {item.manufacturer_part_number}
+                                  </div>
+                                )}
+                              </button>
                             </td>
                             <td className="px-6 py-4 font-bold text-sm tabular-nums text-gray-500">
                                ₹{item.unit_price?.toLocaleString('en-IN')}
@@ -1657,6 +1718,25 @@ export default function PODetailModal({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Part Quick-View Popover (hover) ── */}
+      {hoveredPartKey && hoveredAnchorRect && partPreviewCache[hoveredPartKey] && (
+        <PartQuickView
+          part={partPreviewCache[hoveredPartKey]}
+          anchorRect={hoveredAnchorRect}
+          onClose={() => setHoveredPartKey(null)}
+        />
+      )}
+
+      {/* ── Full Part Detail Modal (click) ── */}
+      {clickedPart && (
+        <PartDetailModal
+          isOpen={true}
+          onClose={() => setClickedPart(null)}
+          part={clickedPart.part}
+          category={clickedPart.category}
+        />
       )}
     </div>
   );
