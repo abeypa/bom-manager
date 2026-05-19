@@ -190,7 +190,6 @@ const Dashboard = () => {
             </div>
             <div>
               <div className="flex items-center gap-3 mb-1">
-                <h2 className="text-xl font-black tracking-tight">Smart AI Command Center</h2>
                 <span className="px-2.5 py-1 rounded-full bg-emerald-400/10 text-emerald-200 border border-emerald-300/20 text-[9px] font-black uppercase tracking-widest">
                   Live Signals
                 </span>
