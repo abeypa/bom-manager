@@ -19,6 +19,7 @@ import Admin from './pages/Admin';
 import ChangeLog from './pages/ChangeLog';
 import ProcurementDashboard from './pages/ProcurementDashboard';
 import Reports from './pages/Reports';
+import POIngestion from './pages/POIngestion';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -120,6 +121,12 @@ function App() {
                 <Route path="/procurement" element={
                   <RoleGuard>
                     <ProcurementDashboard />
+                  </RoleGuard>
+                } />
+
+                <Route path="/po-ingestion" element={
+                  <RoleGuard>
+                    <POIngestion />
                   </RoleGuard>
                 } />
 
