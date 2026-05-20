@@ -669,16 +669,14 @@ function AttachmentChip({ a, onRemove }: { a: Attachment; onRemove: () => void }
 }
 
 function HTMLReport({ title, html }: { title: string; html: string }) {
-  const printRef = useRef<HTMLIFrameElement>(null)
   const [expanded, setExpanded] = useState(false)
   const fullDoc = `<!doctype html><html><head><meta charset="utf-8"><script src="https://cdn.tailwindcss.com"></script><style>body{font-family:system-ui,sans-serif;padding:1rem;color:#0f172a;}table{border-collapse:collapse;width:100%;}th,td{padding:6px 10px;border-bottom:1px solid #e2e8f0;text-align:left;font-size:12px;}th{background:#f8fafc;font-weight:700;text-transform:uppercase;font-size:10px;color:#64748b;letter-spacing:0.05em;}</style></head><body>${html}</body></html>`
 
-  const printIt = () => {
+  const openInNewTab = () => {
     const w = window.open('', '_blank')
     if (!w) return
     w.document.write(fullDoc)
     w.document.close()
-    setTimeout(() => w.print(), 300)
   }
 
   return (
@@ -692,11 +690,10 @@ function HTMLReport({ title, html }: { title: string; html: string }) {
           <button onClick={() => setExpanded(e => !e)} className="text-[10px] text-slate-500 hover:text-slate-800 font-semibold">
             {expanded ? 'collapse' : 'expand'}
           </button>
-          <button onClick={printIt} className="text-[10px] text-navy-600 hover:text-navy-800 font-semibold">print / save PDF</button>
+          <button onClick={openInNewTab} className="text-[10px] text-navy-600 hover:text-navy-800 font-semibold">open in new tab</button>
         </div>
       </div>
       <iframe
-        ref={printRef}
         sandbox=""
         srcDoc={fullDoc}
         title={title}
