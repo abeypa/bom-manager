@@ -22,6 +22,9 @@ import { stockMovementsApi } from '@/api/stock-movements'
 import { getPoRemainingForPart } from '@/api/po-payments'
 import { supabase } from '@/lib/supabase'
 import { auditPurchaseOrderPdf } from '@/lib/po-pdf-audit'
+import { getSignedUrl } from '@/api/storage'
+import { urlToPDFAttachment } from '@/lib/ai-attachments'
+import { parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
 
 export type ToolKind = 'read' | 'write'
 
@@ -188,6 +191,30 @@ function percentChange(oldPrice: any, newPrice: any) {
   const newValue = Number(newPrice || 0)
   if (!oldValue || !Number.isFinite(oldValue) || !Number.isFinite(newValue)) return null
   return ((newValue - oldValue) / oldValue) * 100
+}
+
+function normalizeCode(value: any) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function codeMatches(left: any, right: any) {
+  const a = normalizeCode(left)
+  const b = normalizeCode(right)
+  return Boolean(a && b && (a === b || a.endsWith(b) || b.endsWith(a)))
+}
+
+function normalizeSupplierText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, ' ').replace(/[.,]/g, '').trim()
+}
+
+async function resolveStoredFileUrl(stored: string) {
+  if (!stored) return ''
+  if (!stored.startsWith('http')) return await getSignedUrl(stored, 3600) || stored
+  if (stored.includes('/storage/v1/object/sign/drawings/')) {
+    const match = stored.match(/\/drawings\/(.+?)(?:\?|$)/)
+    if (match) return await getSignedUrl(match[1], 3600) || stored
+  }
+  return stored
 }
 
 async function fetchMasterDetailsByType(projectParts: any[]) {
@@ -374,6 +401,192 @@ async function buildBomHealthAudit(projectId?: number) {
       duplicate_project_mappings: trim(issues.duplicate_project_mappings),
       parts_without_po: trim(issues.parts_without_po),
     },
+  }
+}
+
+async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceivedLines = false) {
+  assertInteger('po_id', poId)
+  const { data: po, error: poError } = await (supabase as any)
+    .from('purchase_orders')
+    .select('*, suppliers(name), project:projects(id, project_name, project_number), purchase_order_items(*)')
+    .eq('id', poId)
+    .single()
+  if (poError || !po) throw new Error(poError?.message || `PO #${poId} not found.`)
+  if (!po.bep_po_pdf_url) throw new Error(`PO ${po.po_number} does not have a BEP PO PDF attached.`)
+  if (po.status === 'Cancelled') throw new Error('Cancelled POs cannot be corrected by AI.')
+
+  const pdfUrl = await resolveStoredFileUrl(po.bep_po_pdf_url)
+  const pdf = await urlToPDFAttachment(pdfUrl, `${po.po_number}.pdf`)
+  const parsed = parsePurchaseOrderText({
+    fileName: pdf.name,
+    fileSize: pdf.size,
+    mimeType: 'application/pdf',
+    pageCount: pdf.pageCount,
+    text: pdf.text,
+  })
+  if (!parsed.lines.length) throw new Error('No PDF line items were detected. Run OCR or attach a clearer PDF before correction.')
+
+  const dbSupplier = normalizeSupplierText(po.suppliers?.name || '')
+  const pdfSupplier = normalizeSupplierText(parsed.supplier_name || '')
+  if (dbSupplier && pdfSupplier && !dbSupplier.includes(pdfSupplier) && !pdfSupplier.includes(dbSupplier)) {
+    throw new Error(`Supplier mismatch: DB supplier is "${po.suppliers?.name}", PDF supplier is "${parsed.supplier_name}".`)
+  }
+
+  const { data: subsections, error: subError } = await (supabase as any)
+    .from('project_subsections')
+    .select('id, project_id, section_name')
+    .eq('project_id', po.project_id)
+  if (subError) throw subError
+  const subsectionIds = (subsections || []).map((s: any) => s.id)
+
+  let projectParts: any[] = []
+  if (subsectionIds.length) {
+    const { data, error } = await (supabase as any)
+      .from('project_parts')
+      .select('id, project_section_id, part_type, part_id, quantity, unit_price, discount_percent')
+      .in('project_section_id', subsectionIds)
+    if (error) throw error
+    projectParts = data || []
+  }
+  const masterDetails = await fetchMasterDetailsByType(projectParts)
+  const projectCandidates = projectParts.map((projectPart) => {
+    const master = masterDetails[projectPart.part_type]?.[projectPart.part_id]
+    return {
+      project_part: projectPart,
+      master,
+      part_number: master?.part_number || '',
+      item_code: master?.beperp_part_no || master?.part_number?.split('-').at(-1) || '',
+    }
+  }).filter((candidate) => candidate.master)
+
+  const oldItems = [...(po.purchase_order_items || [])]
+  const usedOldIds = new Set<number>()
+  const desiredItems: any[] = []
+  const unresolved: any[] = []
+
+  for (const line of parsed.lines) {
+    const oldCandidates = oldItems
+      .filter((item: any) => !usedOldIds.has(item.id) && (
+        codeMatches(item.part_number, line.item_code) ||
+        codeMatches(item.part_number?.split('-').at(-1), line.item_code)
+      ))
+      .sort((a: any, b: any) => {
+        const aPrice = Math.abs(Number(a.unit_price || 0) - Number(line.unit_price || 0))
+        const bPrice = Math.abs(Number(b.unit_price || 0) - Number(line.unit_price || 0))
+        return aPrice - bPrice
+      })
+    const oldMatch = oldCandidates[0]
+    if (oldMatch) usedOldIds.add(oldMatch.id)
+
+    const projectMatch = oldMatch?.project_part_id
+      ? projectCandidates.find((candidate) => candidate.project_part.id === oldMatch.project_part_id)
+      : projectCandidates.find((candidate) =>
+          codeMatches(candidate.item_code, line.item_code) ||
+          codeMatches(candidate.part_number, line.item_code) ||
+          codeMatches(candidate.part_number?.split('-').at(-1), line.item_code)
+        )
+
+    if (!projectMatch) {
+      unresolved.push({
+        line_no: line.line_no,
+        item_code: line.item_code,
+        description: line.description,
+        reason: 'No matching existing PO line or project BOM part was found.',
+      })
+      continue
+    }
+
+    const qty = Number(line.quantity || 0)
+    const unitPrice = Number(line.unit_price || 0)
+    const discount = Number(line.discount_percent || 0)
+    if (qty <= 0 || unitPrice < 0 || discount < 0 || discount > 100) {
+      unresolved.push({
+        line_no: line.line_no,
+        item_code: line.item_code,
+        description: line.description,
+        reason: `Invalid quantity, price, or discount parsed from PDF: qty=${line.quantity}, unit=${line.unit_price}, disc=${line.discount_percent}.`,
+      })
+      continue
+    }
+
+    const receivedQty = Math.min(Number(oldMatch?.received_qty || 0), qty)
+    desiredItems.push({
+      old_item_id: oldMatch?.id || null,
+      purchase_order_id: po.id,
+      project_part_id: projectMatch.project_part.id,
+      part_type: projectMatch.project_part.part_type,
+      part_id: projectMatch.project_part.part_id,
+      part_number: projectMatch.master.part_number,
+      description: line.description || projectMatch.master.description || null,
+      quantity: qty,
+      received_qty: receivedQty,
+      unit_price: unitPrice,
+      discount_percent: discount,
+      total_amount: qty * unitPrice * (1 - discount / 100),
+      pdf_line_no: line.line_no,
+      pdf_item_code: line.item_code,
+    })
+  }
+
+  if (unresolved.length) {
+    return {
+      ok_to_apply: false,
+      po: { id: po.id, po_number: po.po_number, status: po.status, supplier: po.suppliers?.name, project: po.project },
+      parsed_pdf: { po_number: parsed.po_number, supplier_name: parsed.supplier_name, line_count: parsed.lines.length },
+      unresolved,
+      message: 'Correction blocked until every PDF line is mapped to an existing project BOM part.',
+    }
+  }
+
+  const extraItems = oldItems.filter((item: any) => !usedOldIds.has(item.id))
+  const receivedExtraItems = extraItems.filter((item: any) => Number(item.received_qty || 0) > 0)
+  if (receivedExtraItems.length && !allowDeleteReceivedLines) {
+    return {
+      ok_to_apply: false,
+      po: { id: po.id, po_number: po.po_number, status: po.status, supplier: po.suppliers?.name, project: po.project },
+      parsed_pdf: { po_number: parsed.po_number, supplier_name: parsed.supplier_name, line_count: parsed.lines.length },
+      extra_items: extraItems.map((item: any) => ({
+        id: item.id,
+        part_number: item.part_number,
+        quantity: item.quantity,
+        received_qty: item.received_qty || 0,
+        unit_price: item.unit_price,
+      })),
+      message: 'Correction would remove received PO lines. Re-run with allow_delete_received_lines=true if this is intentional.',
+    }
+  }
+
+  const newGrand = desiredItems.reduce((sum, item) => sum + item.total_amount, 0)
+  const inserts = desiredItems.filter((item) => !item.old_item_id).length
+  const updates = desiredItems.filter((item) => item.old_item_id).length
+
+  return {
+    ok_to_apply: true,
+    po: {
+      id: po.id,
+      po_number: po.po_number,
+      status: po.status,
+      supplier: po.suppliers?.name,
+      project: po.project,
+      old_total: po.grand_total || 0,
+      new_total: newGrand,
+      old_line_count: oldItems.length,
+      new_line_count: desiredItems.length,
+    },
+    parsed_pdf: {
+      po_number: parsed.po_number,
+      supplier_name: parsed.supplier_name,
+      po_date: parsed.po_date,
+      line_count: parsed.lines.length,
+    },
+    changes: {
+      update_lines: updates,
+      insert_lines: inserts,
+      delete_lines: extraItems.length,
+      delete_received_lines: receivedExtraItems.length,
+    },
+    delete_item_ids: extraItems.map((item: any) => item.id),
+    desired_items: desiredItems,
   }
 }
 
@@ -1161,6 +1374,42 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           partially_received: items.filter((i: any) => i.received > 0 && i.pending > 0).length,
           not_received: items.filter((i: any) => i.received === 0).length,
         },
+      }
+    },
+  },
+
+  {
+    name: 'preview_existing_po_pdf_correction',
+    kind: 'read',
+    description:
+      'Preview how an existing PO, including a Released PO, would be corrected to match its attached BEP PO PDF. This does not write. Use before apply_existing_po_pdf_correction.',
+    parameters: {
+      type: 'object',
+      required: ['po_id'],
+      properties: {
+        po_id: { type: 'number' },
+        allow_delete_received_lines: {
+          type: 'boolean',
+          default: false,
+          description: 'When false, preview blocks if correction would remove PO lines that already have received_qty.',
+        },
+      },
+    },
+    handler: async ({ po_id, allow_delete_received_lines = false }: any) => {
+      const plan = await buildExistingPoPdfCorrectionPlan(po_id, Boolean(allow_delete_received_lines))
+      return {
+        ...plan,
+        desired_items: (plan.desired_items || []).map((item: any) => ({
+          old_item_id: item.old_item_id,
+          project_part_id: item.project_part_id,
+          part_number: item.part_number,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          discount_percent: item.discount_percent,
+          total_amount: item.total_amount,
+          pdf_line_no: item.pdf_line_no,
+          pdf_item_code: item.pdf_item_code,
+        })),
       }
     },
   },
@@ -2167,6 +2416,108 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         created_date: new Date().toISOString(),
       }
       return purchaseOrdersApi.createPurchaseOrderWithItems(poData, poItems)
+    },
+  },
+  {
+    name: 'apply_existing_po_pdf_correction',
+    kind: 'write',
+    description:
+      'Correct an existing PO, including a Released PO, so its header and line items match the attached BEP PO PDF. Requires approval. It never changes PO status. It validates supplier/project mapping and blocks unresolved PDF lines. Use preview_existing_po_pdf_correction first.',
+    parameters: {
+      type: 'object',
+      required: ['po_id'],
+      properties: {
+        po_id: { type: 'number' },
+        allow_delete_received_lines: {
+          type: 'boolean',
+          default: false,
+          description: 'Set true only when user explicitly accepts removing old PO lines that already have received_qty.',
+        },
+        correct_po_number: {
+          type: 'boolean',
+          default: true,
+          description: 'Update purchase_orders.po_number from the PDF document number when detected.',
+        },
+        correct_po_date: {
+          type: 'boolean',
+          default: true,
+          description: 'Update purchase_orders.po_date from the PDF date when detected.',
+        },
+      },
+    },
+    summarize: (a) =>
+      `Correct existing PO #${a.po_id} from its attached PDF${a.allow_delete_received_lines ? ' (including received extra lines)' : ''}`,
+    handler: async (a: any) => {
+      assertInteger('po_id', a.po_id)
+      const plan = await buildExistingPoPdfCorrectionPlan(a.po_id, Boolean(a.allow_delete_received_lines))
+      if (!plan.ok_to_apply) {
+        throw new Error(plan.message || 'PO PDF correction is not safe to apply yet.')
+      }
+
+      for (const item of plan.desired_items || []) {
+        const row = {
+          purchase_order_id: a.po_id,
+          part_type: item.part_type,
+          part_id: item.part_id,
+          part_number: item.part_number,
+          description: item.description,
+          quantity: item.quantity,
+          received_qty: item.received_qty || 0,
+          unit_price: item.unit_price,
+          discount_percent: item.discount_percent || 0,
+          total_amount: item.total_amount,
+          project_part_id: item.project_part_id,
+        }
+
+        if (item.old_item_id) {
+          const { error } = await (supabase as any)
+            .from('purchase_order_items')
+            .update(row)
+            .eq('id', item.old_item_id)
+          if (error) throw error
+        } else {
+          const { error } = await (supabase as any)
+            .from('purchase_order_items')
+            .insert(row)
+          if (error) throw error
+        }
+      }
+
+      if ((plan.delete_item_ids || []).length) {
+        const { error } = await (supabase as any)
+          .from('purchase_order_items')
+          .delete()
+          .in('id', plan.delete_item_ids)
+        if (error) throw error
+      }
+
+      const headerPatch: any = {
+        updated_date: new Date().toISOString(),
+      }
+      if (a.correct_po_number !== false && plan.parsed_pdf?.po_number && /^PO\/.+\/\d+/i.test(plan.parsed_pdf.po_number)) {
+        headerPatch.po_number = plan.parsed_pdf.po_number
+      }
+      if (a.correct_po_date !== false && plan.parsed_pdf?.po_date) {
+        headerPatch.po_date = plan.parsed_pdf.po_date
+      }
+      if (Object.keys(headerPatch).length > 1) {
+        const { error } = await (supabase as any)
+          .from('purchase_orders')
+          .update(headerPatch)
+          .eq('id', a.po_id)
+        if (error) throw error
+      }
+
+      const totals = await purchaseOrdersApi.recalcPOTotals(a.po_id)
+      return {
+        corrected: true,
+        po_id: a.po_id,
+        po_number: headerPatch.po_number || plan.po.po_number,
+        status_unchanged: plan.po.status,
+        line_count: plan.desired_items.length,
+        changes: plan.changes,
+        totals,
+      }
     },
   },
   {

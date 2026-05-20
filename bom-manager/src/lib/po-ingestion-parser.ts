@@ -124,8 +124,15 @@ function valueAfterLabel(lines: string[], label: RegExp) {
 
 function detectPONumber(text: string, lines: string[], fileName: string) {
   const filenameMeta = metadataFromFilename(fileName)
+  const fullBepNumber = firstMatch(text, [
+    /\b(PO\/[A-Z0-9]+\/\d{2}[-/]\d{2}\/\d{3,})\b/i,
+  ])
+  if (fullBepNumber) return fullBepNumber
+
   const documentNo = valueAfterLabel(lines, /^document\s+no\b/i)
-  const fromDocumentNo = documentNo?.match(/\b(PO\/[A-Z0-9/_.-]+)/i)?.[1]
+  const fromDocumentNo =
+    documentNo?.match(/\b(PO\/[A-Z0-9]+\/\d{2}[-/]\d{2}\/\d{3,})\b/i)?.[1] ||
+    documentNo?.match(/\b(PO\/[A-Z0-9/_.-]+)/i)?.[1]
   if (fromDocumentNo) return fromDocumentNo
 
   const explicit = firstMatch(text, [
