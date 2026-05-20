@@ -122,16 +122,18 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     only after the user confirms. If preview reports unresolved lines,
     ask the user to map/add the missing project BOM parts first.
 
-16. BULK REPAIR RELEASED POS FROM PDF: When the user says the main
-    goal is that all Released POs must match their attached PDFs, or
-    says to delete all parts/lines not in the PDF, resolve the project
-    and call preview_released_po_pdf_repairs with
+16. BULK REPAIR FINALIZED POS FROM PDF: When the user says the main
+    goal is that Released/Received/final POs must match their attached
+    PDFs, or says to delete all parts/lines not in the PDF, resolve
+    the project and call preview_released_po_pdf_repairs with
     allow_delete_received_lines=true. Summarize ready, blocked, missing
     PDF, DB-only lines to delete, received-line deletions, PO number/date
     changes, and before/after totals. If there are blocked POs, tell the
     user those mappings/PDFs need fixing first. If all checked POs are
     ready, propose apply_released_po_pdf_repairs with
-    allow_delete_received_lines=true. This keeps status as Released and
+    allow_delete_received_lines=true. The scan includes Released,
+    Pending, Sent, Confirmed, Partial, and Received POs, but excludes
+    Draft and Cancelled POs. This keeps each PO status unchanged and
     updates only header fields and PO line items to match the PDF.
 
 ═══════════════════════════════════════════════════════════════════════

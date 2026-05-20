@@ -609,6 +609,8 @@ function summarizePoCorrectionPlan(plan: any) {
   }
 }
 
+const FINAL_PO_REPAIR_STATUSES = ['Released', 'Pending', 'Sent', 'Confirmed', 'Partial', 'Received']
+
 async function buildReleasedPoPdfRepairPreview(projectId: number, allowDeleteReceivedLines = true) {
   assertInteger('project_id', projectId)
   const { data: project } = await (supabase as any)
@@ -622,7 +624,7 @@ async function buildReleasedPoPdfRepairPreview(projectId: number, allowDeleteRec
     .from('purchase_orders')
     .select('id, po_number, status, supplier_id, bep_po_pdf_url, suppliers(name)')
     .eq('project_id', projectId)
-    .eq('status', 'Released')
+    .in('status', FINAL_PO_REPAIR_STATUSES)
     .order('po_date', { ascending: false })
     .limit(150)
   if (error) throw error
@@ -678,7 +680,8 @@ async function buildReleasedPoPdfRepairPreview(projectId: number, allowDeleteRec
 
   return {
     project,
-    scope: 'Released POs only',
+    scope: 'Finalized/active POs only: Released, Pending, Sent, Confirmed, Partial, Received. Draft and Cancelled are excluded.',
+    included_statuses: FINAL_PO_REPAIR_STATUSES,
     checked: (pos || []).length,
     ready_count: ready.length,
     blocked_count: blocked.length,
@@ -1592,7 +1595,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'preview_released_po_pdf_repairs',
     kind: 'read',
     description:
-      'Preview repair for every Released PO in one project that has an attached BEP PO PDF. This checks that each released PO will match its PDF and identifies DB-only lines to delete. This does not write.',
+      'Preview repair for every finalized/active PO in one project that has an attached BEP PO PDF. Includes Released, Pending, Sent, Confirmed, Partial, and Received POs; excludes Draft and Cancelled. Identifies DB-only lines to delete. This does not write.',
     parameters: {
       type: 'object',
       required: ['project_id'],
@@ -1601,7 +1604,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         allow_delete_received_lines: {
           type: 'boolean',
           default: true,
-          description: 'For this project-level released PO repair, default true because the user explicitly wants DB-only lines removed when they are not in the PDF.',
+          description: 'For this project-level PO repair, default true because the user explicitly wants DB-only lines removed when they are not in the PDF.',
         },
       },
     },
@@ -2718,7 +2721,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'apply_released_po_pdf_repairs',
     kind: 'write',
     description:
-      'Bulk-correct every Released PO in one project that has an attached BEP PO PDF. Deletes DB-only PO lines that are not in the PDF, updates/inserts PDF lines, fixes PO number/date, recalculates totals, and never changes PO status. Requires approval.',
+      'Bulk-correct every finalized/active PO in one project that has an attached BEP PO PDF. Includes Released, Pending, Sent, Confirmed, Partial, and Received POs; excludes Draft and Cancelled. Deletes DB-only PO lines that are not in the PDF, updates/inserts PDF lines, fixes PO number/date, recalculates totals, and never changes PO status. Requires approval.',
     parameters: {
       type: 'object',
       required: ['project_id'],
@@ -2742,15 +2745,15 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       },
     },
     summarize: (a) =>
-      `Repair all Released POs in project #${a.project_id} from attached PDFs; delete DB-only lines${a.allow_delete_received_lines ? ', including received extra lines' : ''}`,
+      `Repair finalized/active POs in project #${a.project_id} from attached PDFs; delete DB-only lines${a.allow_delete_received_lines ? ', including received extra lines' : ''}`,
     handler: async (a: any) => {
       assertInteger('project_id', a.project_id)
       const preview = await buildReleasedPoPdfRepairPreview(a.project_id, Boolean(a.allow_delete_received_lines))
       if (!preview.ready_count) {
-        throw new Error('No released POs are ready for PDF repair. Check missing PDFs and blocked rows first.')
+        throw new Error('No finalized/active POs are ready for PDF repair. Check missing PDFs and blocked rows first.')
       }
       if (preview.blocked_count) {
-        throw new Error(`${preview.blocked_count} released PO(s) are blocked. Fix unresolved PDF/project mappings before running bulk repair.`)
+        throw new Error(`${preview.blocked_count} finalized/active PO(s) are blocked. Fix unresolved PDF/project mappings before running bulk repair.`)
       }
 
       const applied = []
@@ -2766,7 +2769,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       return {
         repaired: applied.length,
         project: preview.project,
-        status_unchanged: 'Released',
+        status_unchanged: true,
         deleted_db_only_lines: preview.totals.delete_lines,
         deleted_received_lines: preview.totals.delete_received_lines,
         totals_before: preview.totals.old_total,
