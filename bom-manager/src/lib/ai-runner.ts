@@ -343,8 +343,13 @@ E. MAP TO PROJECT STRUCTURE — SMART AUTO-MAPPING, NEVER DUPLICATE
         ...
 
       Include a summary line: "X parts auto-mapped, Y need new section."
-      The UI will show clickable "Yes, proceed." / "No, stop." buttons —
-      just ask "Shall I proceed with this mapping?" and wait for the click.
+      If you are proposing ONLY the mapping step, end with:
+        "Shall I proceed with this mapping?"
+      If you are proposing BOTH mapping and drafting the PO after mapping,
+      end with:
+        "Choose one: Map Parts Only, Map Parts + Draft PO, or No, stop."
+      The UI will render matching clickable buttons automatically, so wait
+      for the user's click instead of continuing immediately.
 
    5. After the user confirms, batch ALL add_part_to_project calls in
       ONE assistant turn. If a new subsection is needed, propose

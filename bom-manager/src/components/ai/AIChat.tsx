@@ -482,10 +482,18 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
   const rawWantsProject = /which project|select.*project|target project|what project|choose.*project|add.*to.*project|project.*should i add|project.*list|project should i run|which project should i run/i.test(questionScope)
   const rawWantsCategory = /part.*(type|category)|which category|classify|which type|what type/i.test(questionScope)
   const rawWantsSection = /which section|which table|which subsection|target.*(section|table|subsection)|(section|table|subsection).*should|map.*to.*(section|table|subsection)/i.test(questionScope)
+  const wantsMapAndDraftChoice =
+    !rawWantsProject &&
+    !rawWantsCategory &&
+    !rawWantsSection &&
+    /shall i proceed with this mapping\??|shall i proceed/i.test(tail) &&
+    /next steps after mapping/i.test(fullMsg) &&
+    /(draft po|create.*po|draft.*po)/i.test(fullMsg) &&
+    /(map parts|add all .* parts|auto-mapped|mapping plan)/i.test(fullMsg)
 
   // Yes/No: only fire for action-confirmation phrases, never when the AI is
   // asking the user to choose a project/category/section from options.
-  const wantsYesNo = !rawWantsProject && !rawWantsCategory && !rawWantsSection && /shall i (proceed|continue|go ahead|start|draft|create|run|batch|propose|map|add|update)|should i (proceed|continue|go ahead|start|draft|create|run|batch|propose)|(proceed|continue|go ahead)\?|correct\?|ok\?|approve all|want me to proceed|like me to proceed/i.test(tail)
+  const wantsYesNo = !wantsMapAndDraftChoice && !rawWantsProject && !rawWantsCategory && !rawWantsSection && /shall i (proceed|continue|go ahead|start|draft|create|run|batch|propose|map|add|update)|should i (proceed|continue|go ahead|start|draft|create|run|batch|propose)|(proceed|continue|go ahead)\?|correct\?|ok\?|approve all|want me to proceed|like me to proceed/i.test(tail)
 
   const wantsProject  = !wantsYesNo && rawWantsProject
   const wantsCategory = !wantsYesNo && !wantsProject && rawWantsCategory
@@ -532,7 +540,19 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
   type Group = { label: string; color: string; children: React.ReactNode }
   let activeGroup: Group | null = null
 
-  if (wantsYesNo) {
+  if (wantsMapAndDraftChoice) {
+    activeGroup = {
+      label: 'Choose next step',
+      color: 'border-emerald-200 bg-emerald-50/60',
+      children: (
+        <div className="flex flex-wrap gap-2">
+          <QuickChip label="Map Parts Only" color="bg-emerald-500 border-emerald-600 text-white hover:bg-emerald-600 font-bold shadow-sm shadow-emerald-200" onClick={() => onReply('Map parts only. Do not draft the PO yet.')} />
+          <QuickChip label="Map Parts + Draft PO" color="bg-white border-navy-300 text-navy-800 hover:bg-navy-50" onClick={() => onReply('Map parts and then draft the PO from the same PDF.')} />
+          <QuickChip label="No, stop" color="bg-white border-red-300 text-red-600 hover:bg-red-50" onClick={() => onReply('No, stop.')} />
+        </div>
+      ),
+    }
+  } else if (wantsYesNo) {
     activeGroup = {
       label: 'Confirm action',
       color: 'border-emerald-200 bg-emerald-50/60',
