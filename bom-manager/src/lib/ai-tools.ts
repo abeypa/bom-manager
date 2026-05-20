@@ -590,6 +590,179 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
   }
 }
 
+function summarizePoCorrectionPlan(plan: any) {
+  return {
+    po_id: plan.po?.id,
+    po_number: plan.po?.po_number,
+    status: plan.po?.status,
+    supplier: plan.po?.supplier,
+    pdf_po_number: plan.parsed_pdf?.po_number,
+    old_line_count: plan.po?.old_line_count,
+    new_line_count: plan.po?.new_line_count ?? plan.parsed_pdf?.line_count,
+    old_total: plan.po?.old_total,
+    new_total: plan.po?.new_total,
+    ok_to_apply: Boolean(plan.ok_to_apply),
+    changes: plan.changes,
+    unresolved_count: plan.unresolved?.length || 0,
+    extra_item_count: plan.extra_items?.length || plan.changes?.delete_lines || 0,
+    message: plan.message,
+  }
+}
+
+async function buildReleasedPoPdfRepairPreview(projectId: number, allowDeleteReceivedLines = true) {
+  assertInteger('project_id', projectId)
+  const { data: project } = await (supabase as any)
+    .from('projects')
+    .select('id, project_number, project_name')
+    .eq('id', projectId)
+    .maybeSingle()
+  if (!project) throw new Error(`Project #${projectId} not found.`)
+
+  const { data: pos, error } = await (supabase as any)
+    .from('purchase_orders')
+    .select('id, po_number, status, supplier_id, bep_po_pdf_url, suppliers(name)')
+    .eq('project_id', projectId)
+    .eq('status', 'Released')
+    .order('po_date', { ascending: false })
+    .limit(150)
+  if (error) throw error
+
+  const missingPdf: any[] = []
+  const ready: any[] = []
+  const blocked: any[] = []
+
+  for (const po of pos || []) {
+    if (!po.bep_po_pdf_url) {
+      missingPdf.push({
+        po_id: po.id,
+        po_number: po.po_number,
+        status: po.status,
+        supplier: po.suppliers?.name,
+        issue: 'No BEP PO PDF attached.',
+      })
+      continue
+    }
+
+    try {
+      const plan = await buildExistingPoPdfCorrectionPlan(po.id, allowDeleteReceivedLines)
+      if (plan.ok_to_apply) ready.push(summarizePoCorrectionPlan(plan))
+      else blocked.push(summarizePoCorrectionPlan(plan))
+    } catch (err: any) {
+      blocked.push({
+        po_id: po.id,
+        po_number: po.po_number,
+        status: po.status,
+        supplier: po.suppliers?.name,
+        ok_to_apply: false,
+        message: err?.message || String(err),
+      })
+    }
+  }
+
+  const totals = ready.reduce((acc: any, row: any) => {
+    acc.update_lines += row.changes?.update_lines || 0
+    acc.insert_lines += row.changes?.insert_lines || 0
+    acc.delete_lines += row.changes?.delete_lines || 0
+    acc.delete_received_lines += row.changes?.delete_received_lines || 0
+    acc.old_total += Number(row.old_total || 0)
+    acc.new_total += Number(row.new_total || 0)
+    return acc
+  }, {
+    update_lines: 0,
+    insert_lines: 0,
+    delete_lines: 0,
+    delete_received_lines: 0,
+    old_total: 0,
+    new_total: 0,
+  })
+
+  return {
+    project,
+    scope: 'Released POs only',
+    checked: (pos || []).length,
+    ready_count: ready.length,
+    blocked_count: blocked.length,
+    missing_pdf_count: missingPdf.length,
+    totals,
+    ready,
+    blocked,
+    missing_pdf: missingPdf,
+  }
+}
+
+async function applyExistingPoPdfCorrection(a: any) {
+  assertInteger('po_id', a.po_id)
+  const plan = await buildExistingPoPdfCorrectionPlan(a.po_id, Boolean(a.allow_delete_received_lines))
+  if (!plan.ok_to_apply) {
+    throw new Error(plan.message || 'PO PDF correction is not safe to apply yet.')
+  }
+
+  for (const item of plan.desired_items || []) {
+    const row = {
+      purchase_order_id: a.po_id,
+      part_type: item.part_type,
+      part_id: item.part_id,
+      part_number: item.part_number,
+      description: item.description,
+      quantity: item.quantity,
+      received_qty: item.received_qty || 0,
+      unit_price: item.unit_price,
+      discount_percent: item.discount_percent || 0,
+      total_amount: item.total_amount,
+      project_part_id: item.project_part_id,
+    }
+
+    if (item.old_item_id) {
+      const { error } = await (supabase as any)
+        .from('purchase_order_items')
+        .update(row)
+        .eq('id', item.old_item_id)
+      if (error) throw error
+    } else {
+      const { error } = await (supabase as any)
+        .from('purchase_order_items')
+        .insert(row)
+      if (error) throw error
+    }
+  }
+
+  if ((plan.delete_item_ids || []).length) {
+    const { error } = await (supabase as any)
+      .from('purchase_order_items')
+      .delete()
+      .in('id', plan.delete_item_ids)
+    if (error) throw error
+  }
+
+  const headerPatch: any = {
+    updated_date: new Date().toISOString(),
+  }
+  if (a.correct_po_number !== false && plan.parsed_pdf?.po_number && /^PO\/.+\/\d+/i.test(plan.parsed_pdf.po_number)) {
+    headerPatch.po_number = plan.parsed_pdf.po_number
+  }
+  if (a.correct_po_date !== false && plan.parsed_pdf?.po_date) {
+    headerPatch.po_date = plan.parsed_pdf.po_date
+  }
+  if (Object.keys(headerPatch).length > 1) {
+    const { error } = await (supabase as any)
+      .from('purchase_orders')
+      .update(headerPatch)
+      .eq('id', a.po_id)
+    if (error) throw error
+  }
+
+  const totals = await purchaseOrdersApi.recalcPOTotals(a.po_id)
+  return {
+    corrected: true,
+    po_id: a.po_id,
+    po_number: headerPatch.po_number || plan.po.po_number,
+    status_unchanged: plan.po.status,
+    line_count: plan.desired_items.length,
+    changes: plan.changes,
+    totals,
+  }
+}
+
 async function getMasterPartForMerge(partType: string, partId: number) {
   assertInteger('part_id', partId)
   if (!part_type_enum.includes(partType)) throw new Error(`Unknown part_type: ${partType}`)
@@ -1415,6 +1588,27 @@ export const TOOL_REGISTRY: ToolSpec[] = [
   },
 
   // ── WRITE (require user approval) ───────────────────────────────────────
+  {
+    name: 'preview_released_po_pdf_repairs',
+    kind: 'read',
+    description:
+      'Preview repair for every Released PO in one project that has an attached BEP PO PDF. This checks that each released PO will match its PDF and identifies DB-only lines to delete. This does not write.',
+    parameters: {
+      type: 'object',
+      required: ['project_id'],
+      properties: {
+        project_id: { type: 'number' },
+        allow_delete_received_lines: {
+          type: 'boolean',
+          default: true,
+          description: 'For this project-level released PO repair, default true because the user explicitly wants DB-only lines removed when they are not in the PDF.',
+        },
+      },
+    },
+    handler: async ({ project_id, allow_delete_received_lines = true }: any) => {
+      return buildReleasedPoPdfRepairPreview(project_id, Boolean(allow_delete_received_lines))
+    },
+  },
   {
     name: 'create_supplier',
     kind: 'write',
@@ -2517,6 +2711,68 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         line_count: plan.desired_items.length,
         changes: plan.changes,
         totals,
+      }
+    },
+  },
+  {
+    name: 'apply_released_po_pdf_repairs',
+    kind: 'write',
+    description:
+      'Bulk-correct every Released PO in one project that has an attached BEP PO PDF. Deletes DB-only PO lines that are not in the PDF, updates/inserts PDF lines, fixes PO number/date, recalculates totals, and never changes PO status. Requires approval.',
+    parameters: {
+      type: 'object',
+      required: ['project_id'],
+      properties: {
+        project_id: { type: 'number' },
+        allow_delete_received_lines: {
+          type: 'boolean',
+          default: true,
+          description: 'Set true only when user explicitly wants DB-only lines removed even if they already have received_qty.',
+        },
+        correct_po_number: {
+          type: 'boolean',
+          default: true,
+          description: 'Update each PO number from the attached PDF document number when detected.',
+        },
+        correct_po_date: {
+          type: 'boolean',
+          default: true,
+          description: 'Update each PO date from the attached PDF date when detected.',
+        },
+      },
+    },
+    summarize: (a) =>
+      `Repair all Released POs in project #${a.project_id} from attached PDFs; delete DB-only lines${a.allow_delete_received_lines ? ', including received extra lines' : ''}`,
+    handler: async (a: any) => {
+      assertInteger('project_id', a.project_id)
+      const preview = await buildReleasedPoPdfRepairPreview(a.project_id, Boolean(a.allow_delete_received_lines))
+      if (!preview.ready_count) {
+        throw new Error('No released POs are ready for PDF repair. Check missing PDFs and blocked rows first.')
+      }
+      if (preview.blocked_count) {
+        throw new Error(`${preview.blocked_count} released PO(s) are blocked. Fix unresolved PDF/project mappings before running bulk repair.`)
+      }
+
+      const applied = []
+      for (const row of preview.ready) {
+        applied.push(await applyExistingPoPdfCorrection({
+          po_id: row.po_id,
+          allow_delete_received_lines: a.allow_delete_received_lines !== false,
+          correct_po_number: a.correct_po_number !== false,
+          correct_po_date: a.correct_po_date !== false,
+        }))
+      }
+
+      return {
+        repaired: applied.length,
+        project: preview.project,
+        status_unchanged: 'Released',
+        deleted_db_only_lines: preview.totals.delete_lines,
+        deleted_received_lines: preview.totals.delete_received_lines,
+        totals_before: preview.totals.old_total,
+        totals_after: preview.totals.new_total,
+        applied,
+        skipped_missing_pdf: preview.missing_pdf,
       }
     },
   },
