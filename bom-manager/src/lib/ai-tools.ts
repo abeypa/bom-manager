@@ -491,6 +491,10 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
         line_no: line.line_no,
         item_code: line.item_code,
         description: line.description,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        discount_percent: line.discount_percent,
+        total_amount: line.total_amount,
         reason: 'No matching existing PO line or project BOM part was found.',
       })
       continue
@@ -505,6 +509,10 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
         line_no: line.line_no,
         item_code: line.item_code,
         description: line.description,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        discount_percent: line.discount_percent,
+        total_amount: line.total_amount,
         reason: `Invalid quantity, price, or discount parsed from PDF: qty=${line.quantity}, unit=${line.unit_price}, disc=${line.discount_percent}.`,
       })
       continue
@@ -514,6 +522,10 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
         line_no: line.line_no,
         item_code: line.item_code,
         description: line.description,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        discount_percent: line.discount_percent,
+        total_amount: line.total_amount,
         reason: `Invalid printed line amount parsed from PDF: amount=${line.total_amount}.`,
       })
       continue
@@ -643,6 +655,10 @@ function summarizePoCorrectionPlan(plan: any) {
       line_no: line.line_no,
       item_code: line.item_code,
       description: line.description,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      discount_percent: line.discount_percent,
+      total_amount: line.total_amount,
       reason: line.reason,
     })),
     extra_item_count: plan.extra_items?.length || plan.changes?.delete_lines || 0,

@@ -150,6 +150,27 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     blocked_count == 0, propose one apply_released_po_pdf_repairs write
     action and stop.
 
+17. FIX A BLOCKED PO REPAIR LINE: When the user says "fix this" after
+    a blocked bulk PO repair preview, and the blocker is an unresolved
+    PDF item code, use the unresolved line details from the preview.
+    Do NOT restart broad investigation. The only allowed read sequence is:
+      a) find_master_part_by_erp_id for the unresolved item_code.
+      b) If found, get_project_structure for the target project so you
+         can choose a subsection.
+      c) If NOT found, find_supplier_by_name for the PO supplier only if
+         supplier_id is needed to create the missing master part.
+    Do NOT call search_image_url, get_po_details, audit_project_po_pdfs,
+    get_project_details, preview_existing_po_pdf_correction, or
+    search_master_parts in this blocker-fix workflow. If the master part
+    exists, propose one add_part_to_project using the PDF quantity,
+    unit_price, discount, and the best matching subsection. If the master
+    part is missing, propose one create_master_part with the ERP item
+    code, description, supplier, price, discount, and electrical_bought_out
+    when the description is an electrical/PLC/adapter module; then stop.
+    After the user approves master creation, map that created part to the
+    project in the next step. Do not rerun the PO repair preview until
+    the missing BOM mapping has been approved.
+
 ═══════════════════════════════════════════════════════════════════════
 INTENT DISPATCH — CHOOSE THE RIGHT WORKFLOW BEFORE DOING ANYTHING
 ═══════════════════════════════════════════════════════════════════════
