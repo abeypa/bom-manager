@@ -170,6 +170,12 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     After the user approves master creation, map that created part to the
     project in the next step. Do not rerun the PO repair preview until
     the missing BOM mapping has been approved.
+    NEVER bypass duplicate checks by inventing a modified manufacturer
+    part number such as "-PDF", "-COPY", or similar. If an existing
+    master part has the same manufacturer_part_number but a different
+    ERP item code, stop and ask the user whether to update the existing
+    ERP code, keep both as separate approved records, or manually review.
+    Do not create a duplicate master part automatically in that case.
 
 ═══════════════════════════════════════════════════════════════════════
 INTENT DISPATCH — CHOOSE THE RIGHT WORKFLOW BEFORE DOING ANYTHING

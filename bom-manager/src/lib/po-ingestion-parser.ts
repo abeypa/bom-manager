@@ -113,7 +113,8 @@ function reconcileLineAgainstAmount(line: ParsedPOLine): ParsedPOLine {
   // PDF text extraction sometimes shifts the DISC amount into QTY. If the
   // line amount implies a clean quantity, prefer the PDF arithmetic.
   const rounded = Math.round(expectedQty)
-  const correctedQty = Math.abs(expectedQty - rounded) < 0.01 ? rounded : Number(expectedQty.toFixed(3))
+  if (Math.abs(expectedQty - rounded) >= 0.01) return line
+  const correctedQty = rounded
   if (Math.abs(correctedQty - qty) < 0.01) return line
 
   return {

@@ -158,6 +158,12 @@ function normalizePartKey(value: any) {
   return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 }
 
+function normalizeManufacturerPartKey(value: any) {
+  return normalizePartKey(
+    String(value || '').replace(/\b(?:PDF|COPY|DUPLICATE|NEW)\b/gi, ''),
+  )
+}
+
 function normalizeDescriptionKey(value: any) {
   return String(value || '')
     .toUpperCase()
@@ -1772,6 +1778,10 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       const erp = String(a.beperp_part_no).trim()
       const part_number = `${prefix}-${erp}`
       const mfgPart = a.manufacturer_part_number ? String(a.manufacturer_part_number).trim() : null
+      const normalizedMfgPart = normalizeManufacturerPartKey(mfgPart)
+      if (mfgPart && /(?:^|[-_\s])(?:PDF|COPY|DUPLICATE|NEW)(?:$|[-_\s])/i.test(mfgPart)) {
+        throw new Error('manufacturer_part_number appears modified to bypass duplicate checks. Use the real manufacturer part number or leave it blank.')
+      }
       // Scan every part_type table for a matching record
       for (const pt of part_type_enum) {
         const orClauses = [
@@ -1799,6 +1809,21 @@ export const TOOL_REGISTRY: ToolSpec[] = [
             `instead. If the price is unchanged, skip this part.`,
           )
         }
+        if (normalizedMfgPart) {
+          const { data: fuzzyDup } = await (supabase as any)
+            .from(pt)
+            .select('id, part_number, beperp_part_no, manufacturer_part_number, base_price, discount_percent, currency')
+            .not('manufacturer_part_number', 'is', null)
+          const found = (fuzzyDup || []).find((row: any) =>
+            normalizeManufacturerPartKey(row.manufacturer_part_number) === normalizedMfgPart
+          )
+          if (found) {
+            throw new Error(
+              `Duplicate master part: manufacturer part "${mfgPart}" matches existing "${found.manufacturer_part_number}" ` +
+              `in table "${pt}" (id ${found.id}, part_number ${found.part_number}). Do NOT create a duplicate with a modified manufacturer number.`,
+            )
+          }
+        }
       }
     },
     handler: async (a: any) => {
@@ -1812,6 +1837,10 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       // The same physical component must never exist twice in part master,
       // regardless of which category an earlier record was filed under.
       const mfgPart = a.manufacturer_part_number || null
+      const normalizedMfgPart = normalizeManufacturerPartKey(mfgPart)
+      if (mfgPart && /(?:^|[-_\s])(?:PDF|COPY|DUPLICATE|NEW)(?:$|[-_\s])/i.test(String(mfgPart))) {
+        throw new Error('manufacturer_part_number appears modified to bypass duplicate checks. Use the real manufacturer part number or leave it blank.')
+      }
       for (const pt of part_type_enum) {
         const orClauses = [
           `part_number.eq.${part_number}`,
@@ -1836,6 +1865,21 @@ export const TOOL_REGISTRY: ToolSpec[] = [
             `If the price changed, use update_master_part_price on that record. ` +
             `If the existing record is filed under the wrong category, ask the user before doing anything else.`,
           )
+        }
+        if (normalizedMfgPart) {
+          const { data: fuzzyDup } = await (supabase as any)
+            .from(pt)
+            .select('id, part_number, manufacturer_part_number')
+            .not('manufacturer_part_number', 'is', null)
+          const found = (fuzzyDup || []).find((row: any) =>
+            normalizeManufacturerPartKey(row.manufacturer_part_number) === normalizedMfgPart
+          )
+          if (found) {
+            throw new Error(
+              `Refusing to create duplicate master part. Manufacturer part "${mfgPart}" matches existing ` +
+              `"${found.manufacturer_part_number}" in table "${pt}" (id ${found.id}, part_number ${found.part_number}).`,
+            )
+          }
         }
       }
 
