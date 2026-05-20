@@ -499,12 +499,22 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
     const qty = Number(line.quantity || 0)
     const unitPrice = Number(line.unit_price || 0)
     const discount = Number(line.discount_percent || 0)
+    const printedLineAmount = Number(line.total_amount || 0)
     if (qty <= 0 || unitPrice < 0 || discount < 0 || discount > 100) {
       unresolved.push({
         line_no: line.line_no,
         item_code: line.item_code,
         description: line.description,
         reason: `Invalid quantity, price, or discount parsed from PDF: qty=${line.quantity}, unit=${line.unit_price}, disc=${line.discount_percent}.`,
+      })
+      continue
+    }
+    if (printedLineAmount <= 0) {
+      unresolved.push({
+        line_no: line.line_no,
+        item_code: line.item_code,
+        description: line.description,
+        reason: `Invalid printed line amount parsed from PDF: amount=${line.total_amount}.`,
       })
       continue
     }
@@ -522,7 +532,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
       received_qty: receivedQty,
       unit_price: unitPrice,
       discount_percent: discount,
-      total_amount: qty * unitPrice * (1 - discount / 100),
+      total_amount: printedLineAmount,
       pdf_line_no: line.line_no,
       pdf_item_code: line.item_code,
     })
