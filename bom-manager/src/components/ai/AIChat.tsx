@@ -486,9 +486,16 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
     !rawWantsProject &&
     !rawWantsCategory &&
     !rawWantsSection &&
-    /shall i proceed with this mapping\??|shall i proceed/i.test(tail) &&
-    /next steps after mapping/i.test(fullMsg) &&
-    /(draft po|create.*po|draft.*po)/i.test(fullMsg) &&
+    (
+      /shall i proceed with this mapping\??|shall i proceed/i.test(tail) ||
+      /choose one[:.]?/i.test(questionScope) ||
+      /map parts only/i.test(fullMsg)
+    ) &&
+    (
+      /next steps after mapping/i.test(fullMsg) ||
+      /map parts only/i.test(fullMsg)
+    ) &&
+    /(draft po|create.*po|draft.*po|map parts \+ draft po)/i.test(fullMsg) &&
     /(map parts|add all .* parts|auto-mapped|mapping plan)/i.test(fullMsg)
 
   // Yes/No: only fire for action-confirmation phrases, never when the AI is
