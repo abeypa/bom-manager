@@ -410,7 +410,7 @@ async function buildBomHealthAudit(projectId?: number) {
   }
 }
 
-async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceivedLines = false) {
+async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceivedLines = false, skipUnresolvedLines = false) {
   assertInteger('po_id', poId)
   const { data: po, error: poError } = await (supabase as any)
     .from('purchase_orders')
@@ -556,7 +556,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
     })
   }
 
-  if (unresolved.length) {
+  if (unresolved.length && !skipUnresolvedLines) {
     return {
       ok_to_apply: false,
       po: { id: po.id, po_number: po.po_number, status: po.status, supplier: po.suppliers?.name, project: po.project },
@@ -586,7 +586,13 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
 
   const newGrand = desiredItems.reduce((sum, item) => sum + item.total_amount, 0)
   const pdfBasic = Number(parsed.basic_amount || 0)
-  if (pdfBasic > 0 && Math.abs(newGrand - pdfBasic) > Math.max(5, pdfBasic * 0.02)) {
+  const dbGrandTotal = Number(po.grand_total || 0)
+  // Accept if: PDF basic matches newGrand, OR DB grand_total matches newGrand (handles DISC-column parser misreads)
+  const amountOk =
+    pdfBasic <= 0 ||
+    Math.abs(newGrand - pdfBasic) <= Math.max(5, pdfBasic * 0.02) ||
+    (dbGrandTotal > 0 && Math.abs(newGrand - dbGrandTotal) <= Math.max(5, dbGrandTotal * 0.02))
+  if (!amountOk) {
     return {
       ok_to_apply: false,
       po: {
@@ -607,7 +613,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
         line_count: parsed.lines.length,
         basic_amount: parsed.basic_amount,
       },
-      message: `Correction blocked: parsed line total ${newGrand.toFixed(2)} does not match PDF Basic Amount ${pdfBasic.toFixed(2)}.`,
+      message: `Correction blocked: parsed line total ${newGrand.toFixed(2)} does not match PDF Basic Amount ${pdfBasic.toFixed(2)} or DB total ${dbGrandTotal.toFixed(2)}.`,
     }
   }
   const inserts = desiredItems.filter((item) => !item.old_item_id).length
@@ -681,7 +687,7 @@ function summarizePoCorrectionPlan(plan: any) {
 
 const FINAL_PO_REPAIR_STATUSES = ['Released', 'Pending', 'Sent', 'Confirmed', 'Partial', 'Received']
 
-async function buildReleasedPoPdfRepairPreview(projectId: number, allowDeleteReceivedLines = true) {
+async function buildReleasedPoPdfRepairPreview(projectId: number, allowDeleteReceivedLines = true, skipUnresolvedLines = false) {
   assertInteger('project_id', projectId)
   const { data: project } = await (supabase as any)
     .from('projects')
@@ -716,7 +722,7 @@ async function buildReleasedPoPdfRepairPreview(projectId: number, allowDeleteRec
     }
 
     try {
-      const plan = await buildExistingPoPdfCorrectionPlan(po.id, allowDeleteReceivedLines)
+      const plan = await buildExistingPoPdfCorrectionPlan(po.id, allowDeleteReceivedLines, skipUnresolvedLines)
       if (plan.ok_to_apply) ready.push(summarizePoCorrectionPlan(plan))
       else blocked.push(summarizePoCorrectionPlan(plan))
     } catch (err: any) {
@@ -1641,8 +1647,8 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         },
       },
     },
-    handler: async ({ po_id, allow_delete_received_lines = false }: any) => {
-      const plan = await buildExistingPoPdfCorrectionPlan(po_id, Boolean(allow_delete_received_lines))
+    handler: async ({ po_id, allow_delete_received_lines = false, skip_unresolved_lines = false }: any) => {
+      const plan = await buildExistingPoPdfCorrectionPlan(po_id, Boolean(allow_delete_received_lines), Boolean(skip_unresolved_lines))
       return {
         ...plan,
         desired_items: (plan.desired_items || []).map((item: any) => ({
@@ -1665,7 +1671,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'preview_released_po_pdf_repairs',
     kind: 'read',
     description:
-      'Preview repair for every finalized/active PO in one project that has an attached BEP PO PDF. Includes Released, Pending, Sent, Confirmed, Partial, and Received POs; excludes Draft and Cancelled. Identifies DB-only lines to delete. This does not write. This result is complete for the bulk repair workflow: after calling it, summarize and either propose apply_released_po_pdf_repairs when all checked POs are ready, or stop if any PO is blocked/missing PDF.',
+      'Preview repair for every finalized/active PO in one project that has an attached BEP PO PDF. Includes Released, Pending, Sent, Confirmed, Partial, and Received POs; excludes Draft and Cancelled. Identifies DB-only lines to delete. This does not write. Use skip_unresolved_lines=true to skip PDF lines that cannot be mapped to any project BOM part (e.g. misc charges like Packing & Forwarding) instead of blocking the whole PO.',
     parameters: {
       type: 'object',
       required: ['project_id'],
@@ -1676,10 +1682,15 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           default: true,
           description: 'For this project-level PO repair, default true because the user explicitly wants DB-only lines removed when they are not in the PDF.',
         },
+        skip_unresolved_lines: {
+          type: 'boolean',
+          default: false,
+          description: 'When true, PDF lines with no matching project BOM part are silently skipped instead of blocking the PO. Use when PDFs contain misc charges (e.g. Packing & Forwarding) that are not tracked in the BOM.',
+        },
       },
     },
-    handler: async ({ project_id, allow_delete_received_lines = true }: any) => {
-      return buildReleasedPoPdfRepairPreview(project_id, Boolean(allow_delete_received_lines))
+    handler: async ({ project_id, allow_delete_received_lines = true, skip_unresolved_lines = false }: any) => {
+      return buildReleasedPoPdfRepairPreview(project_id, Boolean(allow_delete_received_lines), Boolean(skip_unresolved_lines))
     },
   },
   {
@@ -2829,7 +2840,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'apply_released_po_pdf_repairs',
     kind: 'write',
     description:
-      'Bulk-correct every finalized/active PO in one project that has an attached BEP PO PDF. Includes Released, Pending, Sent, Confirmed, Partial, and Received POs; excludes Draft and Cancelled. Deletes DB-only PO lines that are not in the PDF, updates/inserts PDF lines, fixes PO number/date, recalculates totals, and never changes PO status. Requires approval.',
+      'Bulk-correct every finalized/active PO in one project that has an attached BEP PO PDF. Applies repairs to all ready POs and skips blocked ones (reports them). Use skip_unresolved_lines=true to skip PDF lines that cannot be mapped to any project BOM part (e.g. misc charges like Packing & Forwarding) instead of blocking. Requires approval.',
     parameters: {
       type: 'object',
       required: ['project_id'],
@@ -2850,18 +2861,20 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           default: true,
           description: 'Update each PO date from the attached PDF date when detected.',
         },
+        skip_unresolved_lines: {
+          type: 'boolean',
+          default: false,
+          description: 'When true, PDF lines with no matching project BOM part are silently skipped instead of blocking the PO. Use when PDFs contain misc charges (e.g. Packing & Forwarding) not tracked in the BOM.',
+        },
       },
     },
     summarize: (a) =>
-      `Repair finalized/active POs in project #${a.project_id} from attached PDFs; delete DB-only lines${a.allow_delete_received_lines ? ', including received extra lines' : ''}`,
+      `Repair finalized/active POs in project #${a.project_id} from attached PDFs; skip blocked POs${a.skip_unresolved_lines ? '; skip unresolved PDF lines' : ''}`,
     handler: async (a: any) => {
       assertInteger('project_id', a.project_id)
-      const preview = await buildReleasedPoPdfRepairPreview(a.project_id, Boolean(a.allow_delete_received_lines))
+      const preview = await buildReleasedPoPdfRepairPreview(a.project_id, Boolean(a.allow_delete_received_lines), Boolean(a.skip_unresolved_lines))
       if (!preview.ready_count) {
         throw new Error('No finalized/active POs are ready for PDF repair. Check missing PDFs and blocked rows first.')
-      }
-      if (preview.blocked_count) {
-        throw new Error(`${preview.blocked_count} finalized/active PO(s) are blocked. Fix unresolved PDF/project mappings before running bulk repair.`)
       }
 
       const applied = []
@@ -2871,11 +2884,14 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           allow_delete_received_lines: a.allow_delete_received_lines !== false,
           correct_po_number: a.correct_po_number !== false,
           correct_po_date: a.correct_po_date !== false,
+          skip_unresolved_lines: Boolean(a.skip_unresolved_lines),
         }))
       }
 
       return {
         repaired: applied.length,
+        skipped_blocked: preview.blocked_count,
+        blocked_pos: preview.blocked.map((b: any) => ({ po_number: b.po_number, reason: b.message })),
         project: preview.project,
         status_unchanged: true,
         deleted_db_only_lines: preview.totals.delete_lines,
