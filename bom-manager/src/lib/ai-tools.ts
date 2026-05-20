@@ -1456,7 +1456,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'audit_project_po_pdfs',
     kind: 'read',
     description:
-      'Run a read-only PO/PDF match audit for purchase orders in one project. Use after the project is selected. Compares attached BEP PO PDFs against stored PO number, supplier, line count, item codes, quantities, unit prices, discounts, and total value.',
+      'Run a read-only PO/PDF match audit for purchase orders in one project. Use after the project is selected. Compares attached BEP PO PDFs against stored PO number, supplier, line count, item codes, quantities, unit prices, discounts, and total value. Include po_status in reports for matched and mismatched POs.',
     parameters: {
       type: 'object',
       required: ['project_id'],

@@ -157,6 +157,19 @@ function pickLinesMatchingBasicAmount(lines: ParsedPOLine[], basicAmount: number
   return lines.filter((_, index) => Boolean(bestMask & (1 << index)))
 }
 
+function chooseBestParsedLines(candidates: ParsedPOLine[][], basicAmount: number | null) {
+  const nonEmpty = candidates.filter((candidate) => candidate.length > 0)
+  if (!nonEmpty.length) return []
+  if (!basicAmount) return nonEmpty[0]
+
+  return nonEmpty
+    .map((candidate) => ({
+      lines: candidate,
+      diff: Math.abs(lineAmountSum(candidate) - basicAmount),
+    }))
+    .sort((a, b) => a.diff - b.diff || b.lines.length - a.lines.length)[0].lines
+}
+
 function parseDate(value: string | undefined | null): string | null {
   if (!value) return null
   const raw = value.trim()
@@ -541,10 +554,11 @@ export function parsePurchaseOrderText(args: {
 
   const parsedBasicAmount = parseNumber(basicRaw)
   const visualLines = parseBepVisualTable(lines)
-  const columnLines = visualLines.length > 0 ? visualLines : parseBepColumnTable(lines)
-  const rawParsedLines = columnLines.length > 0 ? columnLines : lines
+  const columnLines = parseBepColumnTable(lines)
+  const genericLines = lines
     .map((line, i) => parseLine(line, i))
     .filter((line): line is ParsedPOLine => Boolean(line))
+  const rawParsedLines = chooseBestParsedLines([visualLines, columnLines, genericLines], parsedBasicAmount)
   const parsedLines = pickLinesMatchingBasicAmount(rawParsedLines, parsedBasicAmount)
 
   if (!poNumber) warnings.push('PO number was not detected.')

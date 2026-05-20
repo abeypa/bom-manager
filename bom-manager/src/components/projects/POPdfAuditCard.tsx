@@ -130,8 +130,11 @@ export default function POPdfAuditCard({ projectId, projectPOs }: POPdfAuditCard
                   )}
                   <div>
                     <div className="font-black text-sm text-gray-900 font-mono">{result.po_number}</div>
-                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                      DB {result.db_line_count} lines / PDF {result.pdf_line_count} lines
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                      <span>DB {result.db_line_count} lines / PDF {result.pdf_line_count} lines</span>
+                      <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-gray-500">
+                        {result.po_status}
+                      </span>
                     </div>
                   </div>
                 </div>

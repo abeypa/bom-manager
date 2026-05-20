@@ -14,6 +14,7 @@ export interface POPdfAuditIssue {
 export interface POPdfAuditResult {
   po_id: number
   po_number: string
+  po_status: string
   status: POPdfAuditStatus
   supplier_name: string
   pdf_po_number: string | null
@@ -87,6 +88,7 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
     return {
       po_id: po.id,
       po_number: poNumber,
+      po_status: po.status || 'Unknown',
       status: 'missing_pdf',
       supplier_name: supplierName,
       pdf_po_number: null,
@@ -214,6 +216,7 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
     return {
       po_id: po.id,
       po_number: poNumber,
+      po_status: po.status || 'Unknown',
       status: issues.some((i) => i.severity === 'error') ? 'warning' : issues.length ? 'warning' : 'match',
       supplier_name: supplierName,
       pdf_po_number: parsed.po_number,
@@ -227,6 +230,7 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
     return {
       po_id: po.id,
       po_number: poNumber,
+      po_status: po.status || 'Unknown',
       status: 'error',
       supplier_name: supplierName,
       pdf_po_number: null,
