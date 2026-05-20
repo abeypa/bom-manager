@@ -466,26 +466,52 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
   // end with a trailing word like "below:" that isn't the real question.
   const nonEmptyLines = fullContent.trim().split('\n').map(l => l.trim()).filter(Boolean)
   const tail = nonEmptyLines.slice(-3).join(' ').toLowerCase()
+  const questionLines = nonEmptyLines.filter(line =>
+    /\?/.test(line) ||
+    /\b(which|what|select|choose|please advise|confirm)\b/i.test(line)
+  )
+  const questionScope = (questionLines.length ? questionLines : nonEmptyLines.slice(-3)).join(' ').toLowerCase()
+  const availableProjectsStart = nonEmptyLines.findIndex(line => /available projects/i.test(line))
+  const listedProjectBlock = availableProjectsStart >= 0 ? nonEmptyLines.slice(availableProjectsStart + 1) : []
+  const listedProjectBlockEnd = listedProjectBlock.findIndex(line => !/^\s*[-*]\s+/.test(line))
+  const listedProjectIds = listedProjectBlock
+    .slice(0, listedProjectBlockEnd >= 0 ? listedProjectBlockEnd : undefined)
+    .flatMap(line => Array.from(line.matchAll(/\(id\s*:\s*(\d+)/gi)).map(match => Number(match[1])))
+    .filter(Number.isFinite)
 
-  // Yes/No: only fire for action-confirmation phrases, NOT "should I add/map/place"
-  // which is the AI asking the user to *choose*, not asking for approval.
-  const wantsYesNo = /shall i (proceed|continue|go ahead|start|draft|create|run|batch|propose|map|add|update)|should i (proceed|continue|go ahead|start|draft|create|run|batch|propose)|(proceed|continue|go ahead)\?|correct\?|ok\?|approve all|want me to proceed|like me to proceed/i.test(tail)
+  const rawWantsProject = /which project|select.*project|target project|what project|choose.*project|add.*to.*project|project.*should i add|project.*list|project should i run|which project should i run/i.test(questionScope)
+  const rawWantsCategory = /part.*(type|category)|which category|classify|which type|what type/i.test(questionScope)
+  const rawWantsSection = /which section|which table|which subsection|target.*(section|table|subsection)|(section|table|subsection).*should|map.*to.*(section|table|subsection)/i.test(questionScope)
 
-  const wantsProject  = !wantsYesNo && /which project|select.*project|target project|what project|choose.*project|add.*to.*project|project.*should i add|project.*list/i.test(tail)
-  const wantsCategory = !wantsYesNo && !wantsProject && /part.*(type|category)|which category|classify|which type|what type/i.test(tail)
-  const wantsSection  = !wantsYesNo && !wantsProject && !wantsCategory && /which section|which table|which subsection|target.*section|section.*should|map.*to/i.test(tail)
+  // Yes/No: only fire for action-confirmation phrases, never when the AI is
+  // asking the user to choose a project/category/section from options.
+  const wantsYesNo = !rawWantsProject && !rawWantsCategory && !rawWantsSection && /shall i (proceed|continue|go ahead|start|draft|create|run|batch|propose|map|add|update)|should i (proceed|continue|go ahead|start|draft|create|run|batch|propose)|(proceed|continue|go ahead)\?|correct\?|ok\?|approve all|want me to proceed|like me to proceed/i.test(tail)
+
+  const wantsProject  = !wantsYesNo && rawWantsProject
+  const wantsCategory = !wantsYesNo && !wantsProject && rawWantsCategory
+  const wantsSection  = !wantsYesNo && !wantsProject && !wantsCategory && rawWantsSection
 
   useEffect(() => {
     if (wantsProject) {
-      ;(supabase as any)
+      let q = (supabase as any)
         .from('projects')
         .select('id, project_name, project_number, status')
         .not('status', 'eq', 'cancelled')
         .order('project_number', { ascending: false })
         .limit(10)
-        .then(({ data }: any) => setProjects(data || []))
+      const projectIds = Array.from(new Set(listedProjectIds))
+      if (projectIds.length) q = q.in('id', projectIds)
+      q.then(({ data }: any) => {
+        const rows = data || []
+        setProjects(projectIds.length
+          ? [...rows].sort((a: any, b: any) => projectIds.indexOf(a.id) - projectIds.indexOf(b.id))
+          : rows
+        )
+      })
+    } else {
+      setProjects([])
     }
-  }, [wantsProject])
+  }, [wantsProject, fullContent])
 
   useEffect(() => {
     if (wantsSection) {
@@ -497,6 +523,8 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
         .order('sort_order', { ascending: true })
         .limit(20)
       ;(projectId ? q.eq('project_id', projectId) : q).then(({ data }: any) => setSections(data || []))
+    } else {
+      setSections([])
     }
   }, [wantsSection, fullMsg])
 
