@@ -639,7 +639,20 @@ function summarizePoCorrectionPlan(plan: any) {
     ok_to_apply: Boolean(plan.ok_to_apply),
     changes: plan.changes,
     unresolved_count: plan.unresolved?.length || 0,
+    unresolved: (plan.unresolved || []).slice(0, 10).map((line: any) => ({
+      line_no: line.line_no,
+      item_code: line.item_code,
+      description: line.description,
+      reason: line.reason,
+    })),
     extra_item_count: plan.extra_items?.length || plan.changes?.delete_lines || 0,
+    extra_items: (plan.extra_items || []).slice(0, 10).map((item: any) => ({
+      id: item.id,
+      part_number: item.part_number,
+      quantity: item.quantity,
+      received_qty: item.received_qty || 0,
+      unit_price: item.unit_price,
+    })),
     message: plan.message,
   }
 }
