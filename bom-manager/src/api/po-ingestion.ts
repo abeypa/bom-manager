@@ -1,5 +1,10 @@
 import { supabase } from '@/lib/supabase'
 import type { ParsedPODocument } from '@/lib/po-ingestion-parser'
+import {
+  findExistingProjectPartInProject,
+  isProjectPartDuplicateExemptMaster,
+  MASTER_PART_INTERLOCK_FIELDS,
+} from '@/utils/projectPartInterlock'
 
 const PREFIX_BY_PART_TYPE: Record<string, string> = {
   electrical_bought_out: 'EBO',
@@ -227,6 +232,35 @@ export const poIngestionApi = {
           if (updateError) throw updateError
           projectRowsUpdated += 1
         } else {
+          let projectWideExisting: any = null
+
+          if (!isProjectPartDuplicateExemptMaster(part)) {
+            projectWideExisting = await findExistingProjectPartInProject(
+              supabase as any,
+              projectId,
+              category,
+              part.id,
+            )
+          }
+
+          if (projectWideExisting?.id) {
+            const nextQty = Number(projectWideExisting.quantity || 0) + Number(line.quantity || 0)
+            const { error: updateError } = await (supabase as any)
+              .from('project_parts')
+              .update({
+                quantity: nextQty,
+                unit_price: line.unit_price || 0,
+                currency: doc.currency || line.currency || 'INR',
+                discount_percent: line.discount_percent || 0,
+                updated_date: new Date().toISOString(),
+                notes: doc.po_number
+                  ? `Updated from PO ingestion ${doc.po_number}`
+                  : 'Updated from PO ingestion',
+              })
+              .eq('id', projectWideExisting.id)
+            if (updateError) throw updateError
+            projectRowsUpdated += 1
+          } else {
           const { error: projectPartError } = await (supabase as any)
             .from('project_parts')
             .insert([{
@@ -241,6 +275,7 @@ export const poIngestionApi = {
             }])
           if (projectPartError) throw projectPartError
           projectRowsCreated += 1
+          }
         }
       }
     }

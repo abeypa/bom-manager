@@ -25,6 +25,11 @@ import { auditPurchaseOrderPdf } from '@/lib/po-pdf-audit'
 import { getSignedUrl } from '@/api/storage'
 import { urlToPDFAttachment } from '@/lib/ai-attachments'
 import { parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
+import {
+  findExistingProjectPartInProject,
+  isProjectPartDuplicateExemptMaster,
+  MASTER_PART_INTERLOCK_FIELDS,
+} from '@/utils/projectPartInterlock'
 
 export type ToolKind = 'read' | 'write'
 
@@ -2319,7 +2324,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       // Master part must exist
       const { data: master } = await (supabase as any)
         .from(a.part_type)
-        .select('id, part_number')
+        .select(MASTER_PART_INTERLOCK_FIELDS)
         .eq('id', a.part_id)
         .maybeSingle()
       if (!master) {
@@ -2335,25 +2340,20 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .eq('id', a.project_subsection_id)
         .maybeSingle()
       if (!targetSub) throw new Error(`project_subsection ${a.project_subsection_id} not found.`)
-      const { data: peerSubs } = await (supabase as any)
-        .from('project_subsections')
-        .select('id, section_name')
-        .eq('project_id', targetSub.project_id)
-      const peerIds = (peerSubs || []).map((s: any) => s.id)
-      const { data: existing } = await (supabase as any)
-        .from('project_parts')
-        .select('id, project_section_id, quantity, unit_price')
-        .eq('part_type', a.part_type)
-        .eq('part_id', a.part_id)
-        .in('project_section_id', peerIds.length ? peerIds : [targetSub.id])
-      if (existing && existing.length) {
-        const e = existing[0]
-        const where = (peerSubs || []).find((s: any) => s.id === e.project_section_id)?.section_name || `subsection #${e.project_section_id}`
+      if (!isProjectPartDuplicateExemptMaster(master)) {
+        const existing = await findExistingProjectPartInProject(
+          supabase as any,
+          targetSub.project_id,
+          a.part_type,
+          a.part_id,
+        )
+        if (existing) {
         throw new Error(
-          `${master.part_number} is already mapped to project #${targetSub.project_id} (line id ${e.id}, in "${where}", qty ${e.quantity} @ ${e.unit_price}). ` +
+          `${master.part_number} is already mapped to project #${targetSub.project_id} (line id ${existing.id}, in "${existing.subsection_name}", qty ${existing.quantity} @ ${existing.unit_price}). ` +
           `Do NOT propose add_part_to_project. Use update_part_quantity to change qty/price, ` +
           `or move_part_to_subsection to relocate.`,
         )
+      }
       }
     },
     handler: async (a: any) => {
@@ -2367,7 +2367,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       // Hard guard 1: master part must exist. add_part_to_project NEVER creates master parts.
       const { data: master, error: lookupErr } = await (supabase as any)
         .from(a.part_type)
-        .select('id, part_number, beperp_part_no')
+        .select(MASTER_PART_INTERLOCK_FIELDS)
         .eq('id', a.part_id)
         .maybeSingle()
       if (lookupErr) throw lookupErr
@@ -2388,25 +2388,19 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       if (subErr) throw subErr
       if (!targetSub) throw new Error(`project_subsection ${a.project_subsection_id} not found.`)
 
-      const { data: peerSubs } = await (supabase as any)
-        .from('project_subsections')
-        .select('id, section_name')
-        .eq('project_id', targetSub.project_id)
-      const peerIds = (peerSubs || []).map((s: any) => s.id)
-
-      const { data: existing } = await (supabase as any)
-        .from('project_parts')
-        .select('id, project_section_id, quantity, unit_price')
-        .eq('part_type', a.part_type)
-        .eq('part_id', a.part_id)
-        .in('project_section_id', peerIds.length ? peerIds : [targetSub.id])
-      if (existing && existing.length) {
-        const e = existing[0]
-        const where = (peerSubs || []).find((s: any) => s.id === e.project_section_id)?.section_name || `subsection #${e.project_section_id}`
+      if (!isProjectPartDuplicateExemptMaster(master)) {
+        const existing = await findExistingProjectPartInProject(
+          supabase as any,
+          targetSub.project_id,
+          a.part_type,
+          a.part_id,
+        )
+        if (existing) {
         throw new Error(
-          `This master part is already mapped to project #${targetSub.project_id} (line id ${e.id}, in "${where}", qty ${e.quantity} @ ${e.unit_price}). ` +
+          `This master part is already mapped to project #${targetSub.project_id} (line id ${existing.id}, in "${existing.subsection_name}", qty ${existing.quantity} @ ${existing.unit_price}). ` +
           `Update the existing line via update_part_quantity / move_part_to_subsection instead of adding a duplicate.`,
         )
+      }
       }
 
       const { data, error } = await (supabase as any)

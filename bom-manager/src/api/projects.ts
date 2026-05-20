@@ -1,5 +1,10 @@
 import { supabase } from '@/lib/supabase'
 import { partsApi } from './parts'
+import {
+  findExistingProjectPartInProject,
+  isProjectPartDuplicateExemptMaster,
+  MASTER_PART_INTERLOCK_FIELDS,
+} from '@/utils/projectPartInterlock'
 
 export type Project = {
   id: number
@@ -477,7 +482,7 @@ export const projectsApi = {
     // Fetch part data
     const { data: part, error: partErr } = await (supabase as any)
       .from(part_type)
-      .select('stock_quantity, base_price, part_number, suppliers:supplier_id(name)')
+      .select(`stock_quantity, base_price, ${MASTER_PART_INTERLOCK_FIELDS}, suppliers:supplier_id(name)`)
       .eq('id', part_id)
       .single()
 
@@ -529,6 +534,17 @@ export const projectsApi = {
       if (error) throw error
       result = updated
     } else {
+      if (!isProjectPartDuplicateExemptMaster(part)) {
+        const duplicate = await findExistingProjectPartInProject(supabase as any, (project as any).id, part_type, part_id)
+        if (duplicate) {
+          throw new Error(
+            `${part.part_number || `${part_type} #${part_id}`} is already mapped in this project ` +
+            `(line id ${duplicate.id}, in "${duplicate.subsection_name}", qty ${duplicate.quantity} @ ${duplicate.unit_price}). ` +
+            `Duplicate mappings are only allowed for packing, forwarding, discount, or similar commercial lines.`,
+          )
+        }
+      }
+
       const insertPayload: any = {
         project_section_id,
         part_type,
