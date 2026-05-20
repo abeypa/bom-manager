@@ -59,6 +59,43 @@ function parseDiscountPercent(value: string | undefined | null): number | null {
   return parsed
 }
 
+function parseBepDiscountPercent(lines: string[], start: number, end: number) {
+  const text = lines.slice(start, end).join(' ')
+  const atRate = text.match(/@\s*([\d,]+(?:\.\d+)?)\s*%?/i)?.[1]
+  if (atRate) return parseDiscountPercent(atRate)
+  const percent = text.match(/([\d,]+(?:\.\d+)?)\s*%/i)?.[1]
+  if (percent) return parseDiscountPercent(percent)
+  return parseDiscountPercent(lines[start])
+}
+
+function resolveBepDiscountAndAmount(lines: string[], priceIndex: number, end: number) {
+  const first = nextNonEmptyIndex(lines, priceIndex + 1, end)
+  if (first < 0) return null
+
+  // BEP PDFs often split the DISC cell as "361546.21 @ 30.00%" across
+  // multiple extracted text lines. The first number is discount value, not
+  // discount percent, so scan until the actual percent marker and then take
+  // the following numeric line as AMOUNT.
+  const maxDiscountEnd = Math.min(end, first + 8)
+  for (let i = first; i < maxDiscountEnd; i++) {
+    const windowText = lines.slice(first, i + 1).join(' ')
+    if (!/@|%/.test(windowText)) continue
+    const discountPercent = parseBepDiscountPercent(lines, first, i + 1)
+    const maybeAmount = nextNonEmptyIndex(lines, i + 1, end)
+    if (discountPercent != null && maybeAmount > 0 && parseNumber(lines[maybeAmount]) != null) {
+      return { discountIndex: first, amountIndex: maybeAmount, discountPercent }
+    }
+  }
+
+  const maybeAmount = nextNonEmptyIndex(lines, first + 1, end)
+  if (maybeAmount > 0 && parseNumber(lines[maybeAmount]) != null) {
+    const discountPercent = parseDiscountPercent(lines[first])
+    if (discountPercent != null) return { discountIndex: first, amountIndex: maybeAmount, discountPercent }
+  }
+
+  return null
+}
+
 function parseDate(value: string | undefined | null): string | null {
   if (!value) return null
   const raw = value.trim()
@@ -240,6 +277,7 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
     let priceIndex = -1
     let discountIndex = -1
     let amountIndex = -1
+    let discountPercent: number | null = null
 
     for (let i = codeIndex + 1; i < end; i++) {
       const qty = parseNumber(lines[i])
@@ -247,21 +285,21 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
       const maybeUnit = nextNonEmptyIndex(lines, i + 1, end)
       if (maybeUnit < 0 || !isUnitLine(lines[maybeUnit])) continue
       const maybePrice = nextNonEmptyIndex(lines, maybeUnit + 1, end)
-      const maybeDiscount = nextNonEmptyIndex(lines, maybePrice + 1, end)
-      const maybeAmount = nextNonEmptyIndex(lines, maybeDiscount + 1, end)
+      const discountAndAmount = maybePrice > 0
+        ? resolveBepDiscountAndAmount(lines, maybePrice, end)
+        : null
       if (
         maybePrice > 0 &&
-        maybeDiscount > 0 &&
-        maybeAmount > 0 &&
+        discountAndAmount &&
         parseNumber(lines[maybePrice]) != null &&
-        parseNumber(lines[maybeDiscount]) != null &&
-        parseNumber(lines[maybeAmount]) != null
+        parseNumber(lines[discountAndAmount.amountIndex]) != null
       ) {
         qtyIndex = i
         unitIndex = maybeUnit
         priceIndex = maybePrice
-        discountIndex = maybeDiscount
-        amountIndex = maybeAmount
+        discountIndex = discountAndAmount.discountIndex
+        amountIndex = discountAndAmount.amountIndex
+        discountPercent = discountAndAmount.discountPercent
         break
       }
     }
@@ -278,7 +316,7 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
       description: description || itemCode,
       quantity: parseNumber(lines[qtyIndex]),
       unit_price: parseNumber(lines[priceIndex]),
-      discount_percent: parseDiscountPercent(lines[discountIndex]),
+      discount_percent: discountPercent,
       total_amount: parseNumber(lines[amountIndex]),
       raw_line: lines.slice(cursor, amountIndex + 1).join(' | '),
     })

@@ -557,6 +557,31 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
   }
 
   const newGrand = desiredItems.reduce((sum, item) => sum + item.total_amount, 0)
+  const pdfBasic = Number(parsed.basic_amount || 0)
+  if (pdfBasic > 0 && Math.abs(newGrand - pdfBasic) > Math.max(5, pdfBasic * 0.02)) {
+    return {
+      ok_to_apply: false,
+      po: {
+        id: po.id,
+        po_number: po.po_number,
+        status: po.status,
+        supplier: po.suppliers?.name,
+        project: po.project,
+        old_total: po.grand_total || 0,
+        new_total: newGrand,
+        old_line_count: oldItems.length,
+        new_line_count: desiredItems.length,
+      },
+      parsed_pdf: {
+        po_number: parsed.po_number,
+        supplier_name: parsed.supplier_name,
+        po_date: parsed.po_date,
+        line_count: parsed.lines.length,
+        basic_amount: parsed.basic_amount,
+      },
+      message: `Correction blocked: parsed line total ${newGrand.toFixed(2)} does not match PDF Basic Amount ${pdfBasic.toFixed(2)}.`,
+    }
+  }
   const inserts = desiredItems.filter((item) => !item.old_item_id).length
   const updates = desiredItems.filter((item) => item.old_item_id).length
 
