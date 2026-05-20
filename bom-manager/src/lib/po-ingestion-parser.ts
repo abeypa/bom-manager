@@ -96,6 +96,34 @@ function resolveBepDiscountAndAmount(lines: string[], priceIndex: number, end: n
   return null
 }
 
+function reconcileLineAgainstAmount(line: ParsedPOLine): ParsedPOLine {
+  const qty = Number(line.quantity || 0)
+  const unit = Number(line.unit_price || 0)
+  const inferredDiscount = line.discount_percent ?? parseDiscountPercent(line.raw_line.match(/@\s*([\d,]+(?:\.\d+)?)\s*%?/i)?.[1])
+  const discount = Number(inferredDiscount || 0)
+  const amount = Number(line.total_amount || 0)
+  if (!qty || !unit || !amount || discount < 0 || discount >= 100) return line
+
+  const computed = qty * unit * (1 - discount / 100)
+  if (Math.abs(computed - amount) <= Math.max(1, amount * 0.01)) return line
+
+  const expectedQty = amount / (unit * (1 - discount / 100))
+  if (!Number.isFinite(expectedQty) || expectedQty <= 0) return line
+
+  // PDF text extraction sometimes shifts the DISC amount into QTY. If the
+  // line amount implies a clean quantity, prefer the PDF arithmetic.
+  const rounded = Math.round(expectedQty)
+  const correctedQty = Math.abs(expectedQty - rounded) < 0.01 ? rounded : Number(expectedQty.toFixed(3))
+  if (Math.abs(correctedQty - qty) < 0.01) return line
+
+  return {
+    ...line,
+    discount_percent: inferredDiscount,
+    quantity: correctedQty,
+    raw_line: `${line.raw_line} | reconciled_qty_from_amount=${correctedQty}`,
+  }
+}
+
 function parseDate(value: string | undefined | null): string | null {
   if (!value) return null
   const raw = value.trim()
@@ -310,7 +338,7 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
     }
 
     const description = cleanDescription(lines.slice(codeIndex + 1, qtyIndex))
-    parsed.push({
+    parsed.push(reconcileLineAgainstAmount({
       line_no: lineNo,
       item_code: itemCode,
       description: description || itemCode,
@@ -319,7 +347,7 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
       discount_percent: discountPercent,
       total_amount: parseNumber(lines[amountIndex]),
       raw_line: lines.slice(cursor, amountIndex + 1).join(' | '),
-    })
+    }))
 
     cursor = amountIndex + 1
     if (unitIndex < 0) cursor += 1
@@ -374,7 +402,7 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
         ? parseDiscountPercent(discountText)
         : null
 
-    parsed.push({
+    parsed.push(reconcileLineAgainstAmount({
       line_no: Number(match[1]),
       item_code: match[2],
       description: cleanDescription([match[3]]),
@@ -383,7 +411,7 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
       discount_percent: discountPercent,
       total_amount: parseNumber(match[8]),
       raw_line: line,
-    })
+    }))
   }
 
   return parsed
@@ -417,7 +445,7 @@ function parseLine(raw: string, index: number): ParsedPOLine | null {
 
   if (!description && !itemCode) return null
 
-  return {
+  return reconcileLineAgainstAmount({
     line_no: index + 1,
     item_code: itemCode,
     description: description || itemCode || '',
@@ -426,7 +454,7 @@ function parseLine(raw: string, index: number): ParsedPOLine | null {
     discount_percent: discount?.value != null && discount.value >= 0 && discount.value <= 100 ? discount.value : null,
     total_amount: total.value,
     raw_line: line,
-  }
+  })
 }
 
 export function parsePurchaseOrderText(args: {
