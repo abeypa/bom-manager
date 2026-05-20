@@ -124,6 +124,39 @@ function reconcileLineAgainstAmount(line: ParsedPOLine): ParsedPOLine {
   }
 }
 
+function lineAmountSum(lines: ParsedPOLine[]) {
+  return lines.reduce((sum, line) => sum + Number(line.total_amount || 0), 0)
+}
+
+function pickLinesMatchingBasicAmount(lines: ParsedPOLine[], basicAmount: number | null) {
+  if (!basicAmount || lines.length <= 1 || lines.length > 18) return lines
+
+  const tolerance = Math.max(5, basicAmount * 0.01)
+  const fullDiff = Math.abs(lineAmountSum(lines) - basicAmount)
+  let bestMask = 0
+  let bestDiff = fullDiff
+  let bestCount = lines.length
+
+  for (let mask = 1; mask < (1 << lines.length); mask++) {
+    let sum = 0
+    let count = 0
+    for (let i = 0; i < lines.length; i++) {
+      if (!(mask & (1 << i))) continue
+      sum += Number(lines[i].total_amount || 0)
+      count += 1
+    }
+    const diff = Math.abs(sum - basicAmount)
+    if (diff < bestDiff - 0.01 || (Math.abs(diff - bestDiff) <= 0.01 && count < bestCount)) {
+      bestMask = mask
+      bestDiff = diff
+      bestCount = count
+    }
+  }
+
+  if (!bestMask || bestDiff > tolerance || bestDiff >= fullDiff) return lines
+  return lines.filter((_, index) => Boolean(bestMask & (1 << index)))
+}
+
 function parseDate(value: string | undefined | null): string | null {
   if (!value) return null
   const raw = value.trim()
@@ -506,17 +539,22 @@ export function parsePurchaseOrderText(args: {
     /\btaxable\s+value\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)/i,
   ])
 
+  const parsedBasicAmount = parseNumber(basicRaw)
   const visualLines = parseBepVisualTable(lines)
   const columnLines = visualLines.length > 0 ? visualLines : parseBepColumnTable(lines)
-  const parsedLines = columnLines.length > 0 ? columnLines : lines
+  const rawParsedLines = columnLines.length > 0 ? columnLines : lines
     .map((line, i) => parseLine(line, i))
     .filter((line): line is ParsedPOLine => Boolean(line))
+  const parsedLines = pickLinesMatchingBasicAmount(rawParsedLines, parsedBasicAmount)
 
   if (!poNumber) warnings.push('PO number was not detected.')
   if (!poDate) warnings.push('PO date was not detected.')
   const supplierName = cleanSupplierName(detectSupplier(lines)) || cleanSupplierName(filenameMeta.supplier)
   if (!supplierName) warnings.push('Supplier name was not detected.')
   if (parsedLines.length === 0) warnings.push('No line items were detected from the extracted text.')
+  if (parsedLines.length < rawParsedLines.length) {
+    warnings.push(`Removed ${rawParsedLines.length - parsedLines.length} stray line item(s) that did not reconcile to PDF Basic Amount.`)
+  }
 
   return {
     file_name: args.fileName,
@@ -527,7 +565,7 @@ export function parsePurchaseOrderText(args: {
     supplier_name: supplierName,
     po_date: poDate,
     currency: detectCurrency(rawText),
-    basic_amount: parseNumber(basicRaw),
+    basic_amount: parsedBasicAmount,
     subtotal: parseNumber(subtotalRaw),
     total_amount: parseNumber(totalRaw),
     parse_status: warnings.length ? 'needs_review' : 'parsed',
