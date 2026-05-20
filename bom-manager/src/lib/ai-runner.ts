@@ -140,6 +140,15 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     updates only header fields and PO line items to match the PDF.
     The printed PDF line AMOUNT column is the authority for each line
     total.
+    HARD STOP AFTER PREVIEW: preview_released_po_pdf_repairs is the
+    only read tool needed for this workflow after the project is known.
+    Do NOT call get_po_details, audit_project_po_pdfs,
+    get_project_details, preview_existing_po_pdf_correction,
+    find_master_part_by_erp_id, or search_master_parts after the bulk
+    preview. If blocked_count > 0 or missing_pdf_count > 0, report the
+    exact blocked/missing POs and stop. If ready_count > 0 and
+    blocked_count == 0, propose one apply_released_po_pdf_repairs write
+    action and stop.
 
 ═══════════════════════════════════════════════════════════════════════
 INTENT DISPATCH — CHOOSE THE RIGHT WORKFLOW BEFORE DOING ANYTHING

@@ -1630,7 +1630,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'preview_released_po_pdf_repairs',
     kind: 'read',
     description:
-      'Preview repair for every finalized/active PO in one project that has an attached BEP PO PDF. Includes Released, Pending, Sent, Confirmed, Partial, and Received POs; excludes Draft and Cancelled. Identifies DB-only lines to delete. This does not write.',
+      'Preview repair for every finalized/active PO in one project that has an attached BEP PO PDF. Includes Released, Pending, Sent, Confirmed, Partial, and Received POs; excludes Draft and Cancelled. Identifies DB-only lines to delete. This does not write. This result is complete for the bulk repair workflow: after calling it, summarize and either propose apply_released_po_pdf_repairs when all checked POs are ready, or stop if any PO is blocked/missing PDF.',
     parameters: {
       type: 'object',
       required: ['project_id'],
