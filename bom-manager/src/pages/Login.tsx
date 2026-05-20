@@ -30,13 +30,12 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex bg-[#f8fafc]">
-      {/* Left panel */}
       <div className="hidden lg:flex flex-col justify-between w-2/5 p-16 relative overflow-hidden bg-navy-950">
-        {/* Grid texture */}
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none"
-             style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '50px 50px' }} />
+        <div
+          className="absolute inset-0 opacity-[0.03] pointer-events-none"
+          style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '50px 50px' }}
+        />
 
-        {/* Ambient background blur */}
         <div className="absolute -bottom-24 -right-24 w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
         <div className="absolute -top-24 -left-24 w-[400px] h-[400px] bg-navy-500/10 rounded-full blur-[100px] pointer-events-none" />
 
@@ -44,13 +43,14 @@ export default function Login() {
           <div className="w-16 h-16 bg-navy-900 border border-white/10 rounded-2xl flex items-center justify-center mb-10 shadow-2xl">
             <span className="font-syne font-black text-xs text-white uppercase tracking-tighter">BEP-V3</span>
           </div>
-          
+
           <div className="space-y-4">
-             <div className="label-caps !text-amber-500 !tracking-[0.3em] font-black !text-[10px]">Precision Logic</div>
-             <h1 className="font-syne font-bold text-5xl text-white leading-[1.1] tracking-tight">
-               Engineering<br />
-               <span className="text-white/60">Parts Registry</span>
-             </h1>
+            <div className="label-caps !text-amber-500 !tracking-[0.3em] font-black !text-[10px]">Precision Logic</div>
+            <h1 className="font-syne font-bold text-5xl text-white leading-[1.1] tracking-tight">
+              Engineering
+              <br />
+              <span className="text-white/60">Parts Registry</span>
+            </h1>
           </div>
 
           <p className="mt-8 text-white/40 font-medium text-lg leading-relaxed max-w-sm">
@@ -58,7 +58,6 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Stats */}
         <div className="relative z-10 grid grid-cols-1 gap-4 mb-2">
           {[
             { label: 'Asset Management', value: 'Global Registry', icon: Database },
@@ -78,20 +77,18 @@ export default function Login() {
         </div>
       </div>
 
-      {/* Right panel — login form */}
       <div className="flex-1 flex items-center justify-center p-8 lg:p-16">
         <div className="w-full max-w-[420px] page-enter">
-          {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-3 mb-10">
-             <div className="w-10 h-10 bg-navy-950 rounded-xl flex items-center justify-center">
-                <span className="font-syne font-black text-[10px] text-white">BEP</span>
-             </div>
-             <span className="font-syne font-bold font-black text-xl text-navy-950 uppercase tracking-tighter">BOM Manager</span>
+            <div className="w-10 h-10 bg-navy-950 rounded-xl flex items-center justify-center">
+              <span className="font-syne font-black text-[10px] text-white">BEP</span>
+            </div>
+            <span className="font-syne font-bold font-black text-xl text-navy-950 uppercase tracking-tighter">BOM Manager</span>
           </div>
 
           <div className="mb-10">
-             <h2 className="font-syne font-black text-3xl text-navy-900 tracking-tight leading-none mb-3">System Access</h2>
-             <p className="text-sm font-bold text-tertiary">Initialize your secure administrative session</p>
+            <h2 className="font-syne font-black text-3xl text-navy-900 tracking-tight leading-none mb-3">System Access</h2>
+            <p className="text-sm font-bold text-tertiary">Initialize your secure administrative session</p>
           </div>
 
           {error && (
@@ -127,7 +124,7 @@ export default function Login() {
                   required
                   autoComplete="current-password"
                   className="input pl-11"
-                  placeholder="••••••••"
+                  placeholder="********"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                 />
@@ -152,11 +149,11 @@ export default function Login() {
           </form>
 
           <div className="mt-12 text-center p-6 border border-slate-100 rounded-3xl bg-slate-50/50">
-             <p className="label-caps !text-[9px] !text-tertiary mb-2">Restricted Access Service</p>
-             <p className="text-[10px] font-bold text-slate-400 max-w-[280px] mx-auto leading-relaxed">
-               Access to this registry is governed by corporate security policies. 
-               Unauthorized attempts are documented.
-             </p>
+            <p className="label-caps !text-[9px] !text-tertiary mb-2">Restricted Access Service</p>
+            <p className="text-[10px] font-bold text-slate-400 max-w-[280px] mx-auto leading-relaxed">
+              Access to this registry is governed by corporate security policies.
+              Unauthorized attempts are documented.
+            </p>
           </div>
         </div>
       </div>

@@ -166,7 +166,7 @@ export async function listFiles(
       return [];
     }
 
-    return data.map(item => ({
+    return data.map((item: any) => ({
       id: item.id || '',
       name: item.name,
       path: prefix ? `${prefix}/${item.name}` : item.name,

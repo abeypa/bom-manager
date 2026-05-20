@@ -18,7 +18,7 @@ const SearchOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
-      if (e.key === '/' && e.metaKey) { e.preventDefault(); onClose() } // Cmd+K already opens
+      if (e.key === '/' && e.metaKey) { e.preventDefault(); onClose() }
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
@@ -46,9 +46,9 @@ const SearchOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
 
         <div className="max-h-[60vh] overflow-y-auto p-2">
           {query.length > 0 && filteredProjects.length === 0 && filteredParts.length === 0 && (
-              <div className="p-8 text-center text-slate-400">
-                  No results found for "{query}"
-              </div>
+            <div className="p-8 text-center text-slate-400">
+              No results found for "{query}"
+            </div>
           )}
           {filteredProjects.length > 0 && (
             <div className="mb-4">
@@ -70,27 +70,27 @@ const SearchOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
             <div>
               <h4 className="text-[10px] uppercase tracking-widest font-black text-slate-400 mb-2 px-3 border-t border-slate-50 pt-4">Parts</h4>
               {filteredParts.slice(0, 8).map((p: any) => (
-                <div 
-                  key={p.id} 
-                  onClick={() => { navigate(`/parts`); onClose() }}
+                <div
+                  key={p.id}
+                  onClick={() => { navigate('/parts'); onClose() }}
                   className="p-3 hover:bg-slate-50 rounded-2xl cursor-pointer transition-colors flex items-center gap-3"
                 >
-                  <span className="font-mono text-primary-600 font-bold text-sm">{p.part_number}</span> 
+                  <span className="font-mono text-primary-600 font-bold text-sm">{p.part_number}</span>
                   <span className="text-slate-600 text-sm truncate">{p.description}</span>
                 </div>
               ))}
             </div>
           )}
-          
+
           {query.length === 0 && (
-              <div className="p-8 text-center text-slate-400 text-sm">
-                  Start typing to search your workspace...
-              </div>
+            <div className="p-8 text-center text-slate-400 text-sm">
+              Start typing to search your workspace...
+            </div>
           )}
         </div>
         <div className="bg-slate-50 p-3 text-xs text-slate-400 text-center font-medium border-t border-slate-100 flex justify-center gap-4">
-            <span><kbd className="font-mono bg-white border border-slate-200 rounded px-1 shadow-sm">esc</kbd> to close</span>
-            <span><kbd className="font-mono bg-white border border-slate-200 rounded px-1 shadow-sm">↵</kbd> to select</span>
+          <span><kbd className="font-mono bg-white border border-slate-200 rounded px-1 shadow-sm">esc</kbd> to close</span>
+          <span><kbd className="font-mono bg-white border border-slate-200 rounded px-1 shadow-sm">Enter</kbd> to select</span>
         </div>
       </div>
     </div>

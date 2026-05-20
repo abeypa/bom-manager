@@ -492,7 +492,7 @@ export default function POIngestion() {
                               No line items detected. This document can still be saved for OCR/review.
                             </td>
                           </tr>
-                        ) : currentDoc.lines.map((line, lineIndex) => (
+                        ) : currentDoc.lines.map((line: ReviewLine, lineIndex) => (
                           <tr key={`${currentDoc.file_name}-${line.line_no}`}>
                             <td className="font-mono text-tertiary">{line.line_no}</td>
                             <td className="font-mono font-black text-navy-900">{line.item_code || '-'}</td>

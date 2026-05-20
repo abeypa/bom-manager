@@ -5,6 +5,7 @@ import { ToastProvider } from './context/ToastContext';
 import AppLayout from './components/layout/AppLayout';
 import Login from './pages/Login';
 import RoleGuard from './components/auth/RoleGuard';
+import { isSupabaseConfigured } from './lib/supabase';
 
 // Pages
 import Dashboard from './pages/Dashboard';
@@ -27,12 +28,10 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       refetchOnWindowFocus: true,
-      staleTime: 30 * 1000, // 30s — keeps project values & KPIs live
+      staleTime: 30 * 1000, // 30s keeps project values and KPIs live
     },
   },
 });
-
-import supabase, { isSupabaseConfigured } from './lib/supabase';
 
 function App() {
   if (!isSupabaseConfigured()) {
@@ -40,13 +39,13 @@ function App() {
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-white font-sans">
         <div className="max-w-md w-full bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl">
           <div className="w-16 h-16 bg-amber-500/10 rounded-xl flex items-center justify-center mb-6">
-            <span className="text-3xl">⚙️</span>
+            <span className="text-3xl font-black tracking-tight" aria-hidden="true">CFG</span>
           </div>
           <h1 className="text-2xl font-bold mb-4">Configuration Required</h1>
           <p className="text-slate-400 mb-8 leading-relaxed">
-            The application is running but the <strong>Supabase credentials</strong> are missing. 
-            Please ensure <code className="bg-slate-900 px-2 py-1 rounded text-amber-400">VITE_SUPABASE_URL</code> and 
-            <code className="bg-slate-900 px-2 py-1 rounded text-amber-400">VITE_SUPABASE_ANON_KEY</code> 
+            The application is running but the <strong>Supabase credentials</strong> are missing.
+            Please ensure <code className="bg-slate-900 px-2 py-1 rounded text-amber-400">VITE_SUPABASE_URL</code> and
+            <code className="bg-slate-900 px-2 py-1 rounded text-amber-400">VITE_SUPABASE_ANON_KEY</code>
             are set in your environment variables.
           </p>
           <div className="space-y-4">
@@ -58,7 +57,7 @@ function App() {
                 <li>Trigger a <strong>new build</strong></li>
               </ol>
             </div>
-            <button 
+            <button
               onClick={() => window.location.reload()}
               className="w-full py-3 bg-slate-700 hover:bg-slate-600 transition-colors rounded-xl font-bold text-sm"
             >
@@ -76,13 +75,11 @@ function App() {
         <ToastProvider>
           <Router>
             <Routes>
-              {/* Public Route */}
               <Route path="/login" element={<Login />} />
 
-              {/* Protected Routes with Layout */}
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                
+
                 <Route path="/dashboard" element={
                   <RoleGuard>
                     <Dashboard />
@@ -118,7 +115,7 @@ function App() {
                     <PartInOut />
                   </RoleGuard>
                 } />
-                
+
                 <Route path="/procurement" element={
                   <RoleGuard>
                     <ProcurementDashboard />
@@ -150,7 +147,6 @@ function App() {
                   </RoleGuard>
                 } />
 
-                {/* Admin-only route */}
                 <Route path="/admin" element={
                   <RoleGuard requiredRole="admin">
                     <Admin />
@@ -164,7 +160,6 @@ function App() {
                 } />
               </Route>
 
-              {/* Catch-all */}
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </Router>

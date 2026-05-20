@@ -291,7 +291,7 @@ export default function ChangeLog() {
   }, [])
 
   // Fetch activity logs
-  const { data: logs, isLoading, refetch } = useQuery<ActivityLog[]>({
+  const { data: logs = [], isLoading, refetch } = useQuery<ActivityLog[]>({
     queryKey: ['activity-logs', page, actionFilter, entityFilter],
     queryFn: async () => {
       let query = (supabase as any)
@@ -327,7 +327,7 @@ export default function ChangeLog() {
   }, [profilesList])
 
   // Client-side search filter
-  const filtered = useMemo(() => {
+  const filtered = useMemo<ActivityLog[]>(() => {
     if (!search.trim()) return logs || []
     const q = search.toLowerCase()
     return (logs || []).filter(log => {

@@ -836,7 +836,7 @@ async function applyExistingPoPdfCorrection(a: any) {
     po_id: a.po_id,
     po_number: headerPatch.po_number || plan.po.po_number,
     status_unchanged: plan.po.status,
-    line_count: plan.desired_items.length,
+    line_count: plan.desired_items?.length ?? 0,
     changes: plan.changes,
     totals,
   }
@@ -1534,7 +1534,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       const { data, error } = await q
       if (error) throw error
 
-      const results = []
+      const results: Array<Awaited<ReturnType<typeof auditPurchaseOrderPdf>> & { issue_count: number; has_more_issues: boolean }> = []
       for (const po of data || []) {
         const result = await auditPurchaseOrderPdf(po)
         results.push({
@@ -2830,7 +2830,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         po_id: a.po_id,
         po_number: headerPatch.po_number || plan.po.po_number,
         status_unchanged: plan.po.status,
-        line_count: plan.desired_items.length,
+        line_count: plan.desired_items?.length ?? 0,
         changes: plan.changes,
         totals,
       }
