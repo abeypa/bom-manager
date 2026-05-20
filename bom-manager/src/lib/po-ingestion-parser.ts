@@ -331,7 +331,7 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
 
   const tableStart = headerStart + 8
   const tableEnd = lines.findIndex((line, index) =>
-    index > tableStart && /^tax description$/i.test(line),
+    index > tableStart && (/\btax description\b/i.test(line) || /\bdelivery schedule\b/i.test(line)),
   )
   const end = tableEnd > tableStart ? tableEnd : lines.length
   const parsed: ParsedPOLine[] = []
@@ -415,7 +415,7 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
   if (headerStart < 0) return []
 
   const tableEnd = lines.findIndex((line, index) =>
-    index > headerStart && /^tax description\b/i.test(line),
+    index > headerStart && (/\btax description\b/i.test(line) || /\bdelivery schedule\b/i.test(line)),
   )
   const rows = lines.slice(headerStart + 1, tableEnd > headerStart ? tableEnd : lines.length)
   const parsed: ParsedPOLine[] = []
@@ -429,15 +429,29 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
       if (current) rowChunks.push(current)
       current = line
     } else if (current) {
-      current += ' ' + line
+      // Skip section labels that appear after the last line item (e.g. "Incoterm :", "Payment Term :")
+      if (!/^(incoterm|payment\s*term|terms\s*&|prepared\s*by|authorised|mod\s*:)\b/i.test(line)) {
+        current += ' ' + line
+      }
     }
   }
   if (current) rowChunks.push(current)
 
   for (const raw of rowChunks) {
-    const line = raw.replace(/\s+/g, ' ').trim()
+    // Normalize chunk: remove inline HSN codes, then strip trailing lone "@" and
+    // discount-percent tokens (e.g. "@ 5.00%") that pdf.js places on separate
+    // visual rows and get concatenated here, breaking the amount capture.
+    const line = raw
+      .replace(/\s+HSN\s*Code[:\s]*\S+/gi, '')
+      .replace(/\s+@\s*$/, '')
+      .replace(/(\s+[\d.,]+%)+\s*$/, '')
+      .replace(/\s+@\s*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
     const match = line.match(
-      /^(\d+)\s+(\d{6,})\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s+(NOS?|NO\.?|SET|SETS|PCS?|PIECES?|MTR|METER|METRE|KG|LTR|LOT)\s+([\d,]+(?:\.\d+)?)\s+(.+?)\s+([\d,]+(?:\.\d+)?)$/i,
+      // Allow optional trailing text after the amount: multi-line PDF descriptions
+      // sometimes have the second line appended after the numeric fields.
+      /^(\d+)\s+(\d{6,})\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s+(NOS?|NO\.?|SET|SETS|PCS?|PIECES?|MTR|METER|METRE|KG|LTR|LOT)\s+([\d,]+(?:\.\d+)?)\s+(.+?)\s+([\d,]+(?:\.\d+)?)(?:\s+.*)?$/i,
     )
     if (!match) continue
 
@@ -470,6 +484,8 @@ function parseLine(raw: string, index: number): ParsedPOLine | null {
   if (!/^\d+\s+\d{6,}\s+/.test(line)) return null
   if (/^(subtotal|total|grand total|cgst|sgst|igst|tax|terms|amount in words)\b/i.test(line)) return null
   if (/\b(description|quantity|unit price|rate|amount|item code)\b/i.test(line)) return null
+  // Delivery schedule rows contain dates (DD/MM/YYYY) — skip them
+  if (/\b\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line)) return null
 
   const nums = [...line.matchAll(/(?<![A-Za-z])[-+]?\d[\d,]*(?:\.\d+)?%?/g)]
   const numeric = nums
