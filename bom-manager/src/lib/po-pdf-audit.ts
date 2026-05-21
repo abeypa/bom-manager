@@ -70,6 +70,85 @@ function findLineForItem(item: any, lines: ParsedPOLine[]) {
   return lines.find((line) => normalize(line.description).includes(itemWords) || itemWords.includes(normalize(line.description).slice(0, 18))) || null
 }
 
+function lineKey(line: Pick<ParsedPOLine, 'item_code' | 'description'>) {
+  const code = normalize(line.item_code)
+  if (code) return code
+  return normalize(line.description).slice(0, 24)
+}
+
+function itemKey(item: any) {
+  const candidates = codeCandidates(item)
+  if (candidates.length) return candidates[0]
+  return normalize(item.description).slice(0, 24)
+}
+
+function aggregatePdfLines(lines: ParsedPOLine[]) {
+  const groups = new Map<string, {
+    quantity: number
+    unit_price: number | null
+    discount_percent: number | null
+    total_amount: number
+    line_count: number
+  }>()
+
+  for (const line of lines) {
+    const key = lineKey(line)
+    if (!key) continue
+    const current = groups.get(key) || {
+      quantity: 0,
+      unit_price: null,
+      discount_percent: null,
+      total_amount: 0,
+      line_count: 0,
+    }
+    current.quantity += Number(line.quantity || 0)
+    current.total_amount += Number(line.total_amount || 0)
+    current.line_count += 1
+    if (current.unit_price == null && line.unit_price != null) current.unit_price = Number(line.unit_price)
+    if (current.discount_percent == null && line.discount_percent != null) current.discount_percent = Number(line.discount_percent)
+    groups.set(key, current)
+  }
+
+  return groups
+}
+
+function aggregateDbItems(items: any[]) {
+  const groups = new Map<string, {
+    quantity: number
+    unit_price: number | null
+    discount_percent: number | null
+    total_amount: number
+    part_number: string
+    description: string
+    row_count: number
+  }>()
+
+  for (const item of items) {
+    const key = itemKey(item)
+    if (!key) continue
+    const current = groups.get(key) || {
+      quantity: 0,
+      unit_price: null,
+      discount_percent: null,
+      total_amount: 0,
+      part_number: item.part_number || item.description || 'Unknown item',
+      description: item.description || item.part_number || 'Unknown item',
+      row_count: 0,
+    }
+    current.quantity += Number(item.quantity || 0)
+    current.total_amount +=
+      Number(item.quantity || 0) *
+      Number(item.unit_price || 0) *
+      (1 - Number(item.discount_percent || 0) / 100)
+    current.row_count += 1
+    if (current.unit_price == null && item.unit_price != null) current.unit_price = Number(item.unit_price)
+    if (current.discount_percent == null && item.discount_percent != null) current.discount_percent = Number(item.discount_percent)
+    groups.set(key, current)
+  }
+
+  return groups
+}
+
 function pdfBasicComparableAmount(parsed: ReturnType<typeof parsePurchaseOrderText>) {
   const lineTotal = parsed.lines.reduce((sum, line) => sum + Number(line.total_amount || 0), 0)
   if (parsed.basic_amount != null) return { label: 'PDF Basic Amount', value: parsed.basic_amount }
@@ -153,7 +232,20 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
       })
     }
 
+    const pdfLineGroups = aggregatePdfLines(parsed.lines)
+    const dbItemGroups = aggregateDbItems(dbItems)
+
     for (const item of dbItems) {
+      const key = itemKey(item)
+      const dbGroup = dbItemGroups.get(key)
+      const pdfGroup = pdfLineGroups.get(key)
+      const usesGroupedComparison = Boolean(
+        dbGroup &&
+        pdfGroup &&
+        ((dbGroup.row_count || 0) > 1 || (pdfGroup.line_count || 0) > 1),
+      )
+      if (usesGroupedComparison) continue
+
       const line = findLineForItem(item, parsed.lines)
       if (!line) {
         issues.push({
@@ -199,6 +291,33 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
           label: `Discount mismatch: ${item.part_number}`,
           expected: `${item.discount_percent || 0}%`,
           actual: `${line.discount_percent || 0}%`,
+        })
+      }
+    }
+
+    for (const [key, dbGroup] of dbItemGroups.entries()) {
+      const pdfGroup = pdfLineGroups.get(key)
+      if (!pdfGroup) continue
+
+      if (!closeEnough(dbGroup.quantity, pdfGroup.quantity)) {
+        issues.push({
+          severity: 'error',
+          label: `Qty mismatch: ${dbGroup.part_number}`,
+          expected: String(dbGroup.quantity),
+          actual: String(pdfGroup.quantity),
+        })
+      }
+
+      if (
+        dbGroup.total_amount > 0 &&
+        pdfGroup.total_amount > 0 &&
+        !closeEnough(dbGroup.total_amount, pdfGroup.total_amount, 1)
+      ) {
+        issues.push({
+          severity: 'error',
+          label: `Line amount mismatch: ${dbGroup.part_number}`,
+          expected: money(dbGroup.total_amount),
+          actual: money(pdfGroup.total_amount),
         })
       }
     }

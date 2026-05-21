@@ -321,6 +321,21 @@ function cleanDescription(lines: string[]) {
   return cleaned.join(' ').replace(/\s+/g, ' ').trim()
 }
 
+function isPseudoChargeLine(line: Pick<ParsedPOLine, 'item_code' | 'description' | 'raw_line'>) {
+  const itemCode = String(line.item_code || '').trim()
+  const description = String(line.description || '').trim()
+  const raw = `${itemCode} ${description} ${line.raw_line || ''}`.replace(/\s+/g, ' ').trim()
+  if (!raw) return false
+
+  // BEP PDFs can include discount/charge summary rows inside the item table,
+  // such as "3% CD Applicable". They have a numeric code and amount, but
+  // they are not purchase-order material lines and should not be audited as
+  // regular items.
+  if (/\b(?:cd|cash discount)\b/i.test(raw) && /\bapplicable\b/i.test(raw)) return true
+  if (/^\d+\s+%/.test(description)) return true
+  return false
+}
+
 function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
   const headerStart = lines.findIndex((line, index) =>
     /^sl$/i.test(line) &&
@@ -576,7 +591,7 @@ export function parsePurchaseOrderText(args: {
     .map((line, i) => parseLine(line, i))
     .filter((line): line is ParsedPOLine => Boolean(line))
   const rawParsedLines = chooseBestParsedLines([visualLines, columnLines, genericLines], parsedBasicAmount)
-  const parsedLines = pickLinesMatchingBasicAmount(rawParsedLines, parsedBasicAmount)
+  const parsedLines = pickLinesMatchingBasicAmount(rawParsedLines, parsedBasicAmount).filter((line) => !isPseudoChargeLine(line))
 
   if (!poNumber) warnings.push('PO number was not detected.')
   if (!poDate) warnings.push('PO date was not detected.')
