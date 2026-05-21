@@ -306,6 +306,10 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
     for (const [key, dbGroup] of dbItemGroups.entries()) {
       const pdfGroup = pdfLineGroups.get(key)
       if (!pdfGroup) continue
+      const usesGroupedComparison =
+        (dbGroup.row_count || 0) > 1 ||
+        (pdfGroup.line_count || 0) > 1
+      if (!usesGroupedComparison) continue
 
       if (!closeEnough(dbGroup.quantity, pdfGroup.quantity)) {
         issues.push({

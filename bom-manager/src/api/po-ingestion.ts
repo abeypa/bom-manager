@@ -126,6 +126,16 @@ export const poIngestionApi = {
     let projectRowsUpdated = 0
 
     for (const doc of documents as any[]) {
+      const blockingWarnings = (doc.parse_warnings || []).filter((warning: string) =>
+        /Suspicious item code|Suspicious quantity\/price parse/i.test(warning),
+      )
+      if (doc.parse_status !== 'parsed' || blockingWarnings.length) {
+        throw new Error(
+          `PO ingestion blocked for ${doc.file_name}: parsed PDF needs review before creating parts. ` +
+          `${blockingWarnings[0] || (doc.parse_warnings || [])[0] || 'Resolve parse warnings and try again.'}`,
+        )
+      }
+
       let supplierId = doc.supplier_id || null
       if (!supplierId) {
         const newName = String(doc.new_supplier_name || doc.supplier_name || '').trim()

@@ -62,6 +62,10 @@ function parseDiscountPercent(value: string | undefined | null): number | null {
   return parsed
 }
 
+function normalizeItemCode(value: string | undefined | null) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
 function parseBepDiscountPercent(lines: string[], start: number, end: number) {
   const text = lines.slice(start, end).join(' ')
   const atRate = text.match(/@\s*([\d,]+(?:\.\d+)?)\s*%?/i)?.[1]
@@ -125,6 +129,39 @@ function reconcileLineAgainstAmount(line: ParsedPOLine): ParsedPOLine {
     discount_percent: inferredDiscount,
     quantity: correctedQty,
     raw_line: `${line.raw_line} | reconciled_qty_from_amount=${correctedQty}`,
+  }
+}
+
+function lineAmountMatches(quantity: number | null, unitPrice: number | null, discountPercent: number | null, totalAmount: number | null) {
+  const qty = Number(quantity || 0)
+  const unit = Number(unitPrice || 0)
+  const discount = Number(discountPercent || 0)
+  const amount = Number(totalAmount || 0)
+  if (!qty || !unit || !amount || discount < 0 || discount >= 100) return false
+  const computed = qty * unit * (1 - discount / 100)
+  return Math.abs(computed - amount) <= Math.max(1, amount * 0.01)
+}
+
+function normalizeLikelySwappedQtyAndUnitPrice(line: ParsedPOLine): ParsedPOLine {
+  const qty = Number(line.quantity || 0)
+  const unit = Number(line.unit_price || 0)
+  const amount = Number(line.total_amount || 0)
+  const discount = Number(line.discount_percent || 0)
+  const raw = String(line.raw_line || '')
+  const nonLinearUnit = /\b(?:nos?|no\.?|set|sets|pcs?|piece|pieces?|pair)\b/i.test(raw)
+
+  if (!qty || !unit || !amount || !nonLinearUnit) return line
+  if (!(qty > 25 && unit > 0 && unit <= 10 && Math.abs(unit - Math.round(unit)) < 0.01)) return line
+
+  const swappedQty = unit
+  const swappedUnit = qty
+  if (!lineAmountMatches(swappedQty, swappedUnit, discount, amount)) return line
+
+  return {
+    ...line,
+    quantity: swappedQty,
+    unit_price: swappedUnit,
+    raw_line: `${line.raw_line} | swapped_qty_unit_price`,
   }
 }
 
@@ -339,6 +376,91 @@ function isPseudoChargeLine(line: Pick<ParsedPOLine, 'item_code' | 'description'
   return false
 }
 
+function parseDeliveryScheduleQuantities(lines: string[]) {
+  const scheduleIdx = lines.findIndex((line) => /^delivery schedule\b/i.test(line))
+  if (scheduleIdx < 0) return new Map<string, number>()
+
+  const results = new Map<string, number>()
+  let cursor = scheduleIdx + 1
+  const end = lines.length
+
+  while (cursor < end) {
+    if (/^(for bep india|please mention|prepared by|authorised by|document details|purchase order)$/i.test(lines[cursor] || '')) break
+    if (!isIntegerLine(lines[cursor])) {
+      cursor += 1
+      continue
+    }
+
+    const codeIndex = nextNonEmptyIndex(lines, cursor + 1, end)
+    if (codeIndex < 0) break
+    const itemCode = normalizeItemCode(lines[codeIndex])
+    if (!/^\d{6,}$/.test(itemCode)) {
+      cursor += 1
+      continue
+    }
+
+    const schQtyIndex = nextNonEmptyIndex(lines, codeIndex + 1, end)
+    const schDateIndex = schQtyIndex > 0 ? nextNonEmptyIndex(lines, schQtyIndex + 1, end) : -1
+    const confirmQtyIndex = schDateIndex > 0 ? nextNonEmptyIndex(lines, schDateIndex + 1, end) : -1
+    const confirmQty = confirmQtyIndex > 0 ? parseNumber(lines[confirmQtyIndex]) : null
+    const scheduleQty = schQtyIndex > 0 ? parseNumber(lines[schQtyIndex]) : null
+    const qty = confirmQty ?? scheduleQty
+
+    if (qty != null && qty > 0) {
+      results.set(itemCode, qty)
+    }
+
+    cursor = Math.max(confirmQtyIndex, schDateIndex, schQtyIndex, codeIndex, cursor) + 1
+  }
+
+  return results
+}
+
+function applyDeliveryScheduleQuantities(parsedLines: ParsedPOLine[], lines: string[]) {
+  const scheduleQtyByCode = parseDeliveryScheduleQuantities(lines)
+  if (!scheduleQtyByCode.size) return { lines: parsedLines, warnings: [] as string[] }
+
+  const warnings: string[] = []
+  const normalized = parsedLines.map((line) => {
+    const code = normalizeItemCode(line.item_code)
+    const scheduleQty = code ? scheduleQtyByCode.get(code) : null
+    if (scheduleQty == null || line.quantity == null || Math.abs(scheduleQty - line.quantity) <= 0.01) return line
+    if (!lineAmountMatches(scheduleQty, line.unit_price, line.discount_percent, line.total_amount)) return line
+
+    warnings.push(`Used delivery schedule quantity for item ${line.item_code}: ${line.quantity} -> ${scheduleQty}.`)
+    return {
+      ...line,
+      quantity: scheduleQty,
+      raw_line: `${line.raw_line} | schedule_qty_override=${scheduleQty}`,
+    }
+  })
+
+  return { lines: normalized, warnings }
+}
+
+function suspiciousLineWarnings(lines: ParsedPOLine[]) {
+  const warnings: string[] = []
+  for (const line of lines) {
+    const itemCodeDigits = String(line.item_code || '').replace(/\D/g, '')
+    if (line.item_code && itemCodeDigits && itemCodeDigits.length < 6) {
+      warnings.push(`Suspicious item code on line ${line.line_no}: "${line.item_code}" looks too short for a BEP item code.`)
+    }
+
+    const qty = Number(line.quantity || 0)
+    const unit = Number(line.unit_price || 0)
+    if (
+      qty >= 100 &&
+      unit > 0 &&
+      unit <= 10 &&
+      Number.isInteger(unit) &&
+      /\b(?:nos?|pair|set|pcs?|pieces?)\b/i.test(line.raw_line)
+    ) {
+      warnings.push(`Suspicious quantity/price parse on item ${line.item_code || line.line_no}: qty=${qty}, unit_price=${unit}. Columns may be shifted.`)
+    }
+  }
+  return warnings
+}
+
 function extractCommercialAdjustment(lines: ParsedPOLine[]) {
   const pseudo = lines.find((line) => isPseudoChargeLine(line))
   if (!pseudo) {
@@ -425,7 +547,7 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
     }
 
     const description = cleanDescription(lines.slice(codeIndex + 1, qtyIndex))
-    parsed.push(reconcileLineAgainstAmount({
+    parsed.push(normalizeLikelySwappedQtyAndUnitPrice(reconcileLineAgainstAmount({
       line_no: lineNo,
       item_code: itemCode,
       description: description || itemCode,
@@ -434,7 +556,7 @@ function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
       discount_percent: discountPercent,
       total_amount: parseNumber(lines[amountIndex]),
       raw_line: lines.slice(cursor, amountIndex + 1).join(' | '),
-    }))
+    })))
 
     cursor = amountIndex + 1
     if (unitIndex < 0) cursor += 1
@@ -503,7 +625,7 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
         ? parseDiscountPercent(discountText)
         : null
 
-    parsed.push(reconcileLineAgainstAmount({
+    parsed.push(normalizeLikelySwappedQtyAndUnitPrice(reconcileLineAgainstAmount({
       line_no: Number(match[1]),
       item_code: match[2],
       description: cleanDescription([match[3]]),
@@ -512,7 +634,7 @@ function parseBepVisualTable(lines: string[]): ParsedPOLine[] {
       discount_percent: discountPercent,
       total_amount: parseNumber(match[8]),
       raw_line: line,
-    }))
+    })))
   }
 
   return parsed
@@ -548,7 +670,7 @@ function parseLine(raw: string, index: number): ParsedPOLine | null {
 
   if (!description && !itemCode) return null
 
-  return reconcileLineAgainstAmount({
+  return normalizeLikelySwappedQtyAndUnitPrice(reconcileLineAgainstAmount({
     line_no: index + 1,
     item_code: itemCode,
     description: description || itemCode || '',
@@ -557,7 +679,7 @@ function parseLine(raw: string, index: number): ParsedPOLine | null {
     discount_percent: discount?.value != null && discount.value >= 0 && discount.value <= 100 ? discount.value : null,
     total_amount: total.value,
     raw_line: line,
-  })
+  }))
 }
 
 export function parsePurchaseOrderText(args: {
@@ -617,7 +739,11 @@ export function parsePurchaseOrderText(args: {
     .filter((line): line is ParsedPOLine => Boolean(line))
   const rawParsedLines = chooseBestParsedLines([visualLines, columnLines, genericLines], parsedBasicAmount)
   const commercialAdjustment = extractCommercialAdjustment(rawParsedLines)
-  const parsedLines = pickLinesMatchingBasicAmount(rawParsedLines, parsedBasicAmount).filter((line) => !isPseudoChargeLine(line))
+  const filteredLines = pickLinesMatchingBasicAmount(rawParsedLines, parsedBasicAmount).filter((line) => !isPseudoChargeLine(line))
+  const scheduleAdjusted = applyDeliveryScheduleQuantities(filteredLines, lines)
+  const parsedLines = scheduleAdjusted.lines
+  warnings.push(...scheduleAdjusted.warnings)
+  warnings.push(...suspiciousLineWarnings(parsedLines))
 
   if (!poNumber) warnings.push('PO number was not detected.')
   if (!poDate) warnings.push('PO date was not detected.')

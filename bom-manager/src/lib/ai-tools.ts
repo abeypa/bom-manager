@@ -436,6 +436,15 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
     text: pdf.text,
   })
   if (!parsed.lines.length) throw new Error('No PDF line items were detected. Run OCR or attach a clearer PDF before correction.')
+  const blockingParseWarnings = (parsed.parse_warnings || []).filter((warning: string) =>
+    /Suspicious item code|Suspicious quantity\/price parse/i.test(warning),
+  )
+  if (blockingParseWarnings.length) {
+    throw new Error(
+      `PO correction blocked: PDF parsing looks unreliable. ${blockingParseWarnings[0]} ` +
+      `Review the PDF mapping manually instead of auto-correcting this PO.`,
+    )
+  }
 
   const dbSupplier = normalizeSupplierText(po.suppliers?.name || '')
   const pdfSupplier = normalizeSupplierText(parsed.supplier_name || '')
