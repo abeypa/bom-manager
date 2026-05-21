@@ -2720,6 +2720,17 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       }
 
       const po_number = a.po_number || `CPO-${Date.now().toString().slice(-8)}`
+      const { data: existingPO } = await (supabase as any)
+        .from('purchase_orders')
+        .select('id, po_number, status')
+        .eq('po_number', po_number)
+        .maybeSingle()
+      if (existingPO?.id) {
+        throw new Error(
+          `PO ${po_number} already exists in DB (id=${existingPO.id}, status=${existingPO.status}). ` +
+          `Do not create a duplicate PO. Review or correct the existing entry instead.`,
+        )
+      }
       const poData: any = {
         po_number,
         project_id: a.project_id,
