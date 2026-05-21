@@ -463,18 +463,26 @@ export const purchaseOrdersApi = {
    * update, or delete so downstream reports stay accurate.
    */
   recalcPOTotals: async (poId: number) => {
+    const { data: poHeader } = await supabase
+      .from('purchase_orders')
+      .select('commercial_adjustment_amount')
+      .eq('id', poId)
+      .single();
+
     const { data: items } = await supabase
       .from('purchase_order_items')
       .select('quantity, unit_price, discount_percent')
       .eq('purchase_order_id', poId);
 
     const rows = (items as any[]) || [];
-    const grand_total = rows.reduce((s, r) => {
+    const lines_total = rows.reduce((s, r) => {
       const qty = r.quantity || 0;
       const price = r.unit_price || 0;
       const disc = r.discount_percent || 0;
       return s + qty * price * (1 - disc / 100);
     }, 0);
+    const commercialAdjustment = Number((poHeader as any)?.commercial_adjustment_amount || 0);
+    const grand_total = lines_total + commercialAdjustment;
     const total_items = rows.length;
     const total_quantity = rows.reduce((s, r) => s + (r.quantity || 0), 0);
 

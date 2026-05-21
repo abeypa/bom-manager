@@ -299,6 +299,9 @@ export interface Database {
           status: 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled'
           currency: string
           grand_total: number
+          commercial_adjustment_label: string | null
+          commercial_adjustment_percent: number
+          commercial_adjustment_amount: number
           total_items: number
           total_quantity: number
           notes: string | null
@@ -317,6 +320,9 @@ export interface Database {
           status?: 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled'
           currency?: string
           grand_total?: number
+          commercial_adjustment_label?: string | null
+          commercial_adjustment_percent?: number
+          commercial_adjustment_amount?: number
           total_items?: number
           total_quantity?: number
           notes?: string | null

@@ -78,7 +78,15 @@ function lineKey(line: Pick<ParsedPOLine, 'item_code' | 'description'>) {
 
 function itemKey(item: any) {
   const candidates = codeCandidates(item)
-  if (candidates.length) return candidates[0]
+  if (candidates.length) {
+    const exactPdfLike = candidates.find((candidate) => /^\d{6,}$/.test(candidate))
+    if (exactPdfLike) return exactPdfLike
+    const suffix = candidates
+      .map((candidate) => candidate.match(/(\d{6,})$/)?.[1] || null)
+      .find(Boolean)
+    if (suffix) return suffix
+    return candidates[0]
+  }
   return normalize(item.description).slice(0, 24)
 }
 

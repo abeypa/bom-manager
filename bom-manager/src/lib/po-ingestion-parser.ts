@@ -19,6 +19,9 @@ export interface ParsedPODocument {
   po_date: string | null
   currency: string
   basic_amount: number | null
+  commercial_adjustment_label?: string | null
+  commercial_adjustment_percent?: number | null
+  commercial_adjustment_amount?: number | null
   subtotal: number | null
   total_amount: number | null
   parse_status: 'parsed' | 'needs_review' | 'needs_ocr' | 'failed'
@@ -336,6 +339,28 @@ function isPseudoChargeLine(line: Pick<ParsedPOLine, 'item_code' | 'description'
   return false
 }
 
+function extractCommercialAdjustment(lines: ParsedPOLine[]) {
+  const pseudo = lines.find((line) => isPseudoChargeLine(line))
+  if (!pseudo) {
+    return {
+      label: null,
+      percent: null,
+      amount: null,
+    }
+  }
+
+  const raw = `${pseudo.description || ''} ${pseudo.raw_line || ''}`.replace(/\s+/g, ' ').trim()
+  const percent =
+    parseDiscountPercent(raw.match(/(\d+(?:\.\d+)?)\s*%/i)?.[1]) ??
+    parseDiscountPercent(pseudo.description.match(/(\d+(?:\.\d+)?)\s*%/i)?.[1])
+
+  return {
+    label: pseudo.description || pseudo.item_code || 'Commercial adjustment',
+    percent,
+    amount: pseudo.total_amount != null ? Number(pseudo.total_amount) : null,
+  }
+}
+
 function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
   const headerStart = lines.findIndex((line, index) =>
     /^sl$/i.test(line) &&
@@ -591,6 +616,7 @@ export function parsePurchaseOrderText(args: {
     .map((line, i) => parseLine(line, i))
     .filter((line): line is ParsedPOLine => Boolean(line))
   const rawParsedLines = chooseBestParsedLines([visualLines, columnLines, genericLines], parsedBasicAmount)
+  const commercialAdjustment = extractCommercialAdjustment(rawParsedLines)
   const parsedLines = pickLinesMatchingBasicAmount(rawParsedLines, parsedBasicAmount).filter((line) => !isPseudoChargeLine(line))
 
   if (!poNumber) warnings.push('PO number was not detected.')
@@ -612,6 +638,9 @@ export function parsePurchaseOrderText(args: {
     po_date: poDate,
     currency: detectCurrency(rawText),
     basic_amount: parsedBasicAmount,
+    commercial_adjustment_label: commercialAdjustment.label,
+    commercial_adjustment_percent: commercialAdjustment.percent,
+    commercial_adjustment_amount: commercialAdjustment.amount,
     subtotal: parseNumber(subtotalRaw),
     total_amount: parseNumber(totalRaw),
     parse_status: warnings.length ? 'needs_review' : 'parsed',
