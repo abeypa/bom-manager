@@ -145,6 +145,12 @@ export async function chatCompletion(opts: {
 
   if (!res.ok) {
     const text = await res.text()
+    if (res.status === 405) {
+      throw new Error(
+        'AI proxy 405: the secure OpenRouter proxy is not available on this host. ' +
+        'In local development, run both `npm run dev` and `npm run dev:worker` so /api/openrouter/chat is served by the Worker.',
+      )
+    }
     throw new Error(`AI proxy ${res.status}: ${text}`)
   }
   return (await res.json()) as ORCompletionResponse

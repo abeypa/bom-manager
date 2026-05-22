@@ -5,6 +5,7 @@
   "description": "A Bill of Materials (BOM) management system for tracking components, assemblies, and inventory.",
   "scripts": {
     "dev": "vite",
+    "dev:worker": "wrangler dev --port 8787",
     "build": "vite build",
     "preview": "vite preview",
     "preview:prod": "vite preview --host",
