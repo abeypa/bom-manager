@@ -49,6 +49,8 @@ public/templates/!Part Input.xlsm
 wrangler.toml.bak
 wrangler-dist/
 .wrangler/
+.wrangler-data/
+.dev.vars
 .python-version
 __pycache__/
 *.py[cod]
