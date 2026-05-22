@@ -9,6 +9,8 @@ export type PurchaseOrderItem = Database['public']['Tables']['purchase_order_ite
 // Updated status with Draft as initial state
 export type POStatus = 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled';
 
+const roundMoney = (value: number) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
+
 export const purchaseOrdersApi = {
   // Get all POs
   getAll: async () => {
@@ -465,24 +467,38 @@ export const purchaseOrdersApi = {
   recalcPOTotals: async (poId: number) => {
     const { data: poHeader } = await supabase
       .from('purchase_orders')
-      .select('commercial_adjustment_amount')
+      .select('currency, original_currency, commercial_adjustment_amount, original_commercial_adjustment_amount')
       .eq('id', poId)
       .single();
 
     const { data: items } = await supabase
       .from('purchase_order_items')
-      .select('quantity, unit_price, discount_percent')
+      .select('quantity, unit_price, discount_percent, total_amount, original_total_amount')
       .eq('purchase_order_id', poId);
 
     const rows = (items as any[]) || [];
     const lines_total = rows.reduce((s, r) => {
-      const qty = r.quantity || 0;
-      const price = r.unit_price || 0;
-      const disc = r.discount_percent || 0;
-      return s + qty * price * (1 - disc / 100);
+      const stored = Number(r.total_amount)
+      if (Number.isFinite(stored)) return s + stored
+      const qty = Number(r.quantity || 0)
+      const price = Number(r.unit_price || 0)
+      const disc = Number(r.discount_percent || 0)
+      return s + qty * price * (1 - disc / 100)
     }, 0);
     const commercialAdjustment = Number((poHeader as any)?.commercial_adjustment_amount || 0);
-    const grand_total = lines_total + commercialAdjustment;
+    const grand_total = roundMoney(lines_total + commercialAdjustment);
+
+    const originalLinesTotal = rows.reduce((s, r) => {
+      const stored = Number(r.original_total_amount)
+      if (Number.isFinite(stored)) return s + stored
+      return s + Number(r.total_amount || 0)
+    }, 0)
+    const originalCommercialAdjustment = Number(
+      (poHeader as any)?.original_commercial_adjustment_amount ??
+      (poHeader as any)?.commercial_adjustment_amount ??
+      0,
+    )
+    const original_grand_total = roundMoney(originalLinesTotal + originalCommercialAdjustment)
     const total_items = rows.length;
     const total_quantity = rows.reduce((s, r) => s + (r.quantity || 0), 0);
 
@@ -490,13 +506,142 @@ export const purchaseOrdersApi = {
       .from('purchase_orders')
       .update({
         grand_total,
+        original_grand_total,
         total_items,
         total_quantity,
         updated_date: new Date().toISOString(),
       })
       .eq('id', poId);
     if (error) throw error;
-    return { grand_total, total_items, total_quantity };
+    return { grand_total, original_grand_total, total_items, total_quantity };
+  },
+
+  convertDraftPOCurrency: async (
+    poId: number,
+    {
+      targetCurrency,
+      exchangeRate,
+      exchangeRateDate,
+      exchangeRateSource,
+      allowPreviousBusinessDay = false,
+    }: {
+      targetCurrency: string
+      exchangeRate: number
+      exchangeRateDate: string
+      exchangeRateSource?: string | null
+      allowPreviousBusinessDay?: boolean
+    },
+  ) => {
+    const normalizedTarget = String(targetCurrency || '').trim().toUpperCase()
+    if (!normalizedTarget) throw new Error('Target currency is required.')
+    if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new Error('Exchange rate must be a positive number.')
+    if (!exchangeRateDate) throw new Error('Exchange rate date is required.')
+
+    const { data: po, error: poError } = await supabase
+      .from('purchase_orders')
+      .select('id, po_number, po_date, status, currency, original_currency, grand_total, original_grand_total, commercial_adjustment_amount, original_commercial_adjustment_amount, notes')
+      .eq('id', poId)
+      .single()
+    if (poError) throw poError
+    if (!po) throw new Error('PO not found.')
+    if ((po as any).status !== 'Draft') {
+      throw new Error(`Only Draft POs can be currency-converted. Current status is ${(po as any).status}.`)
+    }
+
+    const currentCurrency = String((po as any).currency || 'INR').trim().toUpperCase()
+    const sourceCurrency = String((po as any).original_currency || currentCurrency).trim().toUpperCase()
+    if (currentCurrency === normalizedTarget) {
+      throw new Error(`PO is already in ${normalizedTarget}. No conversion needed.`)
+    }
+    if (sourceCurrency !== currentCurrency) {
+      throw new Error(
+        `PO ${(po as any).po_number} has already been converted from ${sourceCurrency} to ${currentCurrency}. ` +
+        'Do not convert the same PO twice.',
+      )
+    }
+
+    const poDate = String((po as any).po_date || '').slice(0, 10)
+    const rateDate = String(exchangeRateDate).slice(0, 10)
+    if (poDate && rateDate !== poDate) {
+      if (!allowPreviousBusinessDay) {
+        throw new Error(
+          `Exchange rate date ${rateDate} does not match PO date ${poDate}. ` +
+          'Re-run with allow_previous_business_day=true only if you intentionally used the nearest previous business-day rate.',
+        )
+      }
+      if (rateDate > poDate) {
+        throw new Error(`Exchange rate date ${rateDate} cannot be after PO date ${poDate}.`)
+      }
+      const diffDays = Math.floor((Date.parse(poDate) - Date.parse(rateDate)) / (24 * 60 * 60 * 1000))
+      if (diffDays > 7) {
+        throw new Error(`Exchange rate date ${rateDate} is too far from PO date ${poDate} (${diffDays} days).`)
+      }
+    }
+
+    const { data: items, error: itemsError } = await supabase
+      .from('purchase_order_items')
+      .select('id, quantity, unit_price, discount_percent, total_amount, original_currency, original_unit_price, original_total_amount')
+      .eq('purchase_order_id', poId)
+    if (itemsError) throw itemsError
+
+    const sourceCommercialAdjustment = Number(
+      (po as any).original_commercial_adjustment_amount ??
+      (po as any).commercial_adjustment_amount ??
+      0,
+    )
+    const convertedCommercialAdjustment = roundMoney(sourceCommercialAdjustment * exchangeRate)
+
+    for (const item of items || []) {
+      const sourceUnitPrice = Number((item as any).original_unit_price ?? (item as any).unit_price ?? 0)
+      const sourceLineTotal = Number((item as any).original_total_amount ?? (item as any).total_amount ?? 0)
+      const convertedUnitPrice = roundMoney(sourceUnitPrice * exchangeRate)
+      const convertedLineTotal = roundMoney(sourceLineTotal * exchangeRate)
+
+      const { error } = await (supabase as any)
+        .from('purchase_order_items')
+        .update({
+          original_currency: (item as any).original_currency || currentCurrency,
+          original_unit_price: (item as any).original_unit_price ?? (item as any).unit_price,
+          original_total_amount: (item as any).original_total_amount ?? (item as any).total_amount,
+          unit_price: convertedUnitPrice,
+          total_amount: convertedLineTotal,
+        })
+        .eq('id', (item as any).id)
+      if (error) throw error
+    }
+
+    const note = `Converted from ${currentCurrency} to ${normalizedTarget} using exchange rate ${exchangeRate} on ${rateDate}${exchangeRateSource ? ` (${exchangeRateSource})` : ''}.`
+    const { error: headerError } = await (supabase as any)
+      .from('purchase_orders')
+      .update({
+        original_currency: (po as any).original_currency || currentCurrency,
+        original_grand_total: (po as any).original_grand_total ?? (po as any).grand_total,
+        original_commercial_adjustment_amount:
+          (po as any).original_commercial_adjustment_amount ?? (po as any).commercial_adjustment_amount ?? 0,
+        currency: normalizedTarget,
+        exchange_rate: exchangeRate,
+        exchange_rate_date: rateDate,
+        exchange_rate_source: exchangeRateSource || null,
+        commercial_adjustment_amount: convertedCommercialAdjustment,
+        notes: (po as any).notes
+          ? `${(po as any).notes} | ${note}`
+          : note,
+        updated_date: new Date().toISOString(),
+      })
+      .eq('id', poId)
+    if (headerError) throw headerError
+
+    const totals = await purchaseOrdersApi.recalcPOTotals(poId)
+    return {
+      po_id: poId,
+      po_number: (po as any).po_number,
+      source_currency: currentCurrency,
+      target_currency: normalizedTarget,
+      exchange_rate: exchangeRate,
+      exchange_rate_date: rateDate,
+      exchange_rate_source: exchangeRateSource || null,
+      totals,
+    }
   },
 
   /**

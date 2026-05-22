@@ -84,6 +84,7 @@ const MAX_QTY = 1_000_000
 const MAX_PRICE = 1_000_000_000
 const MAX_DESC_LEN = 2000
 const IMAGE_EXT_RE = /\.(jpg|jpeg|png|webp)(\?|$)/i
+const roundMoney = (value: number) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
 
 function assertNonEmpty(field: string, v: any) {
   if (v == null || (typeof v === 'string' && v.trim() === '')) {
@@ -106,6 +107,20 @@ function assertMaxLen(field: string, v: any, max: number) {
 async function assertRowExists(table: string, id: number, label?: string) {
   const { data } = await (supabase as any).from(table).select('id').eq('id', id).maybeSingle()
   if (!data) throw new Error(`${label || table} #${id} does not exist.`)
+}
+
+function parsedMatchesOriginalPOCurrency(po: any, parsed: any) {
+  const parsedCurrency = String(parsed?.currency || 'INR').trim().toUpperCase()
+  const currentCurrency = String(po?.currency || 'INR').trim().toUpperCase()
+  const originalCurrency = String(po?.original_currency || '').trim().toUpperCase()
+  return Boolean(originalCurrency && parsedCurrency === originalCurrency && currentCurrency !== parsedCurrency)
+}
+
+function comparablePoHeaderTotal(po: any, parsed: any) {
+  if (parsedMatchesOriginalPOCurrency(po, parsed)) {
+    return Number(po.original_grand_total ?? po.grand_total ?? 0)
+  }
+  return Number(po.grand_total || 0)
 }
 
 function extractLikelyCatalogNumbers(text: string): string[] {
@@ -446,6 +461,13 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
     )
   }
 
+  if (parsedMatchesOriginalPOCurrency(po, parsed)) {
+    throw new Error(
+      `PO correction blocked: PO ${po.po_number} was converted from ${po.original_currency} to ${po.currency}. ` +
+      `Audit is supported, but automatic PDF correction is disabled for converted POs until a conversion-aware repair flow is used.`,
+    )
+  }
+
   const dbSupplier = normalizeSupplierText(po.suppliers?.name || '')
   const pdfSupplier = normalizeSupplierText(parsed.supplier_name || '')
   if (dbSupplier && pdfSupplier && !dbSupplier.includes(pdfSupplier) && !pdfSupplier.includes(dbSupplier)) {
@@ -600,12 +622,13 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
 
   const newGrand = desiredItems.reduce((sum, item) => sum + item.total_amount, 0)
   const pdfBasic = Number(parsed.basic_amount || 0)
-  const dbGrandTotal = Number(po.grand_total || 0)
-  // Accept if: PDF basic matches newGrand, OR DB grand_total matches newGrand (handles DISC-column parser misreads)
+  const dbComparableTotal = comparablePoHeaderTotal(po, parsed)
+  // Accept if: PDF basic matches newGrand, OR the comparable DB total matches newGrand
+  // (for converted foreign-currency POs this uses original_grand_total).
   const amountOk =
     pdfBasic <= 0 ||
     Math.abs(newGrand - pdfBasic) <= Math.max(5, pdfBasic * 0.02) ||
-    (dbGrandTotal > 0 && Math.abs(newGrand - dbGrandTotal) <= Math.max(5, dbGrandTotal * 0.02))
+    (dbComparableTotal > 0 && Math.abs(newGrand - dbComparableTotal) <= Math.max(5, dbComparableTotal * 0.02))
   if (!amountOk) {
     return {
       ok_to_apply: false,
@@ -615,7 +638,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
         status: po.status,
         supplier: po.suppliers?.name,
         project: po.project,
-        old_total: po.grand_total || 0,
+        old_total: dbComparableTotal,
         new_total: newGrand,
         old_line_count: oldItems.length,
         new_line_count: desiredItems.length,
@@ -626,8 +649,9 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
         po_date: parsed.po_date,
         line_count: parsed.lines.length,
         basic_amount: parsed.basic_amount,
+        currency: parsed.currency || 'INR',
       },
-      message: `Correction blocked: parsed line total ${newGrand.toFixed(2)} does not match PDF Basic Amount ${pdfBasic.toFixed(2)} or DB total ${dbGrandTotal.toFixed(2)}.`,
+      message: `Correction blocked: parsed line total ${newGrand.toFixed(2)} does not match PDF Basic Amount ${pdfBasic.toFixed(2)} or comparable DB total ${dbComparableTotal.toFixed(2)}.`,
     }
   }
   const inserts = desiredItems.filter((item) => !item.old_item_id).length
@@ -641,7 +665,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
       status: po.status,
       supplier: po.suppliers?.name,
       project: po.project,
-      old_total: po.grand_total || 0,
+      old_total: dbComparableTotal,
       new_total: newGrand,
       old_line_count: oldItems.length,
       new_line_count: desiredItems.length,
@@ -651,6 +675,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
       supplier_name: parsed.supplier_name,
       po_date: parsed.po_date,
       line_count: parsed.lines.length,
+      currency: parsed.currency || 'INR',
     },
     changes: {
       update_lines: updates,
@@ -1926,6 +1951,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         base_price: a.base_price,
         discount_percent: a.discount_percent || 0,
         currency: a.currency || 'INR',
+        original_currency: a.currency || 'INR',
         image_path: a.image_path || null,
         specifications: a.specifications || null,
       }
@@ -2740,12 +2766,53 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         currency: a.currency || 'INR',
         status: 'Draft',          // hard-coded — AI cannot create non-Draft POs
         grand_total: grand,        // GST excluded by design
+        original_grand_total: grand,
         total_items: poItems.length,
         total_quantity: poItems.reduce((s, i) => s + i.quantity, 0),
         notes: (a.notes ? a.notes + ' | ' : '') + 'Drafted by AI from source PO. GST excluded.',
         created_date: new Date().toISOString(),
       }
       return purchaseOrdersApi.createPurchaseOrderWithItems(poData, poItems)
+    },
+  },
+  {
+    name: 'convert_draft_po_currency',
+    kind: 'write',
+    description:
+      'Convert an existing Draft PO from its source currency into a target currency using a confirmed exchange rate. ' +
+      'This preserves the original line/header values for audit, records exchange-rate metadata on the PO, and updates the live draft values to the target currency. ' +
+      'Use only after the user explicitly confirms the exchange rate, date, and source.',
+    parameters: {
+      type: 'object',
+      required: ['po_id', 'target_currency', 'exchange_rate', 'exchange_rate_date'],
+      properties: {
+        po_id: { type: 'number' },
+        target_currency: { type: 'string', description: 'Converted working currency, e.g. INR.' },
+        exchange_rate: { type: 'number', minimum: 0.000001 },
+        exchange_rate_date: { type: 'string', description: 'ISO date for the exchange rate used.' },
+        exchange_rate_source: { type: 'string', description: 'Optional source label, e.g. RBI reference rate.' },
+        allow_previous_business_day: {
+          type: 'boolean',
+          default: false,
+          description: 'Set true only when the exact PO-date rate was unavailable and you intentionally used the nearest previous business-day rate.',
+        },
+      },
+    },
+    summarize: (a) =>
+      `Convert draft PO #${a.po_id} to ${String(a.target_currency || '').toUpperCase()} at rate ${a.exchange_rate} on ${a.exchange_rate_date}`,
+    handler: async (a: any) => {
+      assertInteger('po_id', a.po_id)
+      assertNonEmpty('target_currency', a.target_currency)
+      assertNumberInRange('exchange_rate', a.exchange_rate, 0.000001, MAX_PRICE)
+      assertNonEmpty('exchange_rate_date', a.exchange_rate_date)
+
+      return purchaseOrdersApi.convertDraftPOCurrency(a.po_id, {
+        targetCurrency: a.target_currency,
+        exchangeRate: Number(a.exchange_rate),
+        exchangeRateDate: a.exchange_rate_date,
+        exchangeRateSource: a.exchange_rate_source || null,
+        allowPreviousBusinessDay: Boolean(a.allow_previous_business_day),
+      })
     },
   },
   {

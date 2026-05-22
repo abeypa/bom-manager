@@ -316,9 +316,15 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
                     CHECK (status IN ('Pending','Sent','Confirmed','Partial','Received','Cancelled')),
   currency        TEXT NOT NULL DEFAULT 'INR',
   grand_total     NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  original_currency TEXT,
+  original_grand_total NUMERIC(18, 2),
+  exchange_rate NUMERIC(18, 6),
+  exchange_rate_date DATE,
+  exchange_rate_source TEXT,
   commercial_adjustment_label TEXT,
   commercial_adjustment_percent NUMERIC(5, 2) NOT NULL DEFAULT 0,
   commercial_adjustment_amount NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  original_commercial_adjustment_amount NUMERIC(18, 2),
   total_items     INT NOT NULL DEFAULT 0,
   total_quantity  INT NOT NULL DEFAULT 0,
   notes           TEXT,
@@ -342,8 +348,11 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
   description         TEXT,
   quantity            INT NOT NULL DEFAULT 0,
   unit_price          NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  original_currency   TEXT,
+  original_unit_price NUMERIC(18, 2),
   discount_percent    NUMERIC(5, 2) NOT NULL DEFAULT 0,
   total_amount        NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  original_total_amount NUMERIC(18, 2),
   project_part_id     BIGINT REFERENCES project_parts(id)
 );
 

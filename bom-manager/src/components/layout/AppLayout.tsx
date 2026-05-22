@@ -168,10 +168,10 @@ export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // Sync admin-configured AI key from DB into localStorage so all users can use AI
+  // Sync the shared AI model from DB into localStorage so all users use the same proxy-backed model.
   useEffect(() => {
     if (!user) return;
-    loadSettingsFromDB().then(s => { if (s?.apiKey) saveSettings(s); });
+    loadSettingsFromDB().then(s => { if (s?.model) saveSettings(s); });
   }, [user]);
 
   useEffect(() => {

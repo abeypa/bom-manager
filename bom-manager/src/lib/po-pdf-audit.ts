@@ -144,10 +144,7 @@ function aggregateDbItems(items: any[]) {
       row_count: 0,
     }
     current.quantity += Number(item.quantity || 0)
-    current.total_amount +=
-      Number(item.quantity || 0) *
-      Number(item.unit_price || 0) *
-      (1 - Number(item.discount_percent || 0) / 100)
+    current.total_amount += Number(item.total_amount || 0)
     current.row_count += 1
     if (current.unit_price == null && item.unit_price != null) current.unit_price = Number(item.unit_price)
     if (current.discount_percent == null && item.discount_percent != null) current.discount_percent = Number(item.discount_percent)
@@ -155,6 +152,26 @@ function aggregateDbItems(items: any[]) {
   }
 
   return groups
+}
+
+function auditUsesOriginalCurrency(po: any, parsed: ReturnType<typeof parsePurchaseOrderText>) {
+  const pdfCurrency = normalize(parsed.currency || 'INR')
+  const currentCurrency = normalize(po.currency || 'INR')
+  const originalCurrency = normalize(po.original_currency || '')
+  return Boolean(originalCurrency && originalCurrency === pdfCurrency && currentCurrency !== pdfCurrency)
+}
+
+function auditItemView(item: any, useOriginal: boolean, currencyFallback: string) {
+  return {
+    ...item,
+    unit_price: useOriginal ? (item.original_unit_price ?? item.unit_price) : item.unit_price,
+    total_amount: useOriginal ? (item.original_total_amount ?? item.total_amount) : item.total_amount,
+    currency: useOriginal ? (item.original_currency || currencyFallback) : currencyFallback,
+  }
+}
+
+function comparableDbHeaderTotal(po: any, useOriginal: boolean) {
+  return Number(useOriginal ? (po.original_grand_total ?? po.grand_total ?? 0) : (po.grand_total ?? 0))
 }
 
 function pdfBasicComparableAmount(parsed: ReturnType<typeof parsePurchaseOrderText>) {
@@ -231,6 +248,36 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
     }
 
     const dbItems = po.purchase_order_items || []
+    const useOriginalCurrency = auditUsesOriginalCurrency(po, parsed)
+    const comparableDbItems = dbItems.map((item: any) =>
+      auditItemView(
+        item,
+        useOriginalCurrency,
+        useOriginalCurrency ? (po.original_currency || po.currency || 'INR') : (po.currency || 'INR'),
+      ),
+    )
+
+    if (
+      normalize(parsed.currency || 'INR') !== normalize(po.currency || 'INR') &&
+      !useOriginalCurrency
+    ) {
+      issues.push({
+        severity: 'warning',
+        label: 'Currency mismatch',
+        expected: po.currency || 'INR',
+        actual: parsed.currency || 'INR',
+      })
+    }
+
+    if (useOriginalCurrency && (!po.exchange_rate || !po.exchange_rate_date)) {
+      issues.push({
+        severity: 'warning',
+        label: 'Conversion metadata',
+        expected: 'Exchange rate and exchange rate date recorded on PO',
+        actual: 'PO appears converted, but exchange metadata is missing',
+      })
+    }
+
     if (parsed.lines.length !== dbItems.length) {
       issues.push({
         severity: 'warning',
@@ -241,9 +288,9 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
     }
 
     const pdfLineGroups = aggregatePdfLines(parsed.lines)
-    const dbItemGroups = aggregateDbItems(dbItems)
+    const dbItemGroups = aggregateDbItems(comparableDbItems)
 
-    for (const item of dbItems) {
+    for (const item of comparableDbItems) {
       const key = itemKey(item)
       const dbGroup = dbItemGroups.get(key)
       const pdfGroup = pdfLineGroups.get(key)
@@ -265,18 +312,11 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
         continue
       }
 
-      // Primary check: if the DB line total matches the PDF line total, accept the line.
-      // The BEP PO DISC column contains two numbers ("419.00 @ 2.00%") which can cause
-      // generic parsers to swap qty and unit_price. The total_amount is unambiguous.
-      const dbLineAmount =
-        Number(item.quantity || 0) *
-        Number(item.unit_price || 0) *
-        (1 - Number(item.discount_percent || 0) / 100)
+      const dbLineAmount = Number(item.total_amount || 0)
       if (line.total_amount != null && dbLineAmount > 0 && closeEnough(dbLineAmount, line.total_amount, 1)) {
-        continue // line total matches — data is correct
+        continue
       }
 
-      // Secondary checks — only run when line totals differ or aren't available
       if (line.quantity != null && !closeEnough(item.quantity, line.quantity)) {
         issues.push({
           severity: 'error',
@@ -335,11 +375,12 @@ export async function auditPurchaseOrderPdf(po: any): Promise<POPdfAuditResult> 
     }
 
     const pdfBasicAmount = pdfBasicComparableAmount(parsed)
-    if (pdfBasicAmount && po.grand_total != null && !closeEnough(po.grand_total, pdfBasicAmount.value, 5)) {
+    const comparableDbTotal = comparableDbHeaderTotal(po, useOriginalCurrency)
+    if (pdfBasicAmount && comparableDbTotal > 0 && !closeEnough(comparableDbTotal, pdfBasicAmount.value, 5)) {
       issues.push({
         severity: 'warning',
         label: 'Basic amount',
-        expected: money(po.grand_total),
+        expected: money(comparableDbTotal),
         actual: `${money(pdfBasicAmount.value)} (${pdfBasicAmount.label})`,
       })
     }

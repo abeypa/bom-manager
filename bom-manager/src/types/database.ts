@@ -299,9 +299,15 @@ export interface Database {
           status: 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled'
           currency: string
           grand_total: number
+          original_currency: string | null
+          original_grand_total: number | null
+          exchange_rate: number | null
+          exchange_rate_date: string | null
+          exchange_rate_source: string | null
           commercial_adjustment_label: string | null
           commercial_adjustment_percent: number
           commercial_adjustment_amount: number
+          original_commercial_adjustment_amount: number | null
           total_items: number
           total_quantity: number
           notes: string | null
@@ -320,9 +326,15 @@ export interface Database {
           status?: 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled'
           currency?: string
           grand_total?: number
+          original_currency?: string | null
+          original_grand_total?: number | null
+          exchange_rate?: number | null
+          exchange_rate_date?: string | null
+          exchange_rate_source?: string | null
           commercial_adjustment_label?: string | null
           commercial_adjustment_percent?: number
           commercial_adjustment_amount?: number
+          original_commercial_adjustment_amount?: number | null
           total_items?: number
           total_quantity?: number
           notes?: string | null
@@ -344,8 +356,11 @@ export interface Database {
           description: string | null
           quantity: number
           unit_price: number
+          original_currency: string | null
+          original_unit_price: number | null
           discount_percent: number
           total_amount: number
+          original_total_amount: number | null
           received_qty?: number
           project_part_id: number | null
           part_id?: number | null
@@ -358,8 +373,11 @@ export interface Database {
           description?: string | null
           quantity?: number
           unit_price?: number
+          original_currency?: string | null
+          original_unit_price?: number | null
           discount_percent?: number
           total_amount?: number
+          original_total_amount?: number | null
           received_qty?: number
           project_part_id?: number | null
           part_id?: number | null

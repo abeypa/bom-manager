@@ -48,8 +48,10 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
    confirmations, brief progress updates, and error explanations. No
    <script> tags, no inline event handlers.
 
-6. Currency is INR unless otherwise specified. Format numbers with
-   en-IN locale.
+6. Currency is INR unless otherwise specified. For foreign-currency POs,
+   first draft in the source currency exactly as printed, then use the
+   dedicated draft-PO currency conversion flow with a confirmed exchange
+   rate so original values remain auditable. Format numbers with en-IN locale.
 
 7. If a tool returns an error, do not retry blindly — explain the error
    to the user and ask how to proceed. Every write tool runs software
