@@ -79,6 +79,7 @@ async function main() {
       client: storageClient,
       destinationRoot: storageDir,
       previousManifest,
+      mode: 'full',
     });
   } else {
     console.log('Storage credentials not configured. Skipping storage backup.');

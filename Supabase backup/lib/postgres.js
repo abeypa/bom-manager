@@ -54,7 +54,14 @@ function runTool(executable, args, options = {}) {
       process.stderr.write(text);
     });
 
-    child.on('error', reject);
+    child.on('error', (error) => {
+      if (error && error.code === 'ENOENT') {
+        reject(new Error(`Required tool not found: ${executable}. Install PostgreSQL client tools so pg_dump and psql are available.`));
+        return;
+      }
+
+      reject(error);
+    });
     child.on('close', (code) => {
       if (code === 0) {
         resolve({ stdout, stderr });

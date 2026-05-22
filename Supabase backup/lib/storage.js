@@ -73,18 +73,20 @@ async function downloadObject(client, destinationRoot, objectInfo) {
   await pipeline(response.Body, fs.createWriteStream(destinationFile));
 }
 
-async function backupStorage({ client, destinationRoot, previousManifest = [] }) {
+async function backupStorage({ client, destinationRoot, previousManifest = [], mode = 'incremental' }) {
   const currentObjects = await listAllStorageObjects(client);
   const previousMap = new Map(previousManifest.map((entry) => [`${entry.bucket}/${entry.key}`, entry]));
 
-  const changedObjects = currentObjects.filter((entry) => {
-    const existing = previousMap.get(`${entry.bucket}/${entry.key}`);
-    if (!existing) {
-      return true;
-    }
+  const changedObjects = mode === 'full'
+    ? currentObjects
+    : currentObjects.filter((entry) => {
+        const existing = previousMap.get(`${entry.bucket}/${entry.key}`);
+        if (!existing) {
+          return true;
+        }
 
-    return existing.etag !== entry.etag || existing.size !== entry.size || existing.lastModified !== entry.lastModified;
-  });
+        return existing.etag !== entry.etag || existing.size !== entry.size || existing.lastModified !== entry.lastModified;
+      });
 
   for (const entry of changedObjects) {
     process.stdout.write(`Downloading storage object ${entry.bucket}/${entry.key}...\n`);
