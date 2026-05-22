@@ -82,6 +82,17 @@ function workerEndpoints(path: string) {
   return endpoints
 }
 
+function proxyUnavailableMessage(kind: 'config' | 'chat') {
+  if (isLocalDev()) {
+    return kind === 'config'
+      ? 'AI proxy 405: the secure OpenRouter config endpoint is not available on this host. In local development, run both `npm run dev` and `npm run dev:worker`.'
+      : 'AI proxy 405: the secure OpenRouter proxy is not available on this host. In local development, run both `npm run dev` and `npm run dev:worker` so /api/openrouter/chat is served by the Worker.'
+  }
+  return kind === 'config'
+    ? 'AI proxy 405: the deployed Worker does not have the secure OpenRouter config endpoint yet. Deploy the latest Worker code and set the required Worker secrets.'
+    : 'AI proxy 405: the deployed Worker does not have the secure OpenRouter chat proxy yet. Deploy the latest Worker code and set the required Worker secrets.'
+}
+
 async function workerFetch(
   path: string,
   init: RequestInit,
@@ -172,7 +183,7 @@ export async function getAIProxyConfigStatus(): Promise<AIProxyConfigStatus> {
   const res = await workerFetch(
     CONFIG_URL,
     { method: 'GET', headers },
-    'AI proxy 405: the secure OpenRouter config endpoint is not available on this host. In local development, run both `npm run dev` and `npm run dev:worker`.',
+    proxyUnavailableMessage('config'),
   )
   return (await res.json()) as AIProxyConfigStatus
 }
@@ -188,7 +199,7 @@ export async function saveAIProxyApiKey(apiKey: string): Promise<AIProxyConfigSt
       headers,
       body: JSON.stringify({ apiKey: trimmed }),
     },
-    'AI proxy 405: the secure OpenRouter config endpoint is not available on this host. In local development, run both `npm run dev` and `npm run dev:worker`.',
+    proxyUnavailableMessage('config'),
   )
   return (await res.json()) as AIProxyConfigStatus
 }
@@ -201,7 +212,7 @@ export async function clearAIProxyApiKey(): Promise<AIProxyConfigStatus> {
       method: 'DELETE',
       headers,
     },
-    'AI proxy 405: the secure OpenRouter config endpoint is not available on this host. In local development, run both `npm run dev` and `npm run dev:worker`.',
+    proxyUnavailableMessage('config'),
   )
   return (await res.json()) as AIProxyConfigStatus
 }
@@ -242,7 +253,7 @@ export async function chatCompletion(opts: {
       body: payload,
       signal: opts.signal,
     },
-    'AI proxy 405: the secure OpenRouter proxy is not available on this host. In local development, run both `npm run dev` and `npm run dev:worker` so /api/openrouter/chat is served by the Worker.',
+    proxyUnavailableMessage('chat'),
   )
 
   return (await res.json()) as ORCompletionResponse
