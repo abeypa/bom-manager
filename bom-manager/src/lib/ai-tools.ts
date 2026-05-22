@@ -1951,7 +1951,6 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         base_price: a.base_price,
         discount_percent: a.discount_percent || 0,
         currency: a.currency || 'INR',
-        original_currency: a.currency || 'INR',
         image_path: a.image_path || null,
         specifications: a.specifications || null,
       }
