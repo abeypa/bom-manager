@@ -1,18 +1,25 @@
 {
   "name": "supabase-backup",
   "version": "1.0.0",
-  "description": "",
-  "main": "backup.js",
+  "description": "Supabase full backup, incremental backup, and restore toolkit",
+  "main": "backup_full.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "backup:full": "node backup_full.js",
+    "backup:incremental": "node backup_incremental.js",
+    "restore": "node restore_backup.js",
+    "overview:help": "node -e \"console.log('Run database_overview.sql in the Supabase SQL Editor.')\""
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "supabase",
+    "backup",
+    "restore",
+    "postgres"
+  ],
+  "author": "OpenAI Codex",
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1030.0",
     "dotenv": "^17.4.1",
-    "pg": "^8.20.0",
-    "pg-dump": "^0.10.0"
+    "pg": "^8.20.0"
   }
 }

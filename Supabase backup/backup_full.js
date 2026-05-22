@@ -1,97 +1,126 @@
-const fs = require('fs');
 const path = require('path');
-const { Client } = require('pg');
+const { loadConfig, hasStorageCredentials } = require('./lib/config');
+const { ensureDir, pruneOldDirectories, readJson, timestampForPath, writeJson } = require('./lib/fs-utils');
+const {
+  createClient,
+  fetchIncrementalTables,
+  fetchMaxCursorValue,
+  findPostgresTool,
+  runPgDump,
+} = require('./lib/postgres');
+const { backupStorage, createStorageClient } = require('./lib/storage');
 
-// --- Manual .env Parser ---
-try {
-  const envText = fs.readFileSync('.env', 'utf8');
-  envText.split('\n').forEach(line => {
-    const match = line.match(/^([^#=]+)=(.*)$/);
-    if (match) {
-      const key = match[1].trim();
-      let val = match[2].trim();
-      if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
-      process.env[key] = val;
-    }
+async function main() {
+  const config = loadConfig();
+  const timestamp = timestampForPath();
+  const backupDir = path.join(config.backupRoot, 'full', timestamp);
+  const databaseDir = path.join(backupDir, 'database');
+  const storageDir = path.join(backupDir, 'storage');
+  const state = readJson(config.stateFile, {
+    database: { tables: {} },
+    storage: { objects: [] },
   });
-} catch (e) { console.log('Notice: Could not load .env manually.'); }
 
-const config = {
-  user: process.env.DB_USER || 'postgres',
-  host: process.env.DB_HOST || 'db.buvzefqfoeyupxsmhgkd.supabase.co',
-  database: process.env.DB_NAME || 'postgres',
-  password: process.env.DB_PASSWORD,
-  port: 5432,
-  ssl: { rejectUnauthorized: false }
-};
+  ensureDir(databaseDir);
+  ensureDir(storageDir);
 
-if (!config.password || config.password === 'your_database_password_here') {
-    console.error('ERROR: Database password not found in .env!');
-    process.exit(1);
-}
+  const pgDump = findPostgresTool('pg_dump');
+  console.log(`Using pg_dump: ${pgDump}`);
+  console.log(`Creating full backup in: ${backupDir}`);
 
-async function backup() {
-  const client = new Client(config);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
-  const outputFile = path.join(__dirname, `BOM_MANAGER_BACKUP_${timestamp}.sql`);
-  const stream = fs.createWriteStream(outputFile);
+  const schemaFile = path.join(databaseDir, 'schema.sql');
+  const dataFile = path.join(databaseDir, 'data.sql');
 
-  try {
-    console.log('Connecting to Supabase...');
-    await client.connect();
-    console.log('Connected! Starting data export...');
+  await runPgDump({
+    executable: pgDump,
+    dbUrl: config.database.url,
+    outputFile: schemaFile,
+    schemas: config.database.schemas,
+    extraArgs: ['--schema-only', '--clean', '--if-exists'],
+  });
 
-    // 1. Get all public tables
-    const tableRes = await client.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
-    `);
+  await runPgDump({
+    executable: pgDump,
+    dbUrl: config.database.url,
+    outputFile: dataFile,
+    schemas: config.database.schemas,
+    excludes: config.database.excludeTables,
+    extraArgs: ['--data-only', '--inserts', '--column-inserts'],
+  });
 
-    const tables = tableRes.rows.map(r => r.table_name);
-    console.log(`Found ${tables.length} tables to backup...`);
+  const client = await createClient(config.database.connectConfig);
+  const incrementalTables = await fetchIncrementalTables(
+    client,
+    config.database.incrementalSchemas,
+    config.database.incrementalCursorColumns
+  );
 
-    stream.write(`-- DB BACKUP: BOM Manager / EngineFlow-PM --\n`);
-    stream.write(`-- Generated at: ${new Date().toISOString()} --\n\n`);
-
-    // 2. Dump each table
-    for (const table of tables) {
-      console.log(`Exporting table: ${table}...`);
-      stream.write(`-- Table: ${table} --\n`);
-      
-      const dataRes = await client.query(`SELECT * FROM "${table}"`);
-      
-      if (dataRes.rows.length === 0) {
-        stream.write(`-- (Empty table: ${table})\n\n`);
-        continue;
-      }
-
-      // Generate INSERT statements
-      for (const row of dataRes.rows) {
-        const columns = Object.keys(row).map(c => `"${c}"`).join(', ');
-        const values = Object.values(row).map(v => {
-          if (v === null) return 'NULL';
-          if (typeof v === 'string') return `'${v.replace(/'/g, "''")}'`;
-          if (v instanceof Date) return `'${v.toISOString()}'`;
-          return v;
-        }).join(', ');
-        
-        stream.write(`INSERT INTO "${table}" (${columns}) VALUES (${values});\n`);
-      }
-      stream.write(`\n`);
-    }
-
-    console.log('----------------------------------------------------');
-    console.log('SUCCESS! Pure JS backup completed.');
-    console.log(`File: ${outputFile}`);
-    console.log('----------------------------------------------------');
-
-  } catch (err) {
-    console.error('Backup Error:', err.message);
-  } finally {
-    await client.end();
-    stream.end();
+  const tableState = {};
+  for (const tableInfo of incrementalTables) {
+    tableState[tableInfo.key] = {
+      cursorColumn: tableInfo.cursorColumn,
+      primaryKeys: tableInfo.primaryKeys,
+      lastValue: await fetchMaxCursorValue(client, tableInfo),
+    };
   }
+  await client.end();
+
+  let storageSummary = {
+    currentObjects: [],
+    changedObjects: [],
+    deletedObjects: [],
+    skipped: true,
+  };
+
+  if (hasStorageCredentials(config)) {
+    const storageClient = createStorageClient(config.storage);
+    const previousManifest = state.storage.objects || [];
+    storageSummary = await backupStorage({
+      client: storageClient,
+      destinationRoot: storageDir,
+      previousManifest,
+    });
+  } else {
+    console.log('Storage credentials not configured. Skipping storage backup.');
+  }
+
+  const manifest = {
+    type: 'full',
+    createdAt: new Date().toISOString(),
+    database: {
+      schemas: config.database.schemas,
+      schemaFile: path.relative(backupDir, schemaFile),
+      dataFile: path.relative(backupDir, dataFile),
+    },
+    incrementalBaseline: tableState,
+    storage: {
+      included: !storageSummary.skipped,
+      objectCount: storageSummary.currentObjects.length,
+      downloadedObjectCount: storageSummary.changedObjects.length,
+      deletedObjectCount: storageSummary.deletedObjects.length,
+    },
+  };
+
+  writeJson(path.join(backupDir, 'manifest.json'), manifest);
+  writeJson(config.stateFile, {
+    database: {
+      lastFullBackupDir: backupDir,
+      tables: tableState,
+    },
+    storage: {
+      objects: storageSummary.currentObjects,
+    },
+  });
+
+  const deleted = pruneOldDirectories(path.join(config.backupRoot, 'full'), config.retention.full);
+  if (deleted.length > 0) {
+    console.log(`Pruned ${deleted.length} old full backup folder(s).`);
+  }
+
+  console.log('Full backup completed successfully.');
 }
 
-backup();
+main().catch((error) => {
+  console.error(`Full backup failed: ${error.message}`);
+  process.exitCode = 1;
+});

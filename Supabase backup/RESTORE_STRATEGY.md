@@ -1,52 +1,32 @@
-# 🏗️ BOM Manager - Restore Strategy
+# Restore strategy
 
-Follow this guide to restore your **Database** and **Storage Files** to a new or existing Supabase project.
+Use a new or empty Supabase project whenever possible.
 
----
+## 1. Restore a full backup
 
-## Phase 1: Restore the Database (.sql file)
-
-### Option A: Restore to a NEW Project (Recommended for disaster recovery)
-1.  Create a new project in the Supabase Dashboard.
-2.  Open the **SQL Editor** in your new project.
-3.  Copy and paste the contents of your latest `.sql` backup file into the SQL Editor and click **Run**.
-    *   *Note: If the file is too large (over 5MB), use the command line below.*
-
-### Option B: Command Line Restore
-If you have `psql` installed, run this in your terminal:
 ```powershell
-psql -h db.buvzefqfoeyupxsmhgkd.supabase.co -U postgres -d postgres -f "YOUR_BACKUP_FILE.sql"
+cd "E:\Coding\BOM Software\V3\Supabase backup"
+node restore_backup.js --backup ".\backups\full\YOUR_BACKUP_FOLDER"
 ```
 
----
+This restores:
 
-## Phase 2: Restore Storage Files (Pictures/Docs)
+- `database/schema.sql`
+- `database/data.sql`
+- all downloaded storage objects in the backup folder
 
-To upload all your files back to the storage buckets, use the **[`restore_storage.js`](./restore_storage.js)** script included in this folder.
+## 2. Restore an incremental backup
 
-### 1. Update your `.env`
-If you are restoring to a **new project**, you MUST update the `.env` file with the **new project's** keys:
-*   `S3_ACCESS_KEY_ID`
-*   `S3_SECRET_ACCESS_KEY`
-*   `S3_ENDPOINT`
+Only run this after the related full backup has already been restored.
 
-### 2. Run the Restore Script
 ```powershell
-node restore_storage.js
+cd "E:\Coding\BOM Software\V3\Supabase backup"
+node restore_backup.js --backup ".\backups\incremental\YOUR_INCREMENTAL_FOLDER" --database-only
 ```
-This script will:
-*   Re-create the buckets (like `drawings`).
-*   Upload every file from your `storage_backup` folder back to the clouds.
 
----
+## 3. Important limitations
 
-## Phase 3: Verification Check
-1.  **Check Projects**: Log in to your app and ensure your projects list is visible.
-2.  **Check Pictures**: Open a part and verify its drawing/picture is displaying.
-3.  **Check Permissions**: Ensure your RLS policies (from the .sql file) are active so users can only see what they should.
-
----
-
-## ⚠️ Important Notes
-*   **Sequence**: Always restore the **Database (.sql)** FIRST, then the **Storage Files**.
-*   **Existing Data**: If you restore to a project that already has data, you might get "Duplicate Primary Key" errors. It is best to restore to a clean schema.
+- The incremental database backup is application-level, not WAL/PITR.
+- It captures inserts and updates for tables that have a timestamp cursor column such as `updated_at`.
+- Hard deletes are not replayed by the incremental script.
+- For exact point-in-time recovery, use Supabase PITR in the Dashboard.

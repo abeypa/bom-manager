@@ -1,54 +1,56 @@
-# 📦 BOM Manager - Supabase Backup Tool
+# Supabase backup toolkit
 
-This tool creates a full SQL snapshot of your **BOM Manager** database. It tracks all tables (Projects, Parts, Suppliers, stock history, etc.) directly from Supabase.
+This folder now follows a simpler standard:
 
----
+- `backup_full.js`: full database + storage backup
+- `backup_incremental.js`: incremental database + storage backup
+- `restore_backup.js`: restore a saved backup
+- `database_overview.sql`: inspection query for Supabase SQL Editor
 
-## 🚀 Step-by-Step Instructions
+## Before you run anything
 
-### 1. Open PowerShell in Admin Mode
-*   Press the **Windows Key** on your keyboard.
-*   Type **"PowerShell"**.
-*   Right-click on **Windows PowerShell** and select **"Run as Administrator"**.
+1. Install PostgreSQL client tools so `pg_dump` and `psql` are available on your laptop.
+2. Copy `.env.example` to `.env` if you ever need to recreate the file.
+3. Keep your real `.env` private. It contains credentials.
 
-### 2. Navigate to this Folder
-Copy and paste the following command into your PowerShell window and press **Enter**:
+## Recommended order
+
+1. Review the database in Supabase SQL Editor with [`database_overview.sql`](./database_overview.sql)
+2. Run a full backup first
+3. Run incremental backups during normal work
+4. Restore to a clean project when disaster recovery is needed
+
+## Commands
+
 ```powershell
-cd "E:\Coding\BOM Software\Supabase backup"
-```
-
-### 3. Setup (Only needed the first time)
-Ensure the required tools are installed by running:
-```powershell
+cd "E:\Coding\BOM Software\V3\Supabase backup"
 npm install
+npm run backup:full
+npm run backup:incremental
+npm run restore -- --backup ".\backups\full\YOUR_BACKUP_FOLDER"
 ```
 
-### 4. Run the Backup
-Run the final backup command:
-```powershell
-node backup_full.js
-```
+## What full backup does
 
----
+- dumps configured schemas with `pg_dump`
+- saves schema and data separately
+- downloads Supabase Storage objects
+- records a baseline state for later incremental backups
 
-## 📁 Where is my backup?
-Once the script says **"SUCCESS"**, a new file will appear in this folder named like this:
-`BOM_MANAGER_BACKUP_2026-04-15_15-12.sql`
+## What incremental backup does
 
-This file contains your entire database. **Keep it safe!**
+- exports row changes only for tables that have a cursor column like `updated_at`
+- downloads only new or changed storage objects
+- keeps a local state file in `runtime/state/backup-state.json`
 
----
+## Important note about "progressive" backups
 
-## 🛠 Common Troubleshooting
+This toolkit provides an application-level incremental backup.
 
-### "Authentication Failed"
-Check your **`.env`** file. 
-*   Right-click `.env` and open with **Notepad**.
-*   Make sure your `DB_PASSWORD` is correct inside the quotes.
-*   Example: `DB_PASSWORD="YourPasswordHere"`
+That means:
 
-### "Node is not recognized"
-If you get an error saying 'node' is not found, you need to install it from [nodejs.org](https://nodejs.org/).
+- inserts and updates are covered for configured tables
+- hard deletes are not captured
+- exact point-in-time recovery still requires Supabase PITR/WAL backups
 
-### Special Characters in Password
-If your password has a `#` or `@`, ensure it is wrapped in double quotes in the `.env` file just like the example above.
+Supabase recommends logical exports with `pg_dump` or the Supabase CLI for downloadable backups, and Storage objects must be backed up separately from the database.
