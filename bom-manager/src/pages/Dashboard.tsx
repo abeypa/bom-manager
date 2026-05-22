@@ -117,7 +117,7 @@ const Dashboard = () => {
     }
     if (!isConfigured()) {
       const dbSettings = await loadSettingsFromDB()
-      if (dbSettings?.model) saveSettings(dbSettings)
+      if (dbSettings?.apiKey) saveSettings(dbSettings)
     }
     if (!isConfigured()) {
       setAIOpen(true)

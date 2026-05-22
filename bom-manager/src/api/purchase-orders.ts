@@ -539,7 +539,7 @@ export const purchaseOrdersApi = {
 
     const { data: po, error: poError } = await supabase
       .from('purchase_orders')
-      .select('id, po_number, po_date, status, currency, original_currency, grand_total, original_grand_total, commercial_adjustment_amount, original_commercial_adjustment_amount, notes')
+      .select('id, po_number, po_date, status, currency, original_currency, grand_total, original_grand_total, commercial_adjustment_amount, original_commercial_adjustment_amount')
       .eq('id', poId)
       .single()
     if (poError) throw poError

@@ -1,13 +1,3 @@
-/**
- * Browser-side OpenRouter client settings.
- *
- * Security model:
- * - The real OpenRouter API key never reaches the browser after save.
- * - Admins can submit or rotate the key from AI Settings through the Worker.
- * - The Worker stores the key encrypted and only returns configured/not-configured status.
- * - The browser calls the Worker proxy for chat completions.
- * - Only the selected model is stored in app_settings/localStorage.
- */
 import { supabase } from './supabase'
 
 export type ORContentPart =
@@ -48,17 +38,11 @@ export interface ORCompletionResponse {
 }
 
 export interface AISettings {
+  apiKey: string
   model: string
 }
 
-export interface AIProxyConfigStatus {
-  configured: boolean
-  source: 'app_settings' | 'worker_secret' | 'none'
-}
-
-const API_URL = '/api/openrouter/chat'
-const CONFIG_URL = '/api/openrouter/config'
-const DIRECT_WORKER_URL = 'http://127.0.0.1:8787'
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const STORAGE_KEY = 'bom-ai:openrouter'
 
 export const DEFAULT_MODEL = 'anthropic/claude-3.5-sonnet'
@@ -72,90 +56,36 @@ export const RECOMMENDED_MODELS = [
   { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (text only)', vision: false },
 ]
 
-function isLocalDev() {
-  return typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
-}
-
-function workerEndpoints(path: string) {
-  const endpoints = [path]
-  if (isLocalDev()) endpoints.push(`${DIRECT_WORKER_URL}${path}`)
-  return endpoints
-}
-
-function proxyUnavailableMessage(kind: 'config' | 'chat') {
-  if (isLocalDev()) {
-    return kind === 'config'
-      ? 'AI proxy 405: the secure OpenRouter config endpoint is not available on this host. In local development, run both `npm run dev` and `npm run dev:worker`.'
-      : 'AI proxy 405: the secure OpenRouter proxy is not available on this host. In local development, run both `npm run dev` and `npm run dev:worker` so /api/openrouter/chat is served by the Worker.'
-  }
-  return kind === 'config'
-    ? 'AI proxy 405: the deployed Worker does not have the secure OpenRouter config endpoint yet. Deploy the latest Worker code and set the required Worker secrets.'
-    : 'AI proxy 405: the deployed Worker does not have the secure OpenRouter chat proxy yet. Deploy the latest Worker code and set the required Worker secrets.'
-}
-
-async function workerFetch(
-  path: string,
-  init: RequestInit,
-  fallback405Message?: string,
-): Promise<Response> {
-  const endpoints = workerEndpoints(path)
-  let lastStatus: number | null = null
-  let lastBody = ''
-
-  for (const endpoint of endpoints) {
-    const res = await fetch(endpoint, init)
-    if (res.ok) return res
-
-    lastStatus = res.status
-    lastBody = await res.text()
-
-    if (isLocalDev() && endpoint === path && res.status === 405) continue
-
-    if (res.status === 405 && fallback405Message) {
-      throw new Error(fallback405Message)
-    }
-    throw new Error(`AI proxy ${res.status}: ${lastBody}`)
-  }
-
-  if (lastStatus === 405 && fallback405Message) {
-    throw new Error(fallback405Message)
-  }
-  throw new Error(`AI proxy ${lastStatus ?? 'error'}: ${lastBody}`)
-}
-
-async function getAuthHeaders() {
-  const { data } = await supabase.auth.getSession()
-  const token = data.session?.access_token
-  if (!token) throw new Error('You must be logged in to manage AI settings.')
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  }
-}
-
 export function modelSupportsVision(modelId: string): boolean {
-  const m = RECOMMENDED_MODELS.find((x) => x.id === modelId)
-  if (m) return m.vision
+  const model = RECOMMENDED_MODELS.find((entry) => entry.id === modelId)
+  if (model) return model.vision
   return true
 }
 
 export function loadSettings(): AISettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { model: DEFAULT_MODEL }
+    if (!raw) return { apiKey: '', model: DEFAULT_MODEL }
     const parsed = JSON.parse(raw)
-    return { model: parsed.model || DEFAULT_MODEL }
+    return {
+      apiKey: parsed.apiKey || '',
+      model: parsed.model || DEFAULT_MODEL,
+    }
   } catch {
-    return { model: DEFAULT_MODEL }
+    return { apiKey: '', model: DEFAULT_MODEL }
   }
 }
 
-export function saveSettings(s: AISettings) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ model: s.model || DEFAULT_MODEL }))
+export function saveSettings(settings: AISettings) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    apiKey: settings.apiKey || '',
+    model: settings.model || DEFAULT_MODEL,
+  }))
 }
 
 export function isConfigured(): boolean {
-  return !!loadSettings().model
+  const { apiKey, model } = loadSettings()
+  return !!apiKey && !!model
 }
 
 export async function loadSettingsFromDB(): Promise<AISettings | null> {
@@ -163,58 +93,31 @@ export async function loadSettingsFromDB(): Promise<AISettings | null> {
     const { data, error } = await (supabase as any)
       .from('app_settings')
       .select('key, value')
-      .eq('key', 'ai_model')
-      .maybeSingle()
+      .in('key', ['ai_api_key', 'ai_model'])
+
     if (error) return null
-    return { model: data?.value || DEFAULT_MODEL }
+
+    const rows = Array.isArray(data) ? data : []
+    const apiKey = rows.find((row: any) => row.key === 'ai_api_key')?.value || ''
+    const model = rows.find((row: any) => row.key === 'ai_model')?.value || DEFAULT_MODEL
+
+    if (!apiKey && !model) return null
+    return { apiKey, model }
   } catch {
     return null
   }
 }
 
-export async function saveSettingsToDB(s: AISettings): Promise<void> {
-  await (supabase as any).from('app_settings').upsert([
-    { key: 'ai_model', value: s.model, updated_at: new Date().toISOString() },
-  ])
-}
+export async function saveSettingsToDB(settings: AISettings): Promise<void> {
+  const payload = [
+    { key: 'ai_model', value: settings.model || DEFAULT_MODEL, updated_at: new Date().toISOString() },
+  ]
 
-export async function getAIProxyConfigStatus(): Promise<AIProxyConfigStatus> {
-  const headers = await getAuthHeaders()
-  const res = await workerFetch(
-    CONFIG_URL,
-    { method: 'GET', headers },
-    proxyUnavailableMessage('config'),
-  )
-  return (await res.json()) as AIProxyConfigStatus
-}
+  if (settings.apiKey) {
+    payload.push({ key: 'ai_api_key', value: settings.apiKey, updated_at: new Date().toISOString() })
+  }
 
-export async function saveAIProxyApiKey(apiKey: string): Promise<AIProxyConfigStatus> {
-  const trimmed = apiKey.trim()
-  if (!trimmed) throw new Error('API key is required.')
-  const headers = await getAuthHeaders()
-  const res = await workerFetch(
-    CONFIG_URL,
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ apiKey: trimmed }),
-    },
-    proxyUnavailableMessage('config'),
-  )
-  return (await res.json()) as AIProxyConfigStatus
-}
-
-export async function clearAIProxyApiKey(): Promise<AIProxyConfigStatus> {
-  const headers = await getAuthHeaders()
-  const res = await workerFetch(
-    CONFIG_URL,
-    {
-      method: 'DELETE',
-      headers,
-    },
-    proxyUnavailableMessage('config'),
-  )
-  return (await res.json()) as AIProxyConfigStatus
+  await (supabase as any).from('app_settings').upsert(payload)
 }
 
 export async function chatCompletion(opts: {
@@ -223,38 +126,43 @@ export async function chatCompletion(opts: {
   toolChoice?: 'auto' | 'none' | 'required'
   signal?: AbortSignal
 }): Promise<ORCompletionResponse> {
-  let { model } = loadSettings()
+  let { apiKey, model } = loadSettings()
 
-  if (!model) {
+  if (!apiKey || !model) {
     const dbSettings = await loadSettingsFromDB()
-    if (dbSettings?.model) {
+    if (dbSettings?.apiKey) {
       saveSettings(dbSettings)
+      apiKey = dbSettings.apiKey
       model = dbSettings.model
     }
   }
 
-  if (!model) throw new Error('AI not configured - ask your admin to set the model in AI Settings.')
+  if (!apiKey || !model) {
+    throw new Error('AI not configured - set the OpenRouter API key and model in AI Settings.')
+  }
 
-  const payload = JSON.stringify({
-    model,
-    messages: opts.messages,
-    tools: opts.tools,
-    tool_choice: opts.toolChoice || 'auto',
-    temperature: 0.2,
+  const res = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'BOM Manager',
+    },
+    body: JSON.stringify({
+      model,
+      messages: opts.messages,
+      tools: opts.tools,
+      tool_choice: opts.toolChoice || 'auto',
+      temperature: 0.2,
+    }),
+    signal: opts.signal,
   })
 
-  const res = await workerFetch(
-    API_URL,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: payload,
-      signal: opts.signal,
-    },
-    proxyUnavailableMessage('chat'),
-  )
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`OpenRouter ${res.status}: ${body}`)
+  }
 
   return (await res.json()) as ORCompletionResponse
 }

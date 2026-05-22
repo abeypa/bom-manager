@@ -1,15 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X, Cpu, ShieldCheck, KeyRound } from 'lucide-react'
-import {
-  loadSettings,
-  saveSettings,
-  saveSettingsToDB,
-  RECOMMENDED_MODELS,
-  getAIProxyConfigStatus,
-  saveAIProxyApiKey,
-  clearAIProxyApiKey,
-  type AIProxyConfigStatus,
-} from '@/lib/openrouter'
+import { loadSettings, loadSettingsFromDB, saveSettings, saveSettingsToDB, RECOMMENDED_MODELS } from '@/lib/openrouter'
 import { useRole } from '@/hooks/useRole'
 
 export default function AISettings({ onClose }: { onClose: () => void }) {
@@ -17,47 +8,52 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
   const initial = loadSettings()
   const [model, setModel] = useState(initial.model)
   const [apiKey, setApiKey] = useState('')
-  const [status, setStatus] = useState<AIProxyConfigStatus | null>(null)
-  const [loadingStatus, setLoadingStatus] = useState(true)
+  const [configured, setConfigured] = useState(!!initial.apiKey)
   const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [existingKey, setExistingKey] = useState(initial.apiKey)
 
   useEffect(() => {
     let alive = true
     ;(async () => {
       try {
-        const next = await getAIProxyConfigStatus()
-        if (alive) setStatus(next)
-      } catch {
-        if (alive) setStatus(null)
+        const dbSettings = await loadSettingsFromDB()
+        if (!alive || !dbSettings) return
+        setModel(dbSettings.model || initial.model)
+        setConfigured(!!dbSettings.apiKey)
+        setExistingKey(dbSettings.apiKey || '')
       } finally {
-        if (alive) setLoadingStatus(false)
+        if (alive) setLoading(false)
       }
     })()
     return () => {
       alive = false
     }
-  }, [])
+  }, [initial.model])
 
   const save = async () => {
     const trimmedModel = model.trim()
     const trimmedKey = apiKey.trim()
+    const effectiveKey = trimmedKey || existingKey
 
     if (!trimmedModel) {
       alert('Model id is required.')
       return
     }
 
+    if (!effectiveKey) {
+      alert('OpenRouter API key is required.')
+      return
+    }
+
     setSaving(true)
     try {
-      await saveSettingsToDB({ model: trimmedModel })
-      saveSettings({ model: trimmedModel })
-
-      if (trimmedKey) {
-        const nextStatus = await saveAIProxyApiKey(trimmedKey)
-        setStatus(nextStatus)
-        setApiKey('')
-      }
-
+      const nextSettings = { apiKey: effectiveKey, model: trimmedModel }
+      await saveSettingsToDB(nextSettings)
+      saveSettings(nextSettings)
+      setConfigured(true)
+      setExistingKey(effectiveKey)
+      setApiKey('')
       onClose()
     } catch (e: any) {
       alert(`Failed to save: ${e?.message || 'Unknown error'}`)
@@ -65,26 +61,6 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
       setSaving(false)
     }
   }
-
-  const clearKey = async () => {
-    if (!window.confirm('Clear the stored OpenRouter API key for all users?')) return
-    setSaving(true)
-    try {
-      const nextStatus = await clearAIProxyApiKey()
-      setStatus(nextStatus)
-      setApiKey('')
-    } catch (e: any) {
-      alert(`Failed to clear key: ${e?.message || 'Unknown error'}`)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const statusLabel = loadingStatus
-    ? 'Checking...'
-    : status?.configured
-      ? `Configured (${status.source === 'app_settings' ? 'saved from AI settings' : 'worker secret'})`
-      : 'Not configured'
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
@@ -100,9 +76,8 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
           <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl p-4">
             <ShieldCheck size={16} className="text-blue-500 mt-0.5 shrink-0" />
             <div className="text-[12px] text-blue-900 leading-relaxed">
-              <strong>{isAdmin ? 'Write-only secret flow.' : 'Managed by admin.'}</strong> The OpenRouter API
-              key is never shown back to the browser after save. Admins can rotate it here, but users only see whether
-              AI is configured.
+              <strong>{isAdmin ? 'Shared app setting.' : 'Managed by admin.'}</strong> The OpenRouter API key is saved in
+              app settings and used as the shared key for AI features across the app.
             </div>
           </div>
 
@@ -114,26 +89,20 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder={isAdmin ? 'Enter a new key to save or rotate' : 'Managed by admin'}
+              placeholder={
+                isAdmin
+                  ? configured
+                    ? 'Leave blank to keep the current key'
+                    : 'Enter OpenRouter API key'
+                  : 'Managed by admin'
+              }
               disabled={!isAdmin}
               className="w-full text-sm px-3 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20 font-mono disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
               autoComplete="off"
             />
-            <div className="mt-2 flex items-center justify-between gap-3">
-              <p className="text-[11px] text-slate-500">
-                Status: <span className="font-semibold text-slate-700">{statusLabel}</span>
-              </p>
-              {isAdmin && status?.configured && (
-                <button
-                  type="button"
-                  onClick={clearKey}
-                  disabled={saving}
-                  className="text-[11px] font-semibold text-red-600 hover:text-red-700 disabled:opacity-60"
-                >
-                  Clear stored key
-                </button>
-              )}
-            </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Status: <span className="font-semibold text-slate-700">{loading ? 'Checking...' : configured ? 'Configured' : 'Not configured'}</span>
+            </p>
           </div>
 
           <div>
@@ -153,16 +122,16 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
             {isAdmin && (
               <div className="mt-2 flex items-center gap-2">
                 <select
-                  value={RECOMMENDED_MODELS.some((m) => m.id === model) ? model : ''}
+                  value={RECOMMENDED_MODELS.some((entry) => entry.id === model) ? model : ''}
                   onChange={(e) => {
                     if (e.target.value) setModel(e.target.value)
                   }}
                   className="flex-1 text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20"
                 >
                   <option value="">Pick from recommended...</option>
-                  {RECOMMENDED_MODELS.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
+                  {RECOMMENDED_MODELS.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.label}
                     </option>
                   ))}
                 </select>
