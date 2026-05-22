@@ -1,33 +1,33 @@
-import React, { useState, useMemo } from 'react'
+import type { ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   SortableContext,
-  verticalListSortingStrategy,
   useSortable,
+  verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { 
-  GripVertical, 
-  ChevronRight, 
-  ChevronDown, 
-  Layers, 
-  Folder, 
-  FileText, 
-  PlusCircle,
-  ImageIcon,
-  Plus,
-  Clock,
-  CheckCircle2,
+import {
   AlertTriangle,
-  ShoppingBag,
-  Package,
-  Edit2,
-  Trash2,
-  ShoppingCart,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock,
   Copy,
+  Edit2,
+  FileText,
+  Folder,
+  GripVertical,
+  ImageIcon,
+  Layers,
   Maximize2,
   Minimize2,
+  Package,
+  PlusCircle,
   Search,
-  X as CloseIcon
+  ShoppingBag,
+  ShoppingCart,
+  Trash2,
+  X as CloseIcon,
 } from 'lucide-react'
 import {
   Tooltip,
@@ -37,39 +37,101 @@ import {
 } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
 
-/**
- * Highlight Utility
- * Wraps matching parts of string in a yellow mark tag for search visibility.
- * Supports multiple queries.
- */
-const Highlight = ({ text, queries = [] }: { text: any, queries?: string[] }) => {
-  const str = String(text || '');
-  if (!queries.length || !str || queries.every(q => !q)) return <>{str}</>;
-  
-  // Clean queries: remove empty and escape
-  const activeQueries = queries.filter(q => q && q.trim().length > 0)
-    .map(q => q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-  
-  if (activeQueries.length === 0) return <>{str}</>;
+const Highlight = ({ text, queries = [] }: { text: any; queries?: string[] }) => {
+  const str = String(text || '')
 
-  const regex = new RegExp(`(${activeQueries.join('|')})`, 'gi');
-  const parts = str.split(regex);
-  
+  if (!queries.length || !str || queries.every((q) => !q)) return <>{str}</>
+
+  const activeQueries = queries
+    .filter((q) => q && q.trim().length > 0)
+    .map((q) => q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+
+  if (activeQueries.length === 0) return <>{str}</>
+
+  const regex = new RegExp(`(${activeQueries.join('|')})`, 'gi')
+  const parts = str.split(regex)
+
   return (
     <>
-      {parts.map((part, i) => 
-        activeQueries.some(q => part.toLowerCase() === q.toLowerCase() || new RegExp(q, 'gi').test(part)) ? (
-          <mark key={i} className="bg-yellow-300 text-black px-0.5 rounded font-bold shadow-sm">{part}</mark>
-        ) : part
+      {parts.map((part, i) =>
+        activeQueries.some(
+          (q) =>
+            part.toLowerCase() === q.toLowerCase() || new RegExp(q, 'gi').test(part)
+        ) ? (
+          <mark
+            key={i}
+            className="rounded bg-amber-200/80 px-0.5 font-semibold text-slate-900"
+          >
+            {part}
+          </mark>
+        ) : (
+          part
+        )
       )}
     </>
-  );
-};
+  )
+}
+
+const getDisplayName = (type: 'section' | 'subsection' | 'part', data: any, fallback: string) => {
+  if (type === 'subsection') {
+    return data.name || data.title || data.section_name || 'Untitled subsection'
+  }
+
+  if (type === 'part') {
+    return (
+      data.globalDescription ||
+      data.description ||
+      data.part_ref?.description ||
+      data.name ||
+      fallback ||
+      'Untitled part'
+    )
+  }
+
+  return data.name || data.description || fallback || 'Untitled section'
+}
+
+const getPartStatusMeta = (part: any) => {
+  const poInfo = part.po_info
+  const requiredQty = part.quantity || 0
+  const receivedQty = poInfo?.received_qty || 0
+  const stockQty = part.part_ref?.stock_quantity || 0
+  const hasPendingPO = poInfo?.status === 'Draft'
+  const isReleased = Boolean(poInfo && poInfo.status !== 'Draft')
+  const notArrived =
+    (poInfo && receivedQty < requiredQty) || (!poInfo && stockQty < requiredQty)
+
+  if (notArrived) {
+    return {
+      badgeClass:
+        'border-amber-200 bg-amber-50 text-amber-700',
+      icon: AlertTriangle,
+      label: hasPendingPO ? 'Pending receipt' : 'Short supply',
+      detailLabel: poInfo?.status || 'No PO',
+      poNumber: poInfo?.po_number || 'N/A',
+      receivedQty,
+      requiredQty,
+    }
+  }
+
+  return {
+    badgeClass:
+      isReleased || stockQty >= requiredQty
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-slate-200 bg-slate-100 text-slate-600',
+    icon: isReleased ? CheckCircle2 : Package,
+    label: isReleased ? 'Released' : 'Available',
+    detailLabel: poInfo?.status || 'Stock ready',
+    poNumber: poInfo?.po_number || 'N/A',
+    receivedQty,
+    requiredQty,
+  }
+}
 
 interface TreeItemProps {
   id: string | number
   level: number
-  children?: React.ReactNode
+  children?: ReactNode
   label: string
   type: 'section' | 'subsection' | 'part'
   data: any
@@ -86,16 +148,16 @@ interface TreeItemProps {
   onSelect?: (selected: boolean) => void
 }
 
-const TreeItem = ({ 
-  id, 
-  level, 
-  children, 
-  label: _label, 
-  type, 
-  data, 
+const TreeItem = ({
+  id,
+  level,
+  children,
+  label,
+  type,
+  data,
   searchQuery = '',
   bulkSearchIds = [],
-  isExpanded, 
+  isExpanded,
   onToggle,
   onEdit,
   onDelete,
@@ -103,303 +165,270 @@ const TreeItem = ({
   onAddChild,
   onImageClick,
   isSelected,
-  onSelect
+  onSelect,
 }: TreeItemProps) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ 
-    id: id.toString(),
-    data: { type, data }
-  })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({
+      id: id.toString(),
+      data: { type, data },
+    })
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
-    paddingLeft: `${level * 24}px`
+    opacity: isDragging ? 0.6 : 1,
   }
 
-  // CORRECT subsection name logic using requested fields
-  const getDisplayName = () => {
-    if (type === 'subsection') {
-      return data.name || data.title || data.section_name || 'UNTITLED SUBSECTION'
-    }
-    
-    // ✅ CORRECT part row name display logic 
-    const part = data;
-    const manufacturerPartNo = part.manufacturerPartNo || part.part_ref?.manufacturer_part_number || '';
-    const globalDescription = part.globalDescription || part.description || part.part_ref?.description || '';
-    
-    if (type === 'part') {
-      return globalDescription || 
-             part.description || 
-             part.name || 
-             `${manufacturerPartNo} ${globalDescription}`.trim() ||
-             _label ||
-             'Untitled';
-    }
-    
-    return data.name || data.description || _label || 'Untitled';
-  }
+  const displayName = getDisplayName(type, data, label)
+  const erpId = data.beperp_part_no || data.part_ref?.beperp_part_no || ''
+  const partNumber = data.part_ref?.part_number || ''
+  const quantity = data.quantity || 0
+  const isBulkMatch =
+    type === 'part' &&
+    bulkSearchIds.length > 0 &&
+    bulkSearchIds.some(
+      (q) =>
+        String(erpId).toLowerCase().includes(q.toLowerCase()) ||
+        String(partNumber).toLowerCase().includes(q.toLowerCase())
+    )
 
-  // Get ERP ID for display/search
-  const erpId = data.beperp_part_no || data.part_ref?.beperp_part_no || '';
+  const indentClass =
+    level === 0 ? '' : level === 1 ? 'ml-6 border-l border-slate-200/80 pl-4' : 'ml-12'
 
-  // Checkbox sub-component
-  const RenderCheckbox = () => onSelect ? (
-    <div className="flex items-center pr-1 scale-110">
+  const rowClass =
+    type === 'section'
+      ? 'rounded-2xl border border-slate-200 bg-white shadow-sm'
+      : type === 'subsection'
+        ? 'rounded-xl border border-slate-200/80 bg-slate-50/70'
+        : 'rounded-xl border border-slate-200/70 bg-white'
+
+  const stateClass = isSelected
+    ? 'border-primary-300 bg-primary-50/70 ring-1 ring-primary-200'
+    : isBulkMatch
+      ? 'border-amber-300 bg-amber-50/70 ring-1 ring-amber-200'
+      : 'hover:border-slate-300 hover:bg-slate-50/90'
+
+  const renderCheckbox = () =>
+    onSelect ? (
       <input
         type="checkbox"
         checked={isSelected}
         onChange={(e) => onSelect(e.target.checked)}
-        className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-600 cursor-pointer shadow-sm"
+        className="h-4 w-4 cursor-pointer rounded border-slate-300 text-primary-600 focus:ring-primary-500"
         onClick={(e) => e.stopPropagation()}
       />
-    </div>
-  ) : null
+    ) : null
 
-  // Action Tools sub-component
-  const RenderActions = () => (
-    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-300 pr-2">
+  const renderImagePreview = () => {
+    const imageUrl = type === 'part' ? data.part_ref?.image_path : data.image_path
+    if (!imageUrl) return null
+
+    return (
+      <TooltipContent side="right" className="border-0 bg-transparent p-0 shadow-none">
+        <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl">
+          <img src={imageUrl} alt="Preview" className="h-48 w-48 rounded-xl object-contain" />
+        </div>
+      </TooltipContent>
+    )
+  }
+
+  const renderActions = () => (
+    <div className="flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
       {onImageClick && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button onClick={onImageClick} className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-amber-500 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-              <ImageIcon size={13} />
+            <button
+              onClick={onImageClick}
+              className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white hover:text-amber-600"
+            >
+              <ImageIcon size={14} />
             </button>
           </TooltipTrigger>
-          {(() => {
-            const imageUrl = type === 'part' ? data.part_ref?.image_path : data.image_path;
-            if (!imageUrl) return null;
-            return (
-              <TooltipContent side="right" className="p-0 border-0 bg-transparent shadow-none">
-                <div className="bg-white p-2 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-slate-100 animate-in zoom-in-95 duration-200">
-                  <img 
-                    src={imageUrl} 
-                    alt="Preview" 
-                    className="w-56 h-56 object-contain rounded-[1.5rem]" 
-                  />
-                  <div className="mt-2 mb-1 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 text-center">
-                    Image Preview
-                  </div>
-                </div>
-              </TooltipContent>
-            );
-          })()}
+          {renderImagePreview()}
         </Tooltip>
       )}
       {onAddChild && (
-        <button onClick={onAddChild} title="Add Child" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-          <PlusCircle size={13} />
+        <button
+          onClick={onAddChild}
+          title="Add child"
+          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white hover:text-primary-600"
+        >
+          <PlusCircle size={14} />
         </button>
       )}
       {onCopy && (
-        <button onClick={onCopy} title="Copy Subsection" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-          <Copy size={13} />
+        <button
+          onClick={onCopy}
+          title="Copy"
+          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+        >
+          <Copy size={14} />
         </button>
       )}
       {onEdit && (
-        <button onClick={onEdit} title="Edit" className="p-1.5 hover:bg-white rounded-lg text-slate-400 hover:text-navy-900 shadow-sm border border-transparent hover:border-slate-100 transition-all">
-          <Edit2 size={13} />
+        <button
+          onClick={onEdit}
+          title="Edit"
+          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+        >
+          <Edit2 size={14} />
         </button>
       )}
       {onDelete && (
-        <button onClick={onDelete} title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 shadow-sm border border-transparent hover:border-red-100 transition-all">
-          <Trash2 size={13} />
+        <button
+          onClick={onDelete}
+          title="Delete"
+          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+        >
+          <Trash2 size={14} />
         </button>
       )}
     </div>
   )
 
-  // ── SUBSECTION RENDER ─────────────────────────────────────
-  if (type === 'subsection') {
+  if (type === 'part') {
+    const status = getPartStatusMeta(data)
+    const StatusIcon = status.icon
+
     return (
-      <div ref={setNodeRef} style={style} className="group select-none">
-        <div 
-          className="subsection-header flex items-center gap-3 py-2 px-4 bg-gray-50 border-b hover:bg-slate-100/80 transition-all cursor-pointer mt-1 rounded-xl"
-          onClick={onToggle}
+      <div ref={setNodeRef} style={style} className={indentClass}>
+        <div
+          className={`group mb-2 flex items-start gap-3 px-4 py-3 transition-all duration-200 ${rowClass} ${stateClass}`}
         >
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div 
-              className="p-1 text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing"
-              {...attributes} 
-              {...listeners}
-            >
-              <GripVertical size={14} />
+          <div
+            className="mt-0.5 rounded-lg p-1.5 text-slate-300 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical size={14} />
+          </div>
+
+          <div className="mt-0.5">{renderCheckbox()}</div>
+
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-500">
+            <FileText className="h-4 w-4" />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-slate-900">
+                  <Highlight text={displayName} queries={[searchQuery, ...bulkSearchIds]} />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                  {partNumber && (
+                    <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-slate-600">
+                      <Highlight
+                        text={partNumber}
+                        queries={[searchQuery, ...bulkSearchIds]}
+                      />
+                    </span>
+                  )}
+                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-medium text-slate-600">
+                    Qty {quantity}
+                  </span>
+                  {erpId && (
+                    <span className="rounded-md border border-primary-100 bg-primary-50/60 px-2 py-1 font-mono text-primary-700">
+                      ERP{' '}
+                      <Highlight text={erpId} queries={[searchQuery, ...bulkSearchIds]} />
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="secondary"
+                  className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${status.badgeClass}`}
+                >
+                  <StatusIcon size={11} className="mr-1.5" />
+                  {status.label}
+                </Badge>
+                {renderActions()}
+              </div>
             </div>
-            
-            <RenderCheckbox />
-            
-            <Folder className="h-5 w-5 text-amber-600" />
-            <span className="font-semibold text-base text-slate-900 truncate">
-              <Highlight text={getDisplayName()} queries={[searchQuery, ...bulkSearchIds]} />
-            </span>
-            
-            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
+
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+              <span>Status: {status.detailLabel}</span>
+              <span>PO: {status.poNumber}</span>
+              <span>
+                Received: {status.receivedQty} / {status.requiredQty}
+              </span>
+            </div>
           </div>
-          
-          <RenderActions />
         </div>
-        
-        {isExpanded && children && (
-          <div className="relative animate-in slide-in-from-top-2 duration-300 pl-4">
-            <div className="absolute left-[-4px] top-0 bottom-4 w-[1px] bg-slate-200/60 ml-[23px] rounded-full" />
-            {children}
-          </div>
-        )}
       </div>
     )
   }
 
-  // ── SECTION / PART RENDER ─────────────────────────────────────
-  const isBulkMatch = type === 'part' && bulkSearchIds.length > 0 && bulkSearchIds.some(q => 
-    String(erpId || '').toLowerCase().includes(q.toLowerCase()) || 
-    String(data.part_ref?.part_number || '').toLowerCase().includes(q.toLowerCase())
-  )
+  const childCount =
+    type === 'section' ? data.subsections?.length || 0 : data.parts?.length || 0
+  const Icon = type === 'section' ? Layers : Folder
+  const itemLabel = type === 'section' ? 'subsections' : 'parts'
 
   return (
-    <div ref={setNodeRef} style={style} className="group select-none">
-      <div className={`
-        flex items-center gap-2 py-2 px-2 rounded-xl transition-all duration-300
-        ${level === 0 ? 'mt-6 bg-slate-50/30' : 'mt-1'} 
-        ${isSelected ? 'bg-primary-50/80 border-l-2 border-primary-500 shadow-sm' : isBulkMatch ? 'bg-yellow-50 border-l-2 border-yellow-400' : 'hover:bg-slate-100/50'}
-      `}>
-        <div 
-          className="p-1 hover:bg-white rounded-lg text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing"
-          {...attributes} 
-          {...listeners}
+    <div ref={setNodeRef} style={style} className={indentClass}>
+      <div
+        className={`group mb-3 overflow-hidden transition-all duration-200 ${rowClass} ${stateClass}`}
+      >
+        <div
+          className={`flex items-center gap-3 px-4 py-3.5 ${
+            type === 'section' ? 'bg-white' : 'bg-transparent'
+          }`}
         >
-          <GripVertical size={14} />
-        </div>
+          <div
+            className="rounded-lg p-1.5 text-slate-300 transition-colors hover:bg-white hover:text-slate-600"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical size={14} />
+          </div>
 
-        {type === 'section' && (
-          <button 
-            onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
-            className="p-1 hover:bg-white rounded-lg text-slate-400 hover:text-primary-600"
+          {type === 'subsection' && <div>{renderCheckbox()}</div>}
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggle?.()
+            }}
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
           >
             {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           </button>
+
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600">
+            <Icon className="h-4 w-4" />
+          </div>
+
+          <button onClick={onToggle} className="min-w-0 flex-1 text-left">
+            <div className="truncate text-sm font-semibold text-slate-900">
+              <Highlight text={displayName} queries={[searchQuery, ...bulkSearchIds]} />
+            </div>
+            <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
+              <span>{childCount} {itemLabel}</span>
+              {type === 'section' && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                  Top level
+                </span>
+              )}
+            </div>
+          </button>
+
+          <div className="flex items-center gap-2">
+            <Badge
+              variant="secondary"
+              className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-600"
+            >
+              {childCount} {itemLabel}
+            </Badge>
+            {renderActions()}
+          </div>
+        </div>
+
+        {isExpanded && children && (
+          <div className="border-t border-slate-200/80 px-2 pb-2 pt-3">{children}</div>
         )}
-
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <RenderCheckbox />
-          
-          <div className="shrink-0 flex items-center justify-center w-6 h-6 bg-white rounded-lg shadow-sm border border-slate-100">
-            {type === 'section' ? <Layers className="w-4 h-4 text-primary-600" /> : <FileText className="w-3.5 h-3.5 text-slate-400" />}
-          </div>
-
-          <div className="flex flex-col min-w-0 flex-1">
-            <span className={`
-              text-sm tracking-tight truncate 
-              ${type === 'section' ? 'font-black text-navy-900 uppercase tracking-widest' : 'font-bold text-slate-600'}
-            `}>
-              <Highlight text={getDisplayName()} queries={[searchQuery, ...bulkSearchIds]} />
-            </span>
-
-            {type === 'part' && (
-              <div className="flex flex-col gap-1.5 mt-1.5">
-                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
-                  <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
-                    <Highlight text={data.part_ref?.part_number} queries={[searchQuery, ...bulkSearchIds]} />
-                    {data.part_ref?.part_number && ' • '}
-                    QTY: {data.quantity}
-                  </span>
-
-                  {erpId && (
-                    <span className="text-[10px] font-mono text-navy-400 bg-navy-50/50 px-1.5 py-0.5 rounded border border-navy-100 shrink-0">
-                      ERP ID: <Highlight text={erpId} queries={[searchQuery, ...bulkSearchIds]} />
-                    </span>
-                  )}
-                </div>
-
-                {(() => {
-                  const poInfo = data.po_info;
-                  const hasPendingPO = poInfo && poInfo.status === 'Draft';
-                  const isReleased = poInfo && poInfo.status !== 'Draft';
-                  const requiredQty = data.quantity || 0;
-                  const receivedQty = poInfo?.received_qty || 0;
-                  const notArrived = (poInfo && receivedQty < requiredQty) || (!poInfo && (data.part_ref?.stock_quantity || 0) < requiredQty);
-                  const poNumber = poInfo?.po_number || 'N/A';
-                  const systemStatus = poInfo?.status || 'No PO';
-
-                  return (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="flex items-center gap-1.5 cursor-help shrink-0">
-                          {hasPendingPO && (
-                            <Badge variant="secondary" className="bg-amber-500 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest">
-                              <Clock size={8} className="mr-1.5" />
-                              PENDING PO
-                            </Badge>
-                          )}
-                          {isReleased && (
-                            <Badge variant="success" className="bg-emerald-600 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest">
-                              <CheckCircle2 size={8} className="mr-1.5" />
-                              RELEASED
-                            </Badge>
-                          )}
-                          {!poInfo && (
-                            <Badge variant="secondary" className="bg-slate-100 text-slate-400 text-[9px] px-2 py-0.5 font-black uppercase tracking-widest opacity-60">
-                              <ShoppingBag size={8} className="mr-1.5" />
-                              ORDERING
-                            </Badge>
-                          )}
-                          {notArrived && (
-                            <Badge variant="destructive" className="text-[9px] px-2 py-0.5 font-black uppercase tracking-widest">
-                              <AlertTriangle size={8} className="mr-1.5" />
-                              NOT ARRIVED
-                            </Badge>
-                          )}
-                          {!notArrived && (
-                            <Badge variant="success" className="bg-emerald-600 text-white text-[9px] px-2 py-0.5 font-black uppercase tracking-widest">
-                              <Package size={8} className="mr-1.5" />
-                              ARRIVED
-                            </Badge>
-                          )}
-                        </div>
-                      </TooltipTrigger>
-
-                      <TooltipContent side="right" className="max-w-xs bg-white border-slate-200 shadow-2xl p-4 rounded-2xl animate-in fade-in zoom-in-95 duration-300">
-                        <div className="space-y-2.5 text-xs">
-                          <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
-                            <span className="text-[10px] font-black text-navy-900/40 uppercase">Status Analysis</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <strong className="text-navy-900/60 uppercase text-[9px]">PO REF</strong> 
-                            <span className="font-black text-navy-600 bg-navy-50 px-1.5 rounded">#{poNumber}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <strong className="text-navy-900/60 uppercase text-[9px]">Received</strong> 
-                            <span className="font-black text-slate-700">{receivedQty} / {requiredQty}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <strong className="text-navy-900/60 uppercase text-[9px]">Status</strong> 
-                            <span className="capitalize font-black text-slate-700">{systemStatus}</span>
-                          </div>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <RenderActions />
       </div>
-
-      {isExpanded && children && (
-        <div className="relative animate-in slide-in-from-top-2 duration-300">
-          <div className="absolute left-[-12px] top-0 bottom-4 w-[1px] bg-slate-200/60 ml-[23px] rounded-full" />
-          {children}
-        </div>
-      )}
     </div>
   )
 }
@@ -421,6 +450,7 @@ interface BOMTreeViewProps {
   onToggleSelectPart: (id: number) => void
   onToggleSelectAll: (ids: number[]) => void
   onAddSelectedToBasket?: () => void
+  onClearSelection?: () => void
 }
 
 export default function BOMTreeView({
@@ -439,9 +469,12 @@ export default function BOMTreeView({
   selectedPartIds,
   onToggleSelectPart,
   onToggleSelectAll,
-  onAddSelectedToBasket
+  onAddSelectedToBasket,
+  onClearSelection,
 }: BOMTreeViewProps) {
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(project.sections?.map((s: any) => `section-${s.id}`)))
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(
+    new Set(project.sections?.map((s: any) => `section-${s.id}`))
+  )
   const [tempSearch, setTempSearch] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [tempErpSearch, setTempErpSearch] = useState('')
@@ -449,139 +482,162 @@ export default function BOMTreeView({
   const [bulkSearchRaw, setBulkSearchRaw] = useState('')
   const [bulkSearchIds, setBulkSearchIds] = useState<string[]>([])
 
-  // Debounced search logic
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchQuery(tempSearch)
-    }, 300)
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(tempSearch), 300)
     return () => clearTimeout(timer)
   }, [tempSearch])
 
-  // Debounced ERP search logic
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setErpSearchQuery(tempErpSearch)
-    }, 300)
+  useEffect(() => {
+    const timer = setTimeout(() => setErpSearchQuery(tempErpSearch), 300)
     return () => clearTimeout(timer)
   }, [tempErpSearch])
 
-  // Debounced Bulk Search logic
-  React.useEffect(() => {
+  useEffect(() => {
     const timer = setTimeout(() => {
-      const ids = bulkSearchRaw.split(',')
-        .map(id => id.trim())
-        .filter(id => id.length > 0)
-      
-      // Deduplicate
-      const uniqueIds = Array.from(new Set(ids))
-      setBulkSearchIds(uniqueIds)
+      const ids = bulkSearchRaw
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0)
+
+      setBulkSearchIds(Array.from(new Set(ids)))
     }, 400)
+
     return () => clearTimeout(timer)
   }, [bulkSearchRaw])
 
-  /**
-   * Filtered Data Logic
-   * Hierarchical filter: If a part matches, its subsection and section must remain visible.
-   */
   const filteredSections = useMemo(() => {
-    if (!searchQuery && !erpSearchQuery && bulkSearchIds.length === 0) return project.sections || [];
+    if (!searchQuery && !erpSearchQuery && bulkSearchIds.length === 0) return project.sections || []
 
-    const sQuery = searchQuery.toLowerCase();
-    const eQuery = erpSearchQuery.toLowerCase();
-    const bQueries = bulkSearchIds.map(id => id.toLowerCase());
+    const sQuery = searchQuery.toLowerCase()
+    const eQuery = erpSearchQuery.toLowerCase()
+    const bQueries = bulkSearchIds.map((id) => id.toLowerCase())
 
-    return (project.sections || []).map((section: any) => {
-      const filteredSubsections = (section.subsections || []).map((sub: any) => {
-        const filteredParts = (sub.parts || []).filter((part: any) => {
-          const partErpId = String(part.beperp_part_no || part.part_ref?.beperp_part_no || '').toLowerCase();
-          const partPbo = String(part.part_ref?.part_number || '').toLowerCase();
-          const partDesc = String(part.description || part.part_ref?.description || '').toLowerCase();
-          const partName = String(part.name || '').toLowerCase();
+    return (project.sections || [])
+      .map((section: any) => {
+        const filteredSubsections = (section.subsections || [])
+          .map((sub: any) => {
+            const filteredParts = (sub.parts || []).filter((part: any) => {
+              const partErpId = String(
+                part.beperp_part_no || part.part_ref?.beperp_part_no || ''
+              ).toLowerCase()
+              const partNumber = String(part.part_ref?.part_number || '').toLowerCase()
+              const partDesc = String(
+                part.description || part.part_ref?.description || ''
+              ).toLowerCase()
+              const partName = String(part.name || '').toLowerCase()
 
-          // Bulk matches
-          const matchesBulk = bQueries.length === 0 || bQueries.some(q => partErpId.includes(q) || partPbo.includes(q));
+              const matchesBulk =
+                bQueries.length === 0 ||
+                bQueries.some((q) => partErpId.includes(q) || partNumber.includes(q))
 
-          // ERP Query must match ERP ID specifically if present
-          const matchesErp = !erpSearchQuery || partErpId.includes(eQuery);
-          
-          // Global Query matches multiple fields
-          const matchesGlobal = !searchQuery || 
-            partDesc.includes(sQuery) || 
-            partPbo.includes(sQuery) || 
-            partName.includes(sQuery) ||
-            partErpId.includes(sQuery);
+              const matchesErp = !erpSearchQuery || partErpId.includes(eQuery)
+              const matchesGlobal =
+                !searchQuery ||
+                partDesc.includes(sQuery) ||
+                partNumber.includes(sQuery) ||
+                partName.includes(sQuery) ||
+                partErpId.includes(sQuery)
 
-          return matchesBulk && matchesErp && matchesGlobal;
-        });
+              return matchesBulk && matchesErp && matchesGlobal
+            })
 
-        // Subsection matches if its name matches QR if it has matching parts
-        const subNameMatches = !searchQuery || (sub.name || '').toLowerCase().includes(sQuery);
-        const shouldShowSub = filteredParts.length > 0 || subNameMatches;
+            const subName = String(sub.name || sub.section_name || '').toLowerCase()
+            const subNameMatches = !searchQuery || subName.includes(sQuery)
 
-        if (shouldShowSub) {
-          return { ...sub, parts: filteredParts };
-        }
-        return null;
-      }).filter(Boolean);
+            if (filteredParts.length > 0 || subNameMatches) {
+              return { ...sub, parts: filteredParts }
+            }
 
-      const sectionNameMatches = !searchQuery || (section.name || '').toLowerCase().includes(sQuery);
-      const shouldShowSection = filteredSubsections.length > 0 || sectionNameMatches;
-
-      if (shouldShowSection) {
-        return { ...section, subsections: filteredSubsections };
-      }
-      return null;
-    }).filter(Boolean);
-  }, [project.sections, searchQuery, erpSearchQuery, bulkSearchIds]);
-
-  // Bulk Auto-Select Logic
-  React.useEffect(() => {
-    if (bulkSearchIds.length > 0) {
-      const matchingPartIds: number[] = []
-      filteredSections.forEach((s: any) => {
-        s.subsections?.forEach((sub: any) => {
-          sub.parts?.forEach((p: any) => {
-             // Only select if not already selected
-             if (!selectedPartIds.has(p.id)) {
-               matchingPartIds.push(p.id)
-             }
+            return null
           })
+          .filter(Boolean)
+
+        const sectionNameMatches =
+          !searchQuery || String(section.name || '').toLowerCase().includes(sQuery)
+
+        if (filteredSubsections.length > 0 || sectionNameMatches) {
+          return { ...section, subsections: filteredSubsections }
+        }
+
+        return null
+      })
+      .filter(Boolean)
+  }, [project.sections, searchQuery, erpSearchQuery, bulkSearchIds])
+
+  useEffect(() => {
+    if (bulkSearchIds.length === 0) return
+
+    const matchingPartIds: number[] = []
+
+    filteredSections.forEach((section: any) => {
+      section.subsections?.forEach((sub: any) => {
+        sub.parts?.forEach((part: any) => {
+          if (!selectedPartIds.has(part.id)) {
+            matchingPartIds.push(part.id)
+          }
         })
       })
+    })
 
-      if (matchingPartIds.length > 0) {
-        onToggleSelectAll(matchingPartIds)
-      }
+    if (matchingPartIds.length > 0) {
+      onToggleSelectAll(matchingPartIds)
     }
-  }, [bulkSearchIds, filteredSections])
+  }, [bulkSearchIds, filteredSections, onToggleSelectAll, selectedPartIds])
 
-  // Auto-expand nodes when searching
-  React.useEffect(() => {
-    if (searchQuery || erpSearchQuery || bulkSearchIds.length > 0) {
-      const newExpanded = new Set<string>();
-      filteredSections.forEach((s: any) => {
-        newExpanded.add(`section-${s.id}`);
-        s.subsections?.forEach((sub: any) => {
-          if (sub.parts.length > 0) {
-            newExpanded.add(`sub-${sub.id}`);
-          }
-        });
-      });
-      setExpandedNodes(newExpanded);
-    }
-  }, [searchQuery, erpSearchQuery, bulkSearchIds, filteredSections]);
+  useEffect(() => {
+    if (!searchQuery && !erpSearchQuery && bulkSearchIds.length === 0) return
+
+    const nextExpanded = new Set<string>()
+
+    filteredSections.forEach((section: any) => {
+      nextExpanded.add(`section-${section.id}`)
+      section.subsections?.forEach((sub: any) => {
+        if (sub.parts?.length > 0) {
+          nextExpanded.add(`sub-${sub.id}`)
+        }
+      })
+    })
+
+    setExpandedNodes(nextExpanded)
+  }, [searchQuery, erpSearchQuery, bulkSearchIds, filteredSections])
 
   const allContainerIds = useMemo(() => {
     const ids: string[] = []
-    project.sections?.forEach((s: any) => {
-      ids.push(`section-${s.id}`)
-      s.subsections?.forEach((sub: any) => ids.push(`sub-${sub.id}`))
+
+    project.sections?.forEach((section: any) => {
+      ids.push(`section-${section.id}`)
+      section.subsections?.forEach((sub: any) => ids.push(`sub-${sub.id}`))
     })
+
     return ids
   }, [project.sections])
 
+  const summary = useMemo(() => {
+    const sections = project.sections || []
+    const subsectionCount = sections.reduce(
+      (count: number, section: any) => count + (section.subsections?.length || 0),
+      0
+    )
+    const partCount = sections.reduce(
+      (count: number, section: any) =>
+        count +
+        (section.subsections || []).reduce(
+          (subCount: number, sub: any) => subCount + (sub.parts?.length || 0),
+          0
+        ),
+      0
+    )
+
+    return {
+      sections: sections.length,
+      subsections: subsectionCount,
+      parts: partCount,
+      filteredSections: filteredSections.length,
+    }
+  }, [filteredSections.length, project.sections])
+
   const toggleNode = (nodeId: string) => {
-    setExpandedNodes(prev => {
+    setExpandedNodes((prev) => {
       const next = new Set(prev)
       if (next.has(nodeId)) next.delete(nodeId)
       else next.add(nodeId)
@@ -589,136 +645,183 @@ export default function BOMTreeView({
     })
   }
 
-  const expandAll = () => setExpandedNodes(new Set(allContainerIds))
-  const collapseAll = () => setExpandedNodes(new Set())
+  const clearSearches = () => {
+    setTempSearch('')
+    setTempErpSearch('')
+    setBulkSearchRaw('')
+  }
 
   return (
-    <div className="bg-white rounded-[2rem] border border-slate-100 shadow-2xl shadow-navy-900/5 overflow-hidden">
-      {/* Search & Global Controls Toolbar */}
-      <div className="bg-slate-50/80 px-8 py-5 border-b border-slate-200/60 flex items-center justify-between gap-6 flex-wrap backdrop-blur-md">
-        <div className="flex items-center gap-6">
-          <h3 className="text-xs font-black text-navy-900 tracking-[0.3em] uppercase flex items-center gap-3">
-            <div className="w-1.5 h-6 bg-primary-500 rounded-full" />
-            BOM Registry Hierarchy
-          </h3>
-          
-          <div className="flex items-center gap-6">
-            {/* Global Tree Controls */}
-            <div className="flex items-center bg-white p-1 rounded-xl shadow-sm border border-slate-200/50">
-              <button onClick={expandAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all">
-                <Maximize2 size={12} /> Expand All
-              </button>
-              <div className="w-px h-4 bg-slate-200 mx-1" />
-              <button onClick={collapseAll} className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
-                <Minimize2 size={12} /> Collapse All
-              </button>
-            </div>
-
-            {/* Global Search Input */}
+    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+      <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 px-6 py-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
             <div className="flex items-center gap-3">
-              <div className="relative group">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-500 transition-colors">
-                  <Search size={14} />
-                </div>
-                <input
-                  type="text"
-                  placeholder="Global search..."
-                  value={tempSearch}
-                  onChange={(e) => setTempSearch(e.target.value)}
-                  className="h-9 pl-9 pr-8 bg-white border border-slate-200 rounded-xl text-xs font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all w-48 shadow-sm"
-                />
-                {tempSearch && (
-                  <button onClick={() => setTempSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500"><CloseIcon size={12} /></button>
-                )}
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
+                <Layers className="h-5 w-5" />
               </div>
-
-              <div className="relative group">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400 group-focus-within:text-navy-600 transition-colors">
-                  <Layers size={14} />
-                </div>
-                <input
-                  type="text"
-                  placeholder="ERP ID..."
-                  value={tempErpSearch}
-                  onChange={(e) => setTempErpSearch(e.target.value)}
-                  className="h-9 pl-9 pr-8 bg-navy-50/30 border border-navy-100 rounded-xl text-xs font-bold placeholder:text-navy-300 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 transition-all w-40 shadow-sm"
-                />
-                {tempErpSearch && (
-                  <button onClick={() => setTempErpSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500"><CloseIcon size={12} /></button>
-                )}
-              </div>
-
-              <div className="relative group">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-primary-400 group-focus-within:text-primary-600 transition-colors">
-                  <PlusCircle size={14} />
-                </div>
-                <input
-                  type="text"
-                  placeholder="Bulk ERP IDs (csv)..."
-                  value={bulkSearchRaw}
-                  onChange={(e) => setBulkSearchRaw(e.target.value)}
-                  className="h-9 pl-9 pr-8 bg-primary-50/20 border border-primary-100 rounded-xl text-xs font-bold placeholder:text-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all w-64 shadow-sm"
-                />
-                {bulkSearchRaw && (
-                  <button onClick={() => setBulkSearchRaw('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-red-500"><CloseIcon size={12} /></button>
-                )}
+              <div>
+                <h3 className="text-sm font-semibold tracking-[0.18em] text-slate-900 uppercase">
+                  Project Structure
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Structured BOM explorer with search, bulk selection, and drag ordering.
+                </p>
               </div>
             </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
+                {summary.sections} sections
+              </div>
+              <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
+                {summary.subsections} subsections
+              </div>
+              <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
+                {summary.parts} parts
+              </div>
+              {(searchQuery || erpSearchQuery || bulkSearchIds.length > 0) && (
+                <div className="rounded-full border border-primary-200 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700">
+                  {summary.filteredSections} matching sections
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setExpandedNodes(new Set(allContainerIds))}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900"
+            >
+              <Maximize2 size={13} />
+              Expand all
+            </button>
+            <button
+              onClick={() => setExpandedNodes(new Set())}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900"
+            >
+              <Minimize2 size={13} />
+              Collapse all
+            </button>
           </div>
         </div>
 
-        {/* Selected Items Summary Bar */}
+        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1fr)]">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name, description, part no..."
+              value={tempSearch}
+              onChange={(e) => setTempSearch(e.target.value)}
+              className="h-11 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-10 text-sm text-slate-700 outline-none transition focus:border-primary-400 focus:ring-4 focus:ring-primary-100"
+            />
+            {tempSearch && (
+              <button
+                onClick={() => setTempSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              >
+                <CloseIcon size={14} />
+              </button>
+            )}
+          </label>
+
+          <label className="relative block">
+            <Layers className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Filter ERP ID"
+              value={tempErpSearch}
+              onChange={(e) => setTempErpSearch(e.target.value)}
+              className="h-11 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-10 text-sm text-slate-700 outline-none transition focus:border-primary-400 focus:ring-4 focus:ring-primary-100"
+            />
+            {tempErpSearch && (
+              <button
+                onClick={() => setTempErpSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              >
+                <CloseIcon size={14} />
+              </button>
+            )}
+          </label>
+
+          <label className="relative block">
+            <PlusCircle className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Bulk ERP IDs, comma separated"
+              value={bulkSearchRaw}
+              onChange={(e) => setBulkSearchRaw(e.target.value)}
+              className="h-11 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-24 text-sm text-slate-700 outline-none transition focus:border-primary-400 focus:ring-4 focus:ring-primary-100"
+            />
+            {(tempSearch || tempErpSearch || bulkSearchRaw) && (
+              <button
+                onClick={clearSearches}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              >
+                Clear
+              </button>
+            )}
+          </label>
+        </div>
+
         {selectedPartIds.size > 0 && (
-          <div className="flex items-center gap-4 bg-navy-900 px-4 py-1.5 rounded-xl shadow-lg animate-in slide-in-from-right duration-500 border border-white/10 ring-1 ring-white/5">
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-              <span className="text-[10px] font-black text-white uppercase tracking-widest leading-none">
-                {selectedPartIds.size} Parts Selected
-              </span>
+          <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-900 px-4 py-3 text-white md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10">
+                <ShoppingBag className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold">{selectedPartIds.size} parts selected</div>
+                <div className="text-xs text-slate-300">
+                  Selected items can be moved to the procurement basket in one step.
+                </div>
+              </div>
             </div>
-            <div className="w-px h-3 bg-white/20" />
-            <button
-              onClick={onAddSelectedToBasket}
-              className="text-[9px] font-black text-primary-400 hover:text-white uppercase tracking-[0.15em] transition-all flex items-center gap-2 group"
-            >
-              <ShoppingCart size={11} className="group-hover:scale-110 transition-transform" />
-              Add to Basket
-            </button>
-            <div className="w-px h-3 bg-white/20" />
-            <button
-              onClick={() => onToggleSelectAll([])}
-              className="text-[9px] font-black text-slate-400 hover:text-red-400 uppercase tracking-[0.15em] transition-all"
-            >
-              Clear
-            </button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={onAddSelectedToBasket}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-600"
+              >
+                <ShoppingCart size={13} />
+                Add to basket
+              </button>
+              <button
+                onClick={onClearSelection}
+                className="rounded-xl border border-white/15 px-3 py-2 text-xs font-medium text-slate-200 transition hover:bg-white/10 hover:text-white"
+              >
+                Clear selection
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="p-8 lg:p-12">
-        {filteredSections.length === 0 && (searchQuery || erpSearchQuery) ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in zoom-in duration-500">
-            <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-slate-100">
-              <Search className="w-10 h-10 text-slate-200" />
+      <div className="p-4 md:p-6">
+        {filteredSections.length === 0 && (searchQuery || erpSearchQuery || bulkSearchIds.length > 0) ? (
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-6 py-20 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-sm">
+              <Search className="h-7 w-7 text-slate-300" />
             </div>
-            <h4 className="text-lg font-black text-navy-900 uppercase tracking-widest mb-2">No Parts Found</h4>
-            <p className="text-slate-400 text-sm max-w-xs font-medium">
-              We couldn't find any items matching "{erpSearchQuery || searchQuery}". Try a different term.
+            <h4 className="mt-5 text-lg font-semibold text-slate-900">No matching items</h4>
+            <p className="mt-2 max-w-sm text-sm text-slate-500">
+              Try a broader search term or clear the ERP filters to see more of the BOM.
             </p>
-            <button 
-              onClick={() => { setTempErpSearch(''); setTempSearch(''); }}
-              className="mt-8 text-xs font-black uppercase tracking-[0.2em] text-primary-600 hover:text-primary-700 bg-primary-50 px-6 py-3 rounded-xl transition-all"
+            <button
+              onClick={clearSearches}
+              className="mt-6 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
             >
-              Clear All Filters
+              Clear filters
             </button>
           </div>
         ) : (
           <TooltipProvider delayDuration={0}>
-            <SortableContext 
-              items={filteredSections.map((s: any) => `section-${s.id}`) || []} 
+            <SortableContext
+              items={filteredSections.map((section: any) => `section-${section.id}`)}
               strategy={verticalListSortingStrategy}
             >
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {filteredSections.map((section: any) => (
                   <TreeItem
                     key={`section-${section.id}`}
@@ -736,17 +839,17 @@ export default function BOMTreeView({
                     onAddChild={() => onAddSubsection(section.id)}
                     onImageClick={() => onImageClick(section, 'section')}
                   >
-                    <SortableContext 
-                      items={section.subsections?.map((sub: any) => `sub-${sub.id}`) || []} 
+                    <SortableContext
+                      items={section.subsections?.map((sub: any) => `sub-${sub.id}`) || []}
                       strategy={verticalListSortingStrategy}
                     >
-                      <div className="mt-2 space-y-1">
+                      <div>
                         {section.subsections?.map((sub: any) => (
                           <TreeItem
                             key={`sub-${sub.id}`}
                             id={`sub-${sub.id}`}
                             level={1}
-                            label={sub.name}
+                            label={sub.name || sub.section_name}
                             type="subsection"
                             data={sub}
                             searchQuery={erpSearchQuery || searchQuery}
@@ -758,23 +861,30 @@ export default function BOMTreeView({
                             onCopy={() => onCopySubsection(sub)}
                             onAddChild={() => onAddPart(sub)}
                             onImageClick={() => onImageClick(sub, 'subsection')}
-                            isSelected={sub.parts.length > 0 && sub.parts.every((p: any) => selectedPartIds.has(p.id))}
-                            onSelect={(_checked) => {
-                              const ids = sub.parts.map((p: any) => p.id)
+                            isSelected={
+                              sub.parts.length > 0 &&
+                              sub.parts.every((part: any) => selectedPartIds.has(part.id))
+                            }
+                            onSelect={() => {
+                              const ids = sub.parts.map((part: any) => part.id)
                               onToggleSelectAll(ids)
                             }}
                           >
-                            <SortableContext 
-                              items={sub.parts.map((part: any) => `part-${part.id}`) || []} 
+                            <SortableContext
+                              items={sub.parts.map((part: any) => `part-${part.id}`) || []}
                               strategy={verticalListSortingStrategy}
                             >
-                              <div className="mt-2 space-y-1">
+                              <div>
                                 {sub.parts.map((part: any) => (
                                   <TreeItem
                                     key={`part-${part.id}`}
                                     id={`part-${part.id}`}
                                     level={2}
-                                    label={part.description || part.part_ref?.description || 'Unnamed Part'}
+                                    label={
+                                      part.description ||
+                                      part.part_ref?.description ||
+                                      'Unnamed part'
+                                    }
                                     type="part"
                                     data={part}
                                     searchQuery={erpSearchQuery || searchQuery}

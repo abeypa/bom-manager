@@ -533,7 +533,8 @@ const ProjectDetails = () => {
             onClick={() => setActiveTab('bom')}
             className={`tab-item ${activeTab === 'bom' ? 'active' : ''}`}
           >
-            📋 BOM Hierarchy
+            <Layers className="h-4 w-4 inline mr-1" />
+            BOM Hierarchy
           </button>
           <button
             onClick={() => setActiveTab('documents')}
@@ -633,6 +634,7 @@ const ProjectDetails = () => {
                               showToast('error', 'No selected parts found to add')
                             }
                           }}
+                          onClearSelection={() => setSelectedPartIds(new Set())}
                         />
 
                         {/* Orphaned subsections */}
