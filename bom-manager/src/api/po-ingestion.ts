@@ -44,33 +44,52 @@ const shouldPromoteIncomingPrice = (incomingDate: string | null | undefined, cur
   return incomingKey >= currentKey
 }
 
-async function logPartPriceHistoryFromPO(partTable: string, partId: number, partNumber: string, oldRow: any, newValues: any, doc: any) {
-  const oldPrice = oldRow?.base_price ?? null
-  const newPrice = newValues?.base_price ?? null
-  const oldCurrency = oldRow?.currency || 'INR'
-  const newCurrency = newValues?.currency || 'INR'
-  const oldDiscount = oldRow?.discount_percent ?? null
-  const newDiscount = newValues?.discount_percent ?? null
+async function logPartPriceSnapshotFromPO(
+  partTable: string,
+  partId: number,
+  partNumber: string,
+  oldRow: any,
+  newValues: any,
+  doc: any,
+  loggedKeys: Set<string>,
+) {
+  const hasChange =
+    valuesDiffer(oldRow?.base_price ?? null, newValues?.base_price ?? null) ||
+    valuesDiffer(oldRow?.currency || 'INR', newValues?.currency || 'INR') ||
+    valuesDiffer(oldRow?.discount_percent ?? null, newValues?.discount_percent ?? null)
+  const poNumber = String(doc?.po_number || '').trim()
+  const poDate = String(doc?.po_date || '').trim()
+  const newPrice = Number(newValues?.base_price || 0)
+  const newCurrency = String(newValues?.currency || 'INR')
+  const newDiscount = Number(newValues?.discount_percent || 0)
+  const dedupeKey = [
+    partTable,
+    partId,
+    poNumber || 'no-po',
+    poDate || 'no-date',
+    newPrice.toFixed(4),
+    newCurrency,
+    newDiscount.toFixed(4),
+  ].join('|')
 
-  if (
-    !valuesDiffer(oldPrice, newPrice) &&
-    !valuesDiffer(oldCurrency, newCurrency) &&
-    !valuesDiffer(oldDiscount, newDiscount)
-  ) return
+  if (loggedKeys.has(dedupeKey)) return
+  loggedKeys.add(dedupeKey)
 
   const { data: userData } = await supabase.auth.getUser()
   await (supabase as any).from('part_price_history').insert({
     part_table_name: partTable,
     part_id: partId,
     part_number: partNumber,
-    old_price: oldPrice,
-    new_price: Number(newPrice || 0),
-    old_currency: oldCurrency,
+    old_price: oldRow?.base_price ?? null,
+    new_price: newPrice,
+    old_currency: oldRow?.currency || 'INR',
     new_currency: newCurrency,
-    old_discount_percent: oldDiscount,
+    old_discount_percent: oldRow?.discount_percent ?? null,
     new_discount_percent: newDiscount,
-    change_reason: doc?.po_number ? `po_ingestion:${doc.po_number}` : 'po_ingestion',
-    changed_at: doc?.po_date || new Date().toISOString(),
+    change_reason: poNumber
+      ? `${hasChange ? 'po_ingestion' : 'po_ingestion_snapshot'}:${poNumber}`
+      : (hasChange ? 'po_ingestion' : 'po_ingestion_snapshot'),
+    changed_at: poDate || new Date().toISOString(),
     changed_by: userData.user?.email || 'system',
   })
 }
@@ -206,6 +225,7 @@ export const poIngestionApi = {
     const supplierCache = new Map<string, any>()
     const partCache = new Map<string, any>()
     const projectPartCache = new Map<string, any>()
+    const loggedPriceSnapshotKeys = new Set<string>()
 
     for (const doc of documents as any[]) {
       const blockingWarnings = (doc.parse_warnings || []).filter((warning: string) =>
@@ -295,8 +315,6 @@ export const poIngestionApi = {
             valuesDiffer(part.discount_percent, nextPartValues.discount_percent)
 
           if (hasPartChanges) {
-            await logPartPriceHistoryFromPO(category, part.id, part.part_number, part, nextPartValues, doc)
-
             if (shouldPromote) {
               await (supabase as any)
                 .from(category)
@@ -316,6 +334,16 @@ export const poIngestionApi = {
           } else {
             partsSkippedUnchanged += 1
           }
+
+          await logPartPriceSnapshotFromPO(
+            category,
+            part.id,
+            part.part_number,
+            part,
+            nextPartValues,
+            doc,
+            loggedPriceSnapshotKeys,
+          )
         } else {
           const { data: createdPart, error: partError } = await (supabase as any)
             .from(category)
@@ -337,6 +365,16 @@ export const poIngestionApi = {
           partCache.set(partKey, part)
           partCache.set(`${category}:${part.part_number.toUpperCase()}`, part)
           partsCreated += 1
+
+          await logPartPriceSnapshotFromPO(
+            category,
+            part.id,
+            part.part_number,
+            null,
+            nextPartValues,
+            doc,
+            loggedPriceSnapshotKeys,
+          )
         }
 
         const exactProjectPartKey = `${subsectionId}:${category}:${part.id}`

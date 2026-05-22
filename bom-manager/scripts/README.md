@@ -53,6 +53,36 @@ A bash script for managing users via the Supabase Management API.
 ### `create_user.py` (Alternative Python Version)
 A Python alternative with the same functionality.
 
+### `backfill_po_price_history.mjs` - PO Price History Backfill
+Backfills `part_price_history` from PO PDFs that were already parsed and stored in the ingestion staging tables.
+
+#### What it uses
+- `po_ingestion_documents.po_date`, `po_number`, `currency`
+- `po_ingestion_lines.item_code`, `unit_price`, `discount_percent`, `description`
+
+This means the backfill uses PDF-derived ingestion data already saved in the database, not current BOM prices.
+
+#### Requirements
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+#### Usage
+```bash
+# Preview only
+npm run backfill:po-price-history -- --dry-run
+
+# Backfill one PO
+npm run backfill:po-price-history -- --po-number "PO/P/25-26/100077"
+
+# Backfill all parsed ingestion docs
+npm run backfill:po-price-history
+```
+
+#### Notes
+- Misc/commercial lines such as packing, forwarding, freight, discount, etc. are skipped.
+- The script is idempotent for the same part / PO / date / price / currency / discount combination.
+- It resolves master parts from ingestion mappings first, then falls back to ERP item code lookup in master tables.
+
 ## Best Practices for User Management
 
 ### 1. User Creation

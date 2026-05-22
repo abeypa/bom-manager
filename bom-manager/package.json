@@ -10,6 +10,7 @@
     "preview:prod": "vite preview --host",
     "type-check": "tsc --noEmit",
     "lint": "tsc --noEmit",
+    "backfill:po-price-history": "node scripts/backfill_po_price_history.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
