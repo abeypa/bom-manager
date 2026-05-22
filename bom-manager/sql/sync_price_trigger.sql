@@ -14,10 +14,18 @@ AS $$
 BEGIN
     -- Update the master table based on part_table_name
     EXECUTE format(
-        'UPDATE %I SET base_price = $1, currency = $2, updated_date = NOW() WHERE id = $3',
+        'UPDATE %I
+         SET base_price = $1,
+             currency = $2,
+             updated_date = COALESCE($4::timestamptz, NOW())
+         WHERE id = $3
+           AND (
+             updated_date IS NULL
+             OR COALESCE($4::timestamptz, NOW()) >= updated_date
+           )',
         NEW.part_table_name
     )
-    USING NEW.new_price, NEW.new_currency, NEW.part_id;
+    USING NEW.new_price, NEW.new_currency, NEW.part_id, NEW.changed_at;
     
     RETURN NEW;
 END;

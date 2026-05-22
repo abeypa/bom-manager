@@ -27,6 +27,23 @@ const valuesDiffer = (a: any, b: any, epsilon = 0.0001) => {
   return String(a ?? '') !== String(b ?? '')
 }
 
+const normalizeDateKey = (value: string | null | undefined) => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10)
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString().slice(0, 10)
+}
+
+const shouldPromoteIncomingPrice = (incomingDate: string | null | undefined, currentDate: string | null | undefined) => {
+  const incomingKey = normalizeDateKey(incomingDate)
+  const currentKey = normalizeDateKey(currentDate)
+  if (!incomingKey) return true
+  if (!currentKey) return true
+  return incomingKey >= currentKey
+}
+
 async function logPartPriceHistoryFromPO(partTable: string, partId: number, partNumber: string, oldRow: any, newValues: any, doc: any) {
   const oldPrice = oldRow?.base_price ?? null
   const newPrice = newValues?.base_price ?? null
@@ -258,7 +275,7 @@ export const poIngestionApi = {
         if (!part) {
           const { data: existingParts, error: lookupError } = await (supabase as any)
             .from(category)
-            .select(`id, part_number, supplier_id, base_price, currency, discount_percent, description, beperp_part_no, po_number`)
+            .select(`id, part_number, supplier_id, base_price, currency, discount_percent, description, beperp_part_no, po_number, updated_date`)
             .or(`beperp_part_no.eq.${line.item_code},part_number.eq.${partNumber}`)
             .limit(1)
           if (lookupError) throw lookupError
@@ -269,6 +286,7 @@ export const poIngestionApi = {
           }
         }
         if (part?.id) {
+          const shouldPromote = shouldPromoteIncomingPrice(doc.po_date, part.updated_date)
           partsReused += 1
           const hasPartChanges =
             valuesDiffer(part.supplier_id, nextPartValues.supplier_id) ||
@@ -277,21 +295,24 @@ export const poIngestionApi = {
             valuesDiffer(part.discount_percent, nextPartValues.discount_percent)
 
           if (hasPartChanges) {
-            await (supabase as any)
-              .from(category)
-              .update({
-                ...nextPartValues,
-                updated_date: new Date().toISOString(),
-              })
-              .eq('id', part.id)
             await logPartPriceHistoryFromPO(category, part.id, part.part_number, part, nextPartValues, doc)
-            part = {
-              ...part,
-              ...nextPartValues,
-              updated_date: new Date().toISOString(),
+
+            if (shouldPromote) {
+              await (supabase as any)
+                .from(category)
+                .update({
+                  ...nextPartValues,
+                  updated_date: doc.po_date || new Date().toISOString(),
+                })
+                .eq('id', part.id)
+              part = {
+                ...part,
+                ...nextPartValues,
+                updated_date: doc.po_date || new Date().toISOString(),
+              }
+              partCache.set(partKey, part)
+              partCache.set(`${category}:${part.part_number.toUpperCase()}`, part)
             }
-            partCache.set(partKey, part)
-            partCache.set(`${category}:${part.part_number.toUpperCase()}`, part)
           } else {
             partsSkippedUnchanged += 1
           }
@@ -323,7 +344,7 @@ export const poIngestionApi = {
         if (existingProjectPart === undefined) {
           const { data } = await (supabase as any)
             .from('project_parts')
-            .select('id, quantity, unit_price, currency, discount_percent, notes')
+            .select('id, quantity, unit_price, currency, discount_percent, notes, updated_date')
             .eq('project_section_id', subsectionId)
             .eq('part_type', category)
             .eq('part_id', part.id)
@@ -334,23 +355,30 @@ export const poIngestionApi = {
 
         if (existingProjectPart?.id) {
           const nextQty = Number(existingProjectPart.quantity || 0) + Number(line.quantity || 0)
+          const promoteProjectSnapshot = shouldPromoteIncomingPrice(doc.po_date, existingProjectPart.updated_date)
           const nextProjectValues = {
             quantity: nextQty,
-            unit_price: line.unit_price || 0,
-            currency: lineCurrency,
-            discount_percent: line.discount_percent || 0,
+            unit_price: promoteProjectSnapshot ? (line.unit_price || 0) : Number(existingProjectPart.unit_price || 0),
+            currency: promoteProjectSnapshot ? lineCurrency : (existingProjectPart.currency || lineCurrency),
+            discount_percent: promoteProjectSnapshot
+              ? (line.discount_percent || 0)
+              : Number(existingProjectPart.discount_percent || 0),
+            notes: doc.po_number
+              ? `Updated from PO ingestion ${doc.po_number}${promoteProjectSnapshot ? '' : ' (historical price preserved on PO only)'}`
+              : `Updated from PO ingestion${promoteProjectSnapshot ? '' : ' (historical price preserved on PO only)'}`,
           }
           const hasProjectChanges =
             valuesDiffer(existingProjectPart.quantity, nextProjectValues.quantity) ||
             valuesDiffer(existingProjectPart.unit_price, nextProjectValues.unit_price) ||
             valuesDiffer(existingProjectPart.currency, nextProjectValues.currency) ||
-            valuesDiffer(existingProjectPart.discount_percent, nextProjectValues.discount_percent)
+            valuesDiffer(existingProjectPart.discount_percent, nextProjectValues.discount_percent) ||
+            valuesDiffer(existingProjectPart.notes, nextProjectValues.notes)
           if (hasProjectChanges) {
             const { error: updateError } = await (supabase as any)
               .from('project_parts')
               .update({
                 ...nextProjectValues,
-                updated_date: new Date().toISOString(),
+                updated_date: doc.po_date || new Date().toISOString(),
               })
               .eq('id', existingProjectPart.id)
             if (updateError) throw updateError
@@ -358,7 +386,7 @@ export const poIngestionApi = {
             projectPartCache.set(exactProjectPartKey, {
               ...existingProjectPart,
               ...nextProjectValues,
-              updated_date: new Date().toISOString(),
+              updated_date: doc.po_date || new Date().toISOString(),
             })
           } else {
             projectRowsSkippedUnchanged += 1
@@ -377,20 +405,23 @@ export const poIngestionApi = {
 
           if (projectWideExisting?.id) {
             const nextQty = Number(projectWideExisting.quantity || 0) + Number(line.quantity || 0)
+            const promoteProjectSnapshot = shouldPromoteIncomingPrice(doc.po_date, projectWideExisting.updated_date)
             const nextProjectValues = {
               quantity: nextQty,
-              unit_price: line.unit_price || 0,
-              currency: lineCurrency,
-              discount_percent: line.discount_percent || 0,
+              unit_price: promoteProjectSnapshot ? (line.unit_price || 0) : Number(projectWideExisting.unit_price || 0),
+              currency: promoteProjectSnapshot ? lineCurrency : (projectWideExisting.currency || lineCurrency),
+              discount_percent: promoteProjectSnapshot
+                ? (line.discount_percent || 0)
+                : Number(projectWideExisting.discount_percent || 0),
               notes: doc.po_number
-                ? `Updated from PO ingestion ${doc.po_number}`
-                : 'Updated from PO ingestion',
+                ? `Updated from PO ingestion ${doc.po_number}${promoteProjectSnapshot ? '' : ' (historical price preserved on PO only)'}`
+                : `Updated from PO ingestion${promoteProjectSnapshot ? '' : ' (historical price preserved on PO only)'}`,
             }
             const { error: updateError } = await (supabase as any)
               .from('project_parts')
               .update({
                 ...nextProjectValues,
-                updated_date: new Date().toISOString(),
+                updated_date: doc.po_date || new Date().toISOString(),
               })
               .eq('id', projectWideExisting.id)
             if (updateError) throw updateError

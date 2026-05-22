@@ -1951,6 +1951,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         base_price: a.base_price,
         discount_percent: a.discount_percent || 0,
         currency: a.currency || 'INR',
+        original_currency: a.currency || 'INR',
         image_path: a.image_path || null,
         specifications: a.specifications || null,
       }
@@ -2576,9 +2577,9 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       'Status is locked to "Draft" — the AI can never release, send, confirm, partial-receive or cancel a PO; the user does that from the PO screen. ' +
       'GST / CGST / SGST is NEVER included as a line item or added to grand_total. ' +
       'Each item must reference an existing project_part_id; the tool runs interlocks per line: ' +
-      '(a) project_part.unit_price equals the unit_price you pass; ' +
-      '(b) the unit_price you pass equals expected_price_from_source (the price you read off the PDF); ' +
-      '(c) discount_percent agrees with the BOM line. ' +
+      '(a) the unit_price you pass equals expected_price_from_source (the price you read off the PDF); ' +
+      '(b) the line belongs to the selected project. ' +
+      'Historical or future PO prices are allowed to differ from the current BOM snapshot; the PO stores its own source-price snapshot for audit. ' +
       'One PO carries one supplier (purchase_orders.supplier_id) but the SAME PART can be supplied by DIFFERENT suppliers across POs — the master\'s supplier_id is informational and is NOT cross-checked against the PO supplier. ' +
       'Mismatches in (a)-(c) throw — fix the BOM mapping or re-read the PDF instead of forcing the PO through.',
     parameters: {
@@ -2668,6 +2669,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
 
       const poItems: any[] = []
       let grand = 0
+      const driftNotes: string[] = []
       for (const it of a.items) {
         const pp = ppById.get(it.project_part_id)
         if (!pp) throw new Error(`project_part #${it.project_part_id} does not exist.`)
@@ -2687,7 +2689,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         assertNumberInRange('items[].expected_price_from_source', it.expected_price_from_source, 0, MAX_PRICE)
         if (it.discount_percent != null) assertNumberInRange('items[].discount_percent', it.discount_percent, 0, 100)
 
-        // (3) price agreement: PDF == arg unit_price == saved project_part price
+        // (3) source-of-truth agreement: PDF == arg unit_price
         const eps = 0.01
         if (Math.abs(it.unit_price - it.expected_price_from_source) > eps) {
           throw new Error(
@@ -2696,20 +2698,16 @@ export const TOOL_REGISTRY: ToolSpec[] = [
             `Re-read the PDF; do NOT silently overwrite either value.`,
           )
         }
-        if (Math.abs(Number(pp.unit_price || 0) - it.unit_price) > eps) {
-          throw new Error(
-            `Price drift on project_part #${it.project_part_id}: ` +
-            `BOM line stores ${pp.unit_price}, draft says ${it.unit_price}. ` +
-            `Update the BOM with update_part_quantity first, or fix the PDF reading. The draft PO will not be created with mismatched prices.`,
-          )
-        }
-        // discount agreement (allow 0 vs null equivalence)
         const ppDisc = Number(pp.discount_percent || 0)
         const itDisc = Number(it.discount_percent || 0)
+        if (Math.abs(Number(pp.unit_price || 0) - it.unit_price) > eps) {
+          driftNotes.push(
+            `project_part #${it.project_part_id} BOM price ${pp.unit_price} vs PO price ${it.unit_price}`
+          )
+        }
         if (Math.abs(ppDisc - itDisc) > eps) {
-          throw new Error(
-            `Discount drift on project_part #${it.project_part_id}: ` +
-            `BOM line stores ${ppDisc}%, draft says ${itDisc}%. Reconcile before drafting.`,
+          driftNotes.push(
+            `project_part #${it.project_part_id} BOM discount ${ppDisc}% vs PO discount ${itDisc}%`
           )
         }
 
@@ -2738,8 +2736,11 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           description: null,
           quantity: it.quantity,
           unit_price: it.unit_price,
+          original_currency: a.currency || pp.currency || 'INR',
+          original_unit_price: it.unit_price,
           discount_percent: itDisc,
           total_amount: lineTotal,
+          original_total_amount: lineTotal,
           project_part_id: pp.id,
         })
       }
@@ -2768,7 +2769,10 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         original_grand_total: grand,
         total_items: poItems.length,
         total_quantity: poItems.reduce((s, i) => s + i.quantity, 0),
-        notes: (a.notes ? a.notes + ' | ' : '') + 'Drafted by AI from source PO. GST excluded.',
+        notes:
+          (a.notes ? a.notes + ' | ' : '') +
+          'Drafted by AI from source PO. GST excluded.' +
+          (driftNotes.length ? ` Price drift kept as PO snapshot: ${driftNotes.join('; ')}.` : ''),
         created_date: new Date().toISOString(),
       }
       return purchaseOrdersApi.createPurchaseOrderWithItems(poData, poItems)

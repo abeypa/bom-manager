@@ -40,7 +40,7 @@ export async function findExistingProjectPartInProject(
 
   let query = supabaseClient
     .from('project_parts')
-    .select('id, project_section_id, quantity, unit_price')
+    .select('id, project_section_id, quantity, unit_price, currency, discount_percent, notes, updated_date')
     .eq('part_type', partType)
     .eq('part_id', partId)
     .in('project_section_id', peerIds)
