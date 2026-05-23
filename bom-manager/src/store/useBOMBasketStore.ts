@@ -13,6 +13,7 @@ export interface BOMBasketItem {
   part_number: string
   description: string
   manufacturer_part_number?: string | null
+  image_path?: string | null
   quantity: number
   unit_price: number
   discount_percent: number

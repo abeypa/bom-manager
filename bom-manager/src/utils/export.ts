@@ -440,6 +440,326 @@ export const exportUtils = {
     URL.revokeObjectURL(url);
   },
 
+  // BOM Basket → HTML Report
+  generateBOMBasketHTMLReport: (
+    basketName: string,
+    items: any[],
+    options?: { projectName?: string | null; projectNumber?: string | null; currency?: string | null }
+  ) => {
+    const today = new Date().toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    });
+
+    const currency = options?.currency || 'INR';
+    const totalValue = (items || []).reduce((sum: number, item: any) => {
+      const effectivePrice = (item.unit_price || 0) * (1 - ((item.discount_percent || 0) / 100));
+      return sum + ((item.quantity || 0) * effectivePrice);
+    }, 0);
+
+    const sourceLabel = (source: string) => {
+      if (source === 'project_part') return 'Project BOM';
+      if (source === 'master_part') return 'Part Master';
+      if (source === 'temporary') return 'Temporary';
+      return 'Draft';
+    };
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${basketName} - BOM Basket Report</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&display=swap');
+    body {
+      font-family: 'DM Sans', sans-serif;
+      color: #0f172a;
+      line-height: 1.55;
+      padding: 40px;
+      background: #f8fafc;
+    }
+    .sheet {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 28px;
+      box-shadow: 0 20px 60px rgba(15,23,42,0.08);
+      padding: 40px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 24px;
+      border-bottom: 4px solid #10b981;
+      padding-bottom: 24px;
+      margin-bottom: 28px;
+    }
+    .title {
+      font-size: 32px;
+      font-weight: 900;
+      margin: 0;
+      letter-spacing: -0.03em;
+      text-transform: uppercase;
+    }
+    .pill {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: #ecfdf5;
+      color: #047857;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      border: 1px solid #a7f3d0;
+    }
+    .meta {
+      text-align: right;
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .summary-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      padding: 18px 20px;
+      background: #f8fafc;
+    }
+    .summary-label {
+      font-size: 10px;
+      color: #64748b;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .summary-value {
+      font-size: 26px;
+      font-weight: 900;
+      color: #0f172a;
+      letter-spacing: -0.03em;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      overflow: hidden;
+      border-radius: 18px;
+      border: 1px solid #e2e8f0;
+    }
+    th {
+      background: #0f172a;
+      color: white;
+      text-align: left;
+      padding: 14px 12px;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      vertical-align: top;
+    }
+    td {
+      padding: 14px 12px;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+    tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 700;
+    }
+    .image-cell {
+      width: 72px;
+    }
+    .part-image {
+      width: 52px;
+      height: 52px;
+      object-fit: contain;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      background: white;
+      padding: 4px;
+      display: block;
+    }
+    .part-image-placeholder {
+      width: 52px;
+      height: 52px;
+      border-radius: 12px;
+      border: 1px dashed #cbd5e1;
+      background: #f8fafc;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .right {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .muted {
+      color: #64748b;
+    }
+    .source {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #ecfeff;
+      color: #155e75;
+      border: 1px solid #a5f3fc;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .footer {
+      margin-top: 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      border-top: 2px solid #e2e8f0;
+      padding-top: 20px;
+    }
+    .grand-total {
+      font-size: 28px;
+      font-weight: 900;
+      color: #047857;
+      letter-spacing: -0.03em;
+    }
+    @media print {
+      body {
+        padding: 0;
+        background: white;
+      }
+      .sheet {
+        box-shadow: none;
+        border-radius: 0;
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div>
+        <h1 class="title">${basketName}</h1>
+        <div class="pill">Draft BOM Basket Report</div>
+        ${options?.projectName ? `<div style="margin-top:12px;font-size:13px;font-weight:700;color:#334155;">Project: ${options.projectName}${options?.projectNumber ? ` (${options.projectNumber})` : ''}</div>` : ''}
+      </div>
+      <div class="meta">
+        <div>BOM Basket Export</div>
+        <div style="margin-top:8px;color:#0f172a;font-size:14px;">${today}</div>
+      </div>
+    </div>
+
+    <div class="summary">
+      <div class="summary-card">
+        <div class="summary-label">Total Lines</div>
+        <div class="summary-value">${items.length}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Project Items</div>
+        <div class="summary-value">${items.filter((item: any) => item.source_type === 'project_part').length}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Master Items</div>
+        <div class="summary-value">${items.filter((item: any) => item.source_type === 'master_part').length}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Temporary Items</div>
+        <div class="summary-value">${items.filter((item: any) => item.source_type === 'temporary').length}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Image</th>
+          <th>Source</th>
+          <th>Part Number</th>
+          <th>Description</th>
+          <th>Usage Comment</th>
+          <th>Notes</th>
+          <th class="right">Qty</th>
+          <th class="right">Unit Price</th>
+          <th class="right">Discount</th>
+          <th class="right">Line Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item: any, index: number) => {
+          const effectivePrice = (item.unit_price || 0) * (1 - ((item.discount_percent || 0) / 100));
+          const lineTotal = (item.quantity || 0) * effectivePrice;
+          return `
+            <tr>
+              <td class="mono">${String(index + 1).padStart(2, '0')}</td>
+              <td class="image-cell">
+                ${
+                  item.image_path
+                    ? `<img src="${item.image_path}" alt="${item.part_number || 'Part image'}" class="part-image" />`
+                    : `<div class="part-image-placeholder">No Img</div>`
+                }
+              </td>
+              <td><span class="source">${sourceLabel(item.source_type)}</span></td>
+              <td class="mono">${item.part_number || '-'}</td>
+              <td>${item.description || '<span class="muted">-</span>'}</td>
+              <td>${item.usage_comment || '<span class="muted">-</span>'}</td>
+              <td>${item.notes || '<span class="muted">-</span>'}</td>
+              <td class="right mono">${item.quantity || 0}</td>
+              <td class="right mono">${item.currency || currency} ${(item.unit_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td class="right mono">${item.discount_percent || 0}%</td>
+              <td class="right mono">${item.currency || currency} ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            </tr>
+          `;
+        }).join('')}
+        ${items.length === 0 ? `<tr><td colspan="11" style="text-align:center;padding:32px;color:#94a3b8;font-style:italic;">No items in BOM basket</td></tr>` : ''}
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <div class="muted" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;">
+        Generated by BEP BOM Manager
+      </div>
+      <div>
+        <div class="summary-label" style="text-align:right;">Estimated Project Cost</div>
+        <div class="grand-total">${currency} ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${basketName.replace(/\s+/g, '_')}_Report.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
   // Simple PDF export using browser print (no extra library)
   exportToPDF: (filename: string) => {
     const originalTitle = document.title;

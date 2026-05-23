@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  FileText,
   Package,
   Plus,
   ShoppingBag,
@@ -13,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import BOMBasketPartPickerModal from '@/components/projects/BOMBasketPartPickerModal'
+import exportUtils from '@/utils/export'
 import {
   type BOMBasketItem,
   useBOMBasketStore,
@@ -208,6 +210,19 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                exportUtils.generateBOMBasketHTMLReport('BOM Basket', items, {
+                  projectNumber: projectId ? `PROJECT-${projectId}` : null,
+                  currency: projectCurrency,
+                })
+              }
+              className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-900 px-3 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-slate-200 transition hover:border-slate-500"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Export HTML
+            </button>
             <button
               type="button"
               disabled={!projectId}

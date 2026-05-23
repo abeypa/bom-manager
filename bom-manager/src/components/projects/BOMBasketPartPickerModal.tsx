@@ -43,6 +43,7 @@ const DraggablePartCard = ({
     part_number: part.part_number || part.manufacturer_part_number || `PART-${part.id}`,
     description: part.description || 'No description',
     manufacturer_part_number: part.manufacturer_part_number || null,
+    image_path: part.image_path || null,
     quantity: 1,
     unit_price: part.base_price || 0,
     discount_percent: part.discount_percent || 0,

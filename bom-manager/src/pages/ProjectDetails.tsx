@@ -171,6 +171,7 @@ const ProjectDetails = () => {
       `PART-${part.id}`,
     description: part.description || part.part_ref?.description || 'No description',
     manufacturer_part_number: part.part_ref?.manufacturer_part_number || null,
+    image_path: part.part_ref?.image_path || null,
     quantity: part.quantity || 1,
     unit_price: part.unit_price || part.unitPrice || 0,
     discount_percent: part.discount_percent || part.snapshotDiscount || 0,
