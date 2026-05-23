@@ -5,7 +5,7 @@ import { useToast } from '@/context/ToastContext'
 import {
   Search, Plus, FileDown, MoreHorizontal, FileText, Image as ImageIcon,
   Trash2, Edit, Package, Upload, History, LayoutGrid, List, Filter, ChevronRight,
-  ArrowUpDown
+  ArrowUpDown, ClipboardList
 } from 'lucide-react'
 import PartFormModal from '@/components/parts/PartFormModal'
 import PartImportModal from '@/components/parts/PartImportModal'
@@ -13,6 +13,7 @@ import PriceHistoryModal from '@/components/parts/PriceHistoryModal'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
 import PartDetailModal from '@/components/parts/PartDetailModal'
 import FastScrollSlider from '@/components/ui/FastScrollSlider.tsx'
+import { makeMasterBasketId, type BOMBasketItem, useBOMBasketStore } from '@/store/useBOMBasketStore'
 
 const TABS: { id: PartCategory; name: string }[] = [
   { id: 'electrical_bought_out', name: 'Elec Bought-Out' },
@@ -70,6 +71,9 @@ const Parts = () => {
     partNumber: string;
     category: PartCategory;
   } | null>(null);
+  const addToBOMBasket = useBOMBasketStore((state) => state.addItems)
+  const setBasketOpen = useBOMBasketStore((state) => state.setBasketOpen)
+  const projectId = useBOMBasketStore((state) => state.currentProjectId)
 
   useEffect(() => {
     document.title = 'Parts Master Registry | BEP BOM Manager';
@@ -97,6 +101,36 @@ const Parts = () => {
       partNumber: part.part_number,
       category: activeTab
     });
+  }
+
+  const makeBasketItem = (part: any): BOMBasketItem => ({
+    basket_id: makeMasterBasketId(activeTab, part.id),
+    project_id: projectId || 0,
+    source_type: 'master_part',
+    source_project_part_id: null,
+    part_type: activeTab,
+    part_id: part.id,
+    part_number: part.part_number || part.manufacturer_part_number || `PART-${part.id}`,
+    description: part.description || 'No description',
+    manufacturer_part_number: part.manufacturer_part_number || null,
+    quantity: 1,
+    unit_price: part.base_price || 0,
+    discount_percent: part.discount_percent || 0,
+    currency: part.currency || 'INR',
+    usage_comment: '',
+    reference_designator: null,
+    notes: null,
+    is_temporary: false,
+  })
+
+  const handleAddToBOMBasket = (part: any) => {
+    if (!projectId) {
+      showToastError('Open a project first so the BOM basket knows which project this part belongs to.')
+      return
+    }
+
+    addToBOMBasket(projectId, [makeBasketItem(part)])
+    setBasketOpen(true)
   }
 
   const uniqueSuppliers = Array.from(new Set((parts || []).map((p: any) => p.suppliers?.name).filter(Boolean))).sort()
@@ -381,7 +415,7 @@ const Parts = () => {
                           )}
                         </div>
         
-                        <div className="pt-5 border-t border-slate-100 flex justify-between items-end">
+                        <div className="pt-5 border-t border-slate-100 flex justify-between items-end gap-3">
                           <div>
                             <div className="label-caps !text-[9px] mb-1">Unit Valuation</div>
                             <div className="text-2xl font-black text-navy-900 tabular-nums tracking-tighter italic">
@@ -390,9 +424,18 @@ const Parts = () => {
                             </div>
                           </div>
                           
-                          <div className="flex gap-1.5 mb-2">
-                             {part.pdf_path && <div className="w-2 h-2 bg-red-400 rounded-full animate-pulse shadow-sm" title="Datasheet Connected" />}
-                             {part.cad_file_url && <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse shadow-sm" title="CAD/3D Component Connected" />}
+                          <div className="flex flex-col items-end gap-2">
+                             <button
+                               onClick={(e) => { e.stopPropagation(); handleAddToBOMBasket(part); }}
+                               className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-700 transition hover:bg-emerald-100"
+                             >
+                               <ClipboardList className="h-3.5 w-3.5" />
+                               Add to BOM
+                             </button>
+                             <div className="flex gap-1.5 mb-2">
+                               {part.pdf_path && <div className="w-2 h-2 bg-red-400 rounded-full animate-pulse shadow-sm" title="Datasheet Connected" />}
+                               {part.cad_file_url && <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse shadow-sm" title="CAD/3D Component Connected" />}
+                             </div>
                           </div>
                         </div>
                       </div>
@@ -452,6 +495,13 @@ const Parts = () => {
                                 </td>
                                 <td>
                                     <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all scale-95 group-hover:scale-100">
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleAddToBOMBasket(part); }}
+                                            className="btn btn-icon btn-sm btn-ghost hover:text-emerald-600"
+                                            title="Add to BOM basket"
+                                        >
+                                            <ClipboardList className="h-4 w-4" />
+                                        </button>
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); handleShowHistory(part); }}
                                             className="btn btn-icon btn-sm btn-ghost hover:text-emerald-500"

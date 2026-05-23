@@ -20,7 +20,7 @@ import {
 } from '@/store/useBOMBasketStore'
 
 interface BOMBasketProps {
-  projectId: number
+  projectId: number | null
   projectCurrency?: string
 }
 
@@ -86,6 +86,7 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
   )
 
   const handleAddTemporary = () => {
+    if (!projectId) return
     if (!tempDraft.part_number.trim() || !tempDraft.description.trim()) return
 
     addTemporaryItem(projectId, {
@@ -184,21 +185,37 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
+              disabled={!projectId}
               onClick={() => setPickerOpen(true)}
-              className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-3 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-white transition hover:bg-emerald-400"
+              className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-[11px] font-black uppercase tracking-[0.16em] transition ${
+                projectId
+                  ? 'bg-emerald-500 text-white hover:bg-emerald-400'
+                  : 'cursor-not-allowed bg-slate-800 text-slate-500'
+              }`}
             >
               <Package className="h-3.5 w-3.5" />
               Add From Master
             </button>
             <button
               type="button"
+              disabled={!projectId}
               onClick={() => setShowTemporaryForm((value) => !value)}
-              className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-900 px-3 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-slate-200 transition hover:border-slate-500"
+              className={`inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-[11px] font-black uppercase tracking-[0.16em] transition ${
+                projectId
+                  ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
+                  : 'cursor-not-allowed border-slate-800 bg-slate-900 text-slate-500'
+              }`}
             >
               <Wrench className="h-3.5 w-3.5" />
               Temporary Item
             </button>
           </div>
+
+          {!projectId && (
+            <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs font-medium text-amber-100">
+              Open a project first to set the target for this BOM basket. Then come back here and drag parts in from Part Master.
+            </div>
+          )}
 
           {showTemporaryForm && (
             <div className="mt-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
@@ -344,7 +361,7 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => removeItem(projectId, item.basket_id)}
+                      onClick={() => projectId && removeItem(projectId, item.basket_id)}
                       className="rounded-xl p-2 text-slate-500 transition hover:bg-red-500/10 hover:text-red-300"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -360,10 +377,11 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
                         type="number"
                         min="1"
                         value={item.quantity}
-                        onChange={(e) =>
-                          updateItem(projectId, item.basket_id, {
-                            quantity: Math.max(1, Number(e.target.value) || 1),
-                          })
+                      onChange={(e) =>
+                        projectId &&
+                        updateItem(projectId, item.basket_id, {
+                          quantity: Math.max(1, Number(e.target.value) || 1),
+                        })
                         }
                         className="h-11 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 text-sm font-bold text-white outline-none transition focus:border-primary-400"
                       />
@@ -377,10 +395,11 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
                         min="0"
                         step="0.01"
                         value={item.unit_price}
-                        onChange={(e) =>
-                          updateItem(projectId, item.basket_id, {
-                            unit_price: Math.max(0, Number(e.target.value) || 0),
-                          })
+                      onChange={(e) =>
+                        projectId &&
+                        updateItem(projectId, item.basket_id, {
+                          unit_price: Math.max(0, Number(e.target.value) || 0),
+                        })
                         }
                         className="h-11 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 text-sm font-bold text-white outline-none transition focus:border-primary-400"
                       />
@@ -392,10 +411,11 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
                       <input
                         type="text"
                         value={item.currency}
-                        onChange={(e) =>
-                          updateItem(projectId, item.basket_id, {
-                            currency: e.target.value.toUpperCase(),
-                          })
+                      onChange={(e) =>
+                        projectId &&
+                        updateItem(projectId, item.basket_id, {
+                          currency: e.target.value.toUpperCase(),
+                        })
                         }
                         className="h-11 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 text-sm font-bold text-white outline-none transition focus:border-primary-400"
                       />
@@ -409,10 +429,11 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
                         min="0"
                         step="0.1"
                         value={item.discount_percent}
-                        onChange={(e) =>
-                          updateItem(projectId, item.basket_id, {
-                            discount_percent: Math.max(0, Number(e.target.value) || 0),
-                          })
+                      onChange={(e) =>
+                        projectId &&
+                        updateItem(projectId, item.basket_id, {
+                          discount_percent: Math.max(0, Number(e.target.value) || 0),
+                        })
                         }
                         className="h-11 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 text-sm font-bold text-white outline-none transition focus:border-primary-400"
                       />
@@ -427,6 +448,7 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
                       type="text"
                       value={item.usage_comment}
                       onChange={(e) =>
+                        projectId &&
                         updateItem(projectId, item.basket_id, {
                           usage_comment: e.target.value,
                         })
@@ -444,6 +466,7 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
                       rows={2}
                       value={item.notes || ''}
                       onChange={(e) =>
+                        projectId &&
                         updateItem(projectId, item.basket_id, {
                           notes: e.target.value,
                         })
@@ -485,7 +508,8 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
 
           <button
             type="button"
-            onClick={() => clearProjectBasket(projectId)}
+            disabled={!projectId}
+            onClick={() => projectId && clearProjectBasket(projectId)}
             className="mt-4 w-full rounded-2xl border border-slate-700 px-3 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-slate-300 transition hover:border-red-300 hover:text-red-300"
           >
             Clear BOM Basket
@@ -496,8 +520,9 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
       <BOMBasketPartPickerModal
         isOpen={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        projectId={projectId}
+        projectId={projectId || 0}
         onAddItem={(item) => {
+          if (!projectId) return
           addItems(projectId, [item])
           setBasketOpen(true)
         }}

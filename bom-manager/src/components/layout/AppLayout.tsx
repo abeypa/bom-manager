@@ -9,8 +9,10 @@ import { useRole } from '../../hooks/useRole';
 import { useAuth } from '../../context/AuthContext';
 import SearchOverlay from '@/components/ui/SearchOverlay';
 import POBasket from '@/components/projects/POBasket';
+import BOMBasket from '@/components/projects/BOMBasket';
 import CreatePOFromBOMModal from '@/components/projects/CreatePOFromBOMModal';
 import { usePOBasketStore } from '@/store/usePOBasketStore';
+import { useBOMBasketStore } from '@/store/useBOMBasketStore';
 import AIChat from '@/components/ai/AIChat';
 import { useAIStore } from '@/store/useAIStore';
 import { loadSettingsFromDB, saveSettings } from '@/lib/openrouter';
@@ -167,6 +169,7 @@ export default function AppLayout() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const bomBasketProjectId = useBOMBasketStore((state) => state.currentProjectId);
 
   // Sync admin-configured AI key from DB into localStorage so all users can use AI
   useEffect(() => {
@@ -280,6 +283,7 @@ export default function AppLayout() {
 
       <SearchOverlay isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
 
+      <BOMBasket projectId={bomBasketProjectId} projectCurrency="INR" />
       <POBasket />
       <GlobalPOModal />
       <AILauncher />

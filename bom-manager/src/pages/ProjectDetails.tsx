@@ -46,8 +46,6 @@ import { resolvePartType } from '@/utils/partTypeUtils'
 import { partsApi } from '@/api/parts'
 import BOMDraggableSection from '@/components/projects/BOMDraggableSection'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
-import POBasket from '@/components/projects/POBasket'
-import BOMBasket from '@/components/projects/BOMBasket'
 import FastScrollSlider from '@/components/ui/FastScrollSlider'
 import PendingPartsTab from '@/components/projects/pending-parts/PendingPartsTab.tsx'
 import {
@@ -859,9 +857,6 @@ const ProjectDetails = () => {
           ) : null}
         </DragOverlay>
         
-        <BOMBasket projectId={projectId} projectCurrency="INR" />
-        <POBasket />
-
         {/* Modals integrated within the main container to avoid fragment issues */}
         <ProjectSectionModal
           isOpen={sectionModal.open}
