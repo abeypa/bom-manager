@@ -261,9 +261,14 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
    1. find_master_part_by_erp_id with the Item Code.
       - If found → queue update_master_part_price with the new
         price / discount / supplier_id / last_price_date. Use the PO
-        date as last_price_date. This update is required even when
-        the part already exists, because the PO is the latest price
-        evidence.
+        date as last_price_date, and include a change_reason such as
+        "po_ingestion_snapshot:<po_number>" when you know the PO
+        number. This update is required even when the part already
+        exists, because every resolved material line must log a
+        PDF-dated price snapshot. The tool will only promote the
+        current master price when the PO date is newer than the
+        master updated_date; older POs must log history only and must
+        not overwrite the current master price.
       - If not found → continue with steps 2–6 below to build a
         create_master_part proposal.
    2. Determine the part_type from the description and the prefix system:

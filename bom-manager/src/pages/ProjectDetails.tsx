@@ -47,6 +47,7 @@ import { partsApi } from '@/api/parts'
 import BOMDraggableSection from '@/components/projects/BOMDraggableSection'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
 import POBasket from '@/components/projects/POBasket'
+import BOMBasket from '@/components/projects/BOMBasket'
 import FastScrollSlider from '@/components/ui/FastScrollSlider'
 import PendingPartsTab from '@/components/projects/pending-parts/PendingPartsTab.tsx'
 import {
@@ -72,6 +73,11 @@ import { useRole } from '@/hooks/useRole'
 import { useToast } from '@/context/ToastContext'
 import exportUtils from '@/utils/export'
 import { usePOBasketStore } from '@/store/usePOBasketStore'
+import {
+  makeProjectBasketId,
+  type BOMBasketItem,
+  useBOMBasketStore,
+} from '@/store/useBOMBasketStore'
 
 const ProjectDetails = () => {
   const { id } = useParams()
@@ -131,6 +137,10 @@ const ProjectDetails = () => {
     setProjectId,
     setPoModalOpen
   } = usePOBasketStore()
+  const bomBasketOpen = useBOMBasketStore((state) => state.basketOpen)
+  const setBomBasketOpen = useBOMBasketStore((state) => state.setBasketOpen)
+  const addToBOMBasket = useBOMBasketStore((state) => state.addItems)
+  const setCurrentBOMBasketProject = useBOMBasketStore((state) => state.setCurrentProjectId)
 
   const [activeDragItem, setActiveDragItem] = useState<any | null>(null)
 
@@ -146,7 +156,32 @@ const ProjectDetails = () => {
       document.title = `${project.name} | Project Registry`
     }
     setProjectId(projectId)
-  }, [project?.name, projectId, setProjectId])
+    setCurrentBOMBasketProject(projectId)
+  }, [project?.name, projectId, setProjectId, setCurrentBOMBasketProject])
+
+  const mapProjectPartToBOMBasketItem = (part: any): BOMBasketItem => ({
+    basket_id: makeProjectBasketId(part.id),
+    project_id: projectId,
+    source_type: 'project_part',
+    source_project_part_id: part.id,
+    part_type: part.part_type || null,
+    part_id: part.part_id || null,
+    part_number:
+      part.part_number ||
+      part.part_ref?.part_number ||
+      part.part_ref?.manufacturer_part_number ||
+      `PART-${part.id}`,
+    description: part.description || part.part_ref?.description || 'No description',
+    manufacturer_part_number: part.part_ref?.manufacturer_part_number || null,
+    quantity: part.quantity || 1,
+    unit_price: part.unit_price || part.unitPrice || 0,
+    discount_percent: part.discount_percent || part.snapshotDiscount || 0,
+    currency: part.currency || 'INR',
+    usage_comment: part.notes || '',
+    reference_designator: part.reference_designator || null,
+    notes: part.notes || null,
+    is_temporary: false,
+  })
 
   const { data: projectPOs } = useQuery({
     queryKey: ['project-pos', projectId],
@@ -300,6 +335,12 @@ const ProjectDetails = () => {
 
   const handleDragStart = (event: any) => {
     const { active } = event
+    const dragMeta = active?.data?.current
+    if (dragMeta?.type === 'master_part') {
+      setActiveDragItem(dragMeta.data)
+      return
+    }
+
     let draggedPart = null
     project?.sections?.forEach((s: any) => {
       s.subsections?.forEach((sub: any) => {
@@ -318,7 +359,43 @@ const ProjectDetails = () => {
     const activeId = active.id.toString()
     const overId = over.id.toString()
 
-    // 1. DROP INTO PO BASKET
+    // 1. DROP INTO BOM BASKET
+    if (overId === 'bom-basket') {
+      const draggedData = active.data.current
+      if (!draggedData) return
+
+      const collectParts = (type: string, data: any): any[] => {
+        if (type === 'part') return [data]
+        if (type === 'subsection') return data.parts || []
+        if (type === 'section') {
+          return (data.subsections || []).flatMap((sub: any) => sub.parts || [])
+        }
+        return []
+      }
+
+      if (draggedData.type === 'master_part') {
+        addToBOMBasket(projectId, [draggedData.data])
+        setBomBasketOpen(true)
+        showToast('success', 'Part added to BOM basket')
+        return
+      }
+
+      const partsToAdd = collectParts(draggedData.type, draggedData.data)
+      if (partsToAdd.length > 0) {
+        addToBOMBasket(
+          projectId,
+          partsToAdd.map((part: any) => mapProjectPartToBOMBasketItem(part)),
+        )
+        setBomBasketOpen(true)
+        showToast(
+          'success',
+          `${partsToAdd.length} ${partsToAdd.length === 1 ? 'part' : 'parts'} added to BOM basket`,
+        )
+      }
+      return
+    }
+
+    // 2. DROP INTO PO BASKET
     if (overId === 'po-basket') {
       const draggedData = active.data.current
       if (!draggedData) return
@@ -347,13 +424,13 @@ const ProjectDetails = () => {
       return
     }
 
-    // 2. TREE REORDERING
+    // 3. TREE REORDERING
     if (activeId === overId) return
     
     // Check if over internal tree node (starts with section-, sub-, part-)
     if (!overId.startsWith('section-') && !overId.startsWith('sub-') && !overId.startsWith('part-')) return
 
-    // 2.1 Reordering Sections
+    // 3.1 Reordering Sections
     if (activeId.startsWith('section-') && overId.startsWith('section-')) {
       const activeDataId = parseInt(activeId.split('-')[1])
       const overDataId = parseInt(overId.split('-')[1])
@@ -364,7 +441,7 @@ const ProjectDetails = () => {
       showToast('success', 'Section order updated')
     }
 
-    // 2.2 Reordering/Moving Subsections
+    // 3.2 Reordering/Moving Subsections
     if (activeId.startsWith('sub-') && (overId.startsWith('sub-') || overId.startsWith('section-'))) {
       const subId = parseInt(activeId.split('-')[1])
       let targetSectionId: number
@@ -392,7 +469,7 @@ const ProjectDetails = () => {
       showToast('success', 'Subsection moved')
     }
 
-    // 2.3 Reordering/Moving Parts
+    // 3.3 Reordering/Moving Parts
     if (activeId.startsWith('part-') && (overId.startsWith('part-') || overId.startsWith('sub-'))) {
       const partId = parseInt(activeId.split('-')[1])
       let targetSubId: number
@@ -497,6 +574,13 @@ const ProjectDetails = () => {
                   ADD TO BASKET ({selectedPartIds.size})
                 </button>
               )}
+              <button
+                onClick={() => setBomBasketOpen(!bomBasketOpen)}
+                className="btn relative border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+              >
+                <ClipboardList className="h-4 w-4 mr-2" />
+                BOM BASKET
+              </button>
               <button 
                 onClick={() => setBasketOpen(!basketOpen)}
                 className={`btn ${basketItems.length > 0 ? 'bg-primary-500 text-white' : 'btn-secondary'} relative`}
@@ -764,7 +848,9 @@ const ProjectDetails = () => {
                  <Package className="w-4 h-4 text-white" />
               </div>
               <div>
-                <p className="text-xs font-black text-navy-900">{activeDragItem.part_ref?.part_number || activeDragItem.part_ref}</p>
+                <p className="text-xs font-black text-navy-900">
+                  {activeDragItem.part_ref?.part_number || activeDragItem.part_number || activeDragItem.part_ref}
+                </p>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[150px]">
                   {activeDragItem.description || activeDragItem.part_ref?.description}
                 </p>
@@ -773,6 +859,7 @@ const ProjectDetails = () => {
           ) : null}
         </DragOverlay>
         
+        <BOMBasket projectId={projectId} projectCurrency="INR" />
         <POBasket />
 
         {/* Modals integrated within the main container to avoid fragment issues */}

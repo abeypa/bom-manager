@@ -85,6 +85,7 @@ const MAX_PRICE = 1_000_000_000
 const MAX_DESC_LEN = 2000
 const IMAGE_EXT_RE = /\.(jpg|jpeg|png|webp)(\?|$)/i
 const roundMoney = (value: number) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
+const PRICE_HISTORY_EPSILON = 0.0001
 
 function assertNonEmpty(field: string, v: any) {
   if (v == null || (typeof v === 'string' && v.trim() === '')) {
@@ -217,6 +218,88 @@ function percentChange(oldPrice: any, newPrice: any) {
   const newValue = Number(newPrice || 0)
   if (!oldValue || !Number.isFinite(oldValue) || !Number.isFinite(newValue)) return null
   return ((newValue - oldValue) / oldValue) * 100
+}
+
+function valuesDiffer(left: any, right: any, epsilon = PRICE_HISTORY_EPSILON) {
+  const a = Number(left)
+  const b = Number(right)
+  if (Number.isFinite(a) && Number.isFinite(b)) return Math.abs(a - b) > epsilon
+  return String(left ?? '') !== String(right ?? '')
+}
+
+function normalizeDateKey(value: string | null | undefined) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10)
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString().slice(0, 10)
+}
+
+function shouldPromoteIncomingPrice(incomingDate: string | null | undefined, currentDate: string | null | undefined) {
+  const incomingKey = normalizeDateKey(incomingDate)
+  const currentKey = normalizeDateKey(currentDate)
+  if (!incomingKey) return true
+  if (!currentKey) return true
+  return incomingKey >= currentKey
+}
+
+async function insertPartPriceHistorySnapshot(args: {
+  partType: string
+  partId: number
+  partNumber: string
+  oldRow?: any
+  newValues: {
+    base_price?: any
+    currency?: any
+    discount_percent?: any
+  }
+  changeReason?: string | null
+  changedAt?: string | null
+}) {
+  const changedAt = String(args.changedAt || '').trim() || new Date().toISOString()
+  const newPrice = Number(args.newValues?.base_price ?? 0)
+  const newCurrency = String(args.newValues?.currency || 'INR')
+  const newDiscount = Number(args.newValues?.discount_percent ?? 0)
+  const reason = String(args.changeReason || '').trim() || 'master_part_price_update'
+  const normalizedChangedAt = normalizeDateKey(changedAt)
+
+  const { data: existingRows, error: existingError } = await (supabase as any)
+    .from('part_price_history')
+    .select('id, changed_at, new_price, new_currency, new_discount_percent, change_reason')
+    .eq('part_table_name', args.partType)
+    .eq('part_id', args.partId)
+    .order('changed_at', { ascending: false })
+    .limit(50)
+  if (existingError) throw existingError
+
+  const duplicate = (existingRows || []).some((row: any) =>
+    normalizeDateKey(row.changed_at) === normalizedChangedAt &&
+    !valuesDiffer(row.new_price ?? null, newPrice) &&
+    String(row.new_currency || 'INR') === newCurrency &&
+    !valuesDiffer(row.new_discount_percent ?? 0, newDiscount) &&
+    String(row.change_reason || '').trim() === reason
+  )
+  if (duplicate) return { inserted: false, duplicate: true }
+
+  const { data: userData } = await supabase.auth.getUser()
+  const { error } = await (supabase as any).from('part_price_history').insert({
+    part_table_name: args.partType,
+    part_id: args.partId,
+    part_number: args.partNumber,
+    old_price: args.oldRow?.base_price ?? null,
+    new_price: newPrice,
+    old_currency: args.oldRow?.currency || 'INR',
+    new_currency: newCurrency,
+    old_discount_percent: args.oldRow?.discount_percent ?? null,
+    new_discount_percent: newDiscount,
+    change_reason: reason,
+    changed_at: changedAt,
+    changed_by: userData.user?.email || 'system',
+  })
+  if (error) throw error
+
+  return { inserted: true, duplicate: false }
 }
 
 function normalizeCode(value: any) {
@@ -1813,6 +1896,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         image_path: { type: 'string', description: 'Optional image URL — try search_image_url first.' },
         last_price_date: { type: 'string', description: 'ISO date (the PO date).' },
         specifications: { type: 'string' },
+        change_reason: { type: 'string', description: 'Optional audit note for the initial price snapshot, for example po_ingestion_snapshot:PO/P/25-26/100077.' },
       },
     },
     summarize: (a) => {
@@ -1961,7 +2045,21 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .select()
         .single()
       if (error) throw error
-      return data
+      const history = await insertPartPriceHistorySnapshot({
+        partType: a.part_type,
+        partId: data.id,
+        partNumber: data.part_number,
+        oldRow: null,
+        newValues: insertRow,
+        changedAt: a.last_price_date || data.updated_date || data.created_date,
+        changeReason: a.change_reason || (a.last_price_date ? 'po_ingestion_create' : 'master_part_create'),
+      })
+      return {
+        ...data,
+        price_history_logged: history.inserted,
+        promoted_current_price: true,
+        skipped_price_promotion_due_to_older_po: false,
+      }
     },
   },
   {
@@ -1980,6 +2078,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         currency: { type: 'string' },
         image_path: { type: 'string' },
         last_price_date: { type: 'string' },
+        change_reason: { type: 'string', description: 'Optional audit note for the price snapshot, for example po_ingestion_snapshot:PO/P/25-26/100077.' },
         manufacturer_part_number: { type: 'string' },
         supplier_id: { type: 'number', description: 'Optional. Update the master part\'s primary supplier when a different supplier is now sourcing this part. The supplier row must exist.' },
       },
@@ -1996,32 +2095,81 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       assertInteger('part_id', a.part_id)
       if (a.base_price != null) assertNumberInRange('base_price', a.base_price, 0, MAX_PRICE)
       if (a.discount_percent != null) assertNumberInRange('discount_percent', a.discount_percent, 0, 100)
-      await assertRowExists(a.part_type, a.part_id, `${a.part_type} master part`)
+      const { data: currentRow, error: currentError } = await (supabase as any)
+        .from(a.part_type)
+        .select('*')
+        .eq('id', a.part_id)
+        .single()
+      if (currentError || !currentRow) throw new Error(`${a.part_type} master part #${a.part_id} does not exist.`)
       if (a.supplier_id != null) {
         assertInteger('supplier_id', a.supplier_id)
         await assertRowExists('suppliers', a.supplier_id, 'supplier')
       }
 
+      const hasIncomingPriceEvidence =
+        a.base_price != null ||
+        a.discount_percent != null ||
+        a.currency != null ||
+        a.supplier_id != null ||
+        a.last_price_date != null ||
+        a.change_reason != null
+      const isPoDatedUpdate = Boolean(a.last_price_date)
+      const shouldPromotePrice = !isPoDatedUpdate || shouldPromoteIncomingPrice(a.last_price_date, currentRow.updated_date)
+
       const patch: any = {}
-      if (a.base_price != null) patch.base_price = a.base_price
-      if (a.discount_percent != null) patch.discount_percent = a.discount_percent
-      if (a.currency) patch.currency = a.currency
       if (a.image_path) patch.image_path = a.image_path
       if (a.manufacturer_part_number) patch.manufacturer_part_number = a.manufacturer_part_number
-      if (a.supplier_id != null) patch.supplier_id = a.supplier_id
-      if (a.last_price_date) patch.updated_date = a.last_price_date
-      else patch.updated_date = new Date().toISOString()
-      if (Object.keys(patch).length === 1 /* only updated_date */) {
-        throw new Error('update_master_part_price: nothing to update — supply at least one of base_price, discount_percent, currency, image_path, manufacturer_part_number, supplier_id, last_price_date.')
+      if (shouldPromotePrice) {
+        if (a.base_price != null) patch.base_price = a.base_price
+        if (a.discount_percent != null) patch.discount_percent = a.discount_percent
+        if (a.currency) patch.currency = a.currency
+        if (a.supplier_id != null) patch.supplier_id = a.supplier_id
+        if (hasIncomingPriceEvidence) patch.updated_date = a.last_price_date || new Date().toISOString()
       }
-      const { data, error } = await (supabase as any)
-        .from(a.part_type)
-        .update(patch)
-        .eq('id', a.part_id)
-        .select()
-        .single()
-      if (error) throw error
-      return data
+
+      const hasPatchBeyondUpdatedDate = Object.keys(patch).some((key) => key !== 'updated_date')
+      if (!hasPatchBeyondUpdatedDate && !hasIncomingPriceEvidence) {
+        throw new Error('update_master_part_price: nothing to update — supply at least one of base_price, discount_percent, currency, image_path, manufacturer_part_number, supplier_id, last_price_date, or change_reason.')
+      }
+
+      const historyNeeded =
+        hasIncomingPriceEvidence &&
+        (a.base_price != null || a.discount_percent != null || a.currency != null || a.last_price_date != null || a.change_reason != null)
+
+      let data = currentRow
+      if (Object.keys(patch).length) {
+        const { data: updated, error } = await (supabase as any)
+          .from(a.part_type)
+          .update(patch)
+          .eq('id', a.part_id)
+          .select()
+          .single()
+        if (error) throw error
+        data = updated
+      }
+
+      const history = historyNeeded
+        ? await insertPartPriceHistorySnapshot({
+            partType: a.part_type,
+            partId: a.part_id,
+            partNumber: currentRow.part_number,
+            oldRow: currentRow,
+            newValues: {
+              base_price: a.base_price ?? currentRow.base_price,
+              currency: a.currency || currentRow.currency || 'INR',
+              discount_percent: a.discount_percent ?? currentRow.discount_percent ?? 0,
+            },
+            changedAt: a.last_price_date || new Date().toISOString(),
+            changeReason: a.change_reason || (a.last_price_date ? 'po_ingestion_snapshot' : 'master_part_price_update'),
+          })
+        : { inserted: false, duplicate: false }
+
+      return {
+        ...data,
+        price_history_logged: history.inserted,
+        promoted_current_price: shouldPromotePrice && hasIncomingPriceEvidence,
+        skipped_price_promotion_due_to_older_po: Boolean(isPoDatedUpdate && !shouldPromotePrice),
+      }
     },
   },
   {
