@@ -133,6 +133,18 @@ const Parts = () => {
     setBasketOpen(true)
   }
 
+  const handlePartMasterDragStart = (event: React.DragEvent, part: any) => {
+    if (!projectId) {
+      event.preventDefault()
+      showToastError('Open a project first so dragged parts can go into that project BOM basket.')
+      return
+    }
+
+    event.dataTransfer.effectAllowed = 'copy'
+    event.dataTransfer.setData('application/x-bom-master-part', JSON.stringify(makeBasketItem(part)))
+    event.dataTransfer.setData('text/plain', part.part_number || part.manufacturer_part_number || `PART-${part.id}`)
+  }
+
   const uniqueSuppliers = Array.from(new Set((parts || []).map((p: any) => p.suppliers?.name).filter(Boolean))).sort()
 
   const filteredParts = (parts || []).filter((p: any) => {
@@ -356,6 +368,8 @@ const Parts = () => {
                   return (
                     <div
                       key={part.id}
+                      draggable={Boolean(projectId)}
+                      onDragStart={(e) => handlePartMasterDragStart(e, part)}
                       onClick={() => setDetailModal({ id: part.id, category: activeTab })}
                       className="card group hover:shadow-2xl hover:-translate-y-1.5 transition-all duration-300 overflow-hidden flex flex-col cursor-pointer border-b-4 hover:border-navy-500"
                     >
@@ -457,7 +471,13 @@ const Parts = () => {
                     </thead>
                     <tbody>
                         {sortedParts.map((part: any) => (
-                            <tr key={part.id} className="table-row-hover group" onClick={() => setDetailModal({ id: part.id, category: activeTab })}>
+                            <tr
+                                key={part.id}
+                                draggable={Boolean(projectId)}
+                                onDragStart={(e) => handlePartMasterDragStart(e, part)}
+                                className="table-row-hover group"
+                                onClick={() => setDetailModal({ id: part.id, category: activeTab })}
+                            >
                                 <td>
                                     <div className="flex items-center gap-4">
                                         <div className="w-12 h-12 bg-white border border-slate-100 rounded-xl flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">

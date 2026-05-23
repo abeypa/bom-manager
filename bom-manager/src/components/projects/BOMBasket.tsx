@@ -62,10 +62,13 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [showTemporaryForm, setShowTemporaryForm] = useState(false)
   const [tempDraft, setTempDraft] = useState(defaultTemporaryDraft)
+  const [nativeDragOver, setNativeDragOver] = useState(false)
 
   const { setNodeRef, isOver } = useDroppable({
     id: 'bom-basket',
   })
+
+  const isDropActive = isOver || nativeDragOver
 
   const totalValue = useMemo(
     () =>
@@ -115,9 +118,31 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
       <div
         ref={setNodeRef}
         id="bom-basket"
+        onDragOver={(event) => {
+          const hasMasterPayload = Array.from(event.dataTransfer?.types || []).includes('application/x-bom-master-part')
+          if (!hasMasterPayload) return
+          event.preventDefault()
+          setNativeDragOver(true)
+        }}
+        onDragLeave={() => setNativeDragOver(false)}
+        onDrop={(event) => {
+          const payload = event.dataTransfer?.getData('application/x-bom-master-part')
+          setNativeDragOver(false)
+          if (!payload || !projectId) return
+
+          event.preventDefault()
+
+          try {
+            const item = JSON.parse(payload) as BOMBasketItem
+            addItems(projectId, [{ ...item, project_id: projectId }])
+            setBasketOpen(true)
+          } catch (error) {
+            console.error('Failed to parse dropped BOM basket item', error)
+          }
+        }}
         className={`fixed inset-y-0 right-0 z-[120] flex flex-col border-l border-slate-800 bg-slate-950 text-white shadow-[-24px_0_80px_rgba(15,23,42,0.45)] transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)]
           ${basketOpen ? 'translate-x-0 w-full sm:w-[430px]' : 'translate-x-[calc(100%-12px)] w-3'}
-          ${isOver ? 'ring-4 ring-emerald-400 ring-inset' : ''}
+          ${isDropActive ? 'ring-4 ring-emerald-400 ring-inset' : ''}
         `}
       >
         {!basketOpen && (
@@ -307,7 +332,7 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
           )}
         </div>
 
-        {isOver && (
+        {isDropActive && (
           <div className="mx-4 mt-4 rounded-3xl border-2 border-dashed border-emerald-300 bg-emerald-500/10 px-4 py-6 text-center">
             <div className="text-xs font-black uppercase tracking-[0.2em] text-emerald-300">
               Drop here to add into BOM basket
