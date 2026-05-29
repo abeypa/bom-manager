@@ -48,7 +48,7 @@ export default function PendingPartsTab({ projectId }: { projectId: number }) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-500 w-4 h-4" />
             <input 
               type="text" 
-              placeholder="Search requested parts..." 
+              placeholder="Search work items..." 
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full h-10 pl-9 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
@@ -56,7 +56,7 @@ export default function PendingPartsTab({ projectId }: { projectId: number }) {
           </div>
           <button onClick={() => setModalOpen(true)} className="btn btn-primary shrink-0">
             <Plus className="w-4 h-4 mr-2" />
-            Request Part
+            New Work Item
           </button>
         </div>
       </div>
@@ -71,14 +71,14 @@ export default function PendingPartsTab({ projectId }: { projectId: number }) {
           <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
             <Layers className="w-12 h-12 text-slate-300" />
           </div>
-          <h3 className="text-xl font-black text-navy-900 mb-2">No Requests Found</h3>
+          <h3 className="text-xl font-black text-navy-900 mb-2">No Work Items Found</h3>
           <p className="text-slate-500 max-w-sm mx-auto mb-8 font-medium">
             {search || filter !== 'All' 
-              ? "We couldn't track down any matching part requests. Try adjusting your filters." 
-              : "No one has requested any new parts for this project yet."}
+              ? "We couldn't track down any matching work items. Try adjusting your filters." 
+              : "No work items have been created for this project yet."}
           </p>
           <button onClick={() => setModalOpen(true)} className="btn btn-primary bg-navy-900 hover:bg-black text-white px-8">
-            Submit New Request
+            Create Work Item
           </button>
         </div>
       ) : (

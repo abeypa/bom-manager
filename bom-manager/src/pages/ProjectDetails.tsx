@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { projectsApi } from '@/api/projects'
 import {
@@ -77,8 +77,17 @@ import {
   useBOMBasketStore,
 } from '@/store/useBOMBasketStore'
 
+const resolveProjectTab = (tab: string | null): 'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts' => {
+  if (tab === 'documents') return 'documents'
+  if (tab === 'jo') return 'jo'
+  if (tab === 'pos') return 'pos'
+  if (tab === 'pending_parts' || tab === 'work_items') return 'pending_parts'
+  return 'bom'
+}
+
 const ProjectDetails = () => {
   const { id } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const projectId = parseInt(id!)
   const { isAdmin } = useRole()
   const queryClient = useQueryClient()
@@ -115,7 +124,9 @@ const ProjectDetails = () => {
   } | null>(null)
 
   const [selectedPartIds, setSelectedPartIds] = useState<Set<number>>(new Set())
-  const [activeTab, setActiveTab] = useState<'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts'>('bom')
+  const [activeTab, setActiveTab] = useState<'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts'>(
+    () => resolveProjectTab(searchParams.get('tab'))
+  )
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set())
   const [imageModal, setImageModal] = useState<{
     open: boolean
@@ -156,6 +167,19 @@ const ProjectDetails = () => {
     setProjectId(projectId)
     setCurrentBOMBasketProject(projectId)
   }, [project?.name, projectId, setProjectId, setCurrentBOMBasketProject])
+
+  useEffect(() => {
+    const nextTab = resolveProjectTab(searchParams.get('tab'))
+    setActiveTab((prev) => (prev === nextTab ? prev : nextTab))
+  }, [searchParams])
+
+  const changeTab = (tab: 'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts') => {
+    setActiveTab(tab)
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'bom') next.delete('tab')
+    else next.set('tab', tab === 'pending_parts' ? 'work_items' : tab)
+    setSearchParams(next, { replace: true })
+  }
 
   const mapProjectPartToBOMBasketItem = (part: any): BOMBasketItem => ({
     basket_id: makeProjectBasketId(part.id),
@@ -613,39 +637,39 @@ const ProjectDetails = () => {
         {/* Tab Bar */}
         <div className="tab-bar shrink-0 mb-6 px-6">
           <button
-            onClick={() => setActiveTab('bom')}
+            onClick={() => changeTab('bom')}
             className={`tab-item ${activeTab === 'bom' ? 'active' : ''}`}
           >
             <Layers className="h-4 w-4 inline mr-1" />
             BOM Hierarchy
           </button>
           <button
-            onClick={() => setActiveTab('documents')}
+            onClick={() => changeTab('documents')}
             className={`tab-item ${activeTab === 'documents' ? 'active' : ''}`}
           >
             <FileText className="h-4 w-4 inline mr-1" />
             Documents
           </button>
           <button
-            onClick={() => setActiveTab('jo')}
+            onClick={() => changeTab('jo')}
             className={`tab-item ${activeTab === 'jo' ? 'active' : ''}`}
           >
             <ClipboardList className="h-4 w-4 inline mr-1" />
             Job Orders
           </button>
           <button
-            onClick={() => setActiveTab('pos')}
+            onClick={() => changeTab('pos')}
             className={`tab-item ${activeTab === 'pos' ? 'active' : ''}`}
           >
             <ShoppingCart className="h-4 w-4 inline mr-1" />
             Purchase Orders
           </button>
           <button
-            onClick={() => setActiveTab('pending_parts')}
+            onClick={() => changeTab('pending_parts')}
             className={`tab-item ${activeTab === 'pending_parts' ? 'active' : ''}`}
           >
             <Clock className="h-4 w-4 inline mr-1" />
-            Pending Parts
+            Work Items
           </button>
         </div>
 

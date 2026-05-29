@@ -389,7 +389,7 @@ export default function DiscussionThread({
                 value={rejectReason}
                 onChange={e => setRejectReason(e.target.value)}
                 className="w-full bg-white border border-red-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-red-400/20 mb-3 resize-none font-medium"
-                placeholder="Why is this part being rejected?"
+                placeholder="Why is this work item being rejected?"
                 rows={2}
               />
               <div className="flex justify-end gap-2">
@@ -411,7 +411,7 @@ export default function DiscussionThread({
                 className="btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 shadow-md px-4 flex-1 text-[10px] uppercase font-black tracking-widest py-2.5"
               >
                 <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
-                {updateStatus.isPending ? 'Approving…' : 'Approve Part'}
+                  {updateStatus.isPending ? 'Completing...' : 'Mark Complete'}
               </button>
               <button
                 onClick={() => setIsRejecting(true)}
@@ -432,7 +432,7 @@ export default function DiscussionThread({
               <AtSign size={18} className="text-slate-300" />
             </div>
             <p className="text-slate-400 text-sm font-medium">No comments yet.</p>
-            <p className="text-slate-300 text-xs mt-0.5">Start the discussion or @mention someone.</p>
+            <p className="text-slate-300 text-xs mt-0.5">Start the discussion or @mention someone you are waiting on.</p>
           </div>
         ) : (
           commentTree!.map(c => (
@@ -497,8 +497,8 @@ export default function DiscussionThread({
             type="text"
             placeholder={
               replyTo
-                ? `Reply to @${replyTo.author_name || replyTo.author_email || 'User'}… or paste image`
-                : 'Add a comment, type @ to mention… or paste image (Ctrl+V)'
+                ? `Reply to @${replyTo.author_name || replyTo.author_email || 'User'}... or paste image`
+                : 'Add a comment, type @ to tag a teammate, or paste image (Ctrl+V)'
             }
             value={comment}
             onChange={handleInputChange}

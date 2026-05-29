@@ -42,7 +42,7 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
       if (prev) queryClient.setQueryData<PendingPart[]>(['pending-parts', projectId], prev.filter(p => p.id !== part.id));
       return { prev };
     },
-    onSuccess: () => showToast('success', 'Part deleted permanently'),
+    onSuccess: () => showToast('success', 'Work item deleted permanently'),
     onError: (err: any, _v, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['pending-parts', projectId], ctx.prev);
       showToast('error', 'Delete failed: ' + err.message);
@@ -51,7 +51,7 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
   });
 
   const handleDelete = () => {
-    if (window.confirm('Delete this pending part and all associated comments/images? This cannot be undone.')) {
+    if (window.confirm('Delete this work item and all associated comments/images? This cannot be undone.')) {
       deleteMut.mutate();
     }
   };
@@ -94,7 +94,7 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
                 <button
                   onClick={() => setEditOpen(true)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-primary-600 hover:bg-primary-50 border border-transparent hover:border-primary-200 rounded-xl transition-all"
-                  title="Edit Part"
+                  title="Edit Work Item"
                 >
                   <Pencil size={12} />
                   Edit

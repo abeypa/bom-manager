@@ -1,55 +1,21 @@
-import { useState, useEffect } from 'react'
-import {
-  Package, FolderKanban, AlertTriangle, CheckCircle, Database,
-  FileText, ShoppingCart, RefreshCcw, ArrowUpRight,
-  TrendingUp, Clock, ArrowRight, Zap, ArrowUpDown, ChevronRight, Activity, Globe
-} from 'lucide-react'
+import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import {
+  AlertTriangle,
+  ArrowRight,
+  Bell,
+  CheckCircle2,
+  Clock3,
+  FolderKanban,
+  Layers3,
+  ShoppingCart,
+  UserCircle2,
+  Users,
+} from 'lucide-react'
 import { dashboardApi } from '@/api/dashboard'
 import { useRole } from '@/hooks/useRole'
-import { partsApi } from '@/api/parts'
-import { useToast } from '@/context/ToastContext'
-import { useAIStore } from '@/store/useAIStore'
-import { sendUserMessage } from '@/lib/ai-runner'
-import { isConfigured, loadSettingsFromDB, saveSettings } from '@/lib/openrouter'
-
-const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
-  planning:  { cls: 'badge-slate',   label: 'Planning' },
-  design:    { cls: 'badge-navy',    label: 'Design' },
-  build:     { cls: 'badge-amber',   label: 'Build' },
-  testing:   { cls: 'badge-teal-soft', label: 'Testing' },
-  completed: { cls: 'badge-success', label: 'Completed' },
-  on_hold:   { cls: 'badge-amber',   label: 'On Hold' },
-  cancelled: { cls: 'badge-danger',  label: 'Cancelled' },
-}
-
-const INSIGHT_STYLE = {
-  critical: {
-    icon: AlertTriangle,
-    panel: 'border-red-200 bg-red-50/70',
-    badge: 'bg-red-100 text-red-700 border-red-200',
-    text: 'text-red-700',
-  },
-  warning: {
-    icon: Clock,
-    panel: 'border-amber-200 bg-amber-50/70',
-    badge: 'bg-amber-100 text-amber-700 border-amber-200',
-    text: 'text-amber-700',
-  },
-  info: {
-    icon: FileText,
-    panel: 'border-sky-200 bg-sky-50/70',
-    badge: 'bg-sky-100 text-sky-700 border-sky-200',
-    text: 'text-sky-700',
-  },
-  success: {
-    icon: CheckCircle,
-    panel: 'border-emerald-200 bg-emerald-50/70',
-    badge: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    text: 'text-emerald-700',
-  },
-} as const
+import { supabase } from '@/lib/supabase'
 
 const formatCurrency = (value?: number) => {
   const amount = Number(value || 0)
@@ -58,576 +24,442 @@ const formatCurrency = (value?: number) => {
   return `INR ${Math.round(amount).toLocaleString('en-IN')}`
 }
 
-const Dashboard = () => {
-  const { displayName, userEmail, isAdmin } = useRole() as any
-  const [lastUpdated, setLastUpdated] = useState(new Date())
-  const [isHealing, setIsHealing] = useState(false)
-  const [healResult, setHealResult] = useState<{ sync: number; err: number } | null>(null)
-  const { showToast } = useToast()
-  const queryClient = useQueryClient()
-  const setAIOpen = useAIStore(s => s.setOpen)
-  const aiBusy = useAIStore(s => s.busy)
+const formatDateTime = (value?: string | null) => {
+  if (!value) return 'No activity yet'
+  return new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+const formatShortDate = (value?: string | null) => {
+  if (!value) return 'No updates'
+  return new Date(value).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+  })
+}
+
+const priorityClass: Record<string, string> = {
+  Urgent: 'bg-red-50 text-red-700 border-red-200',
+  High: 'bg-orange-50 text-orange-700 border-orange-200',
+  Medium: 'bg-amber-50 text-amber-700 border-amber-200',
+  Low: 'bg-slate-100 text-slate-600 border-slate-200',
+}
+
+const statusLabel: Record<string, string> = {
+  Pending: 'Open',
+  Approved: 'Completed',
+  Rejected: 'Needs Rework',
+}
+
+export default function Dashboard() {
+  const { userEmail, isAdmin } = useRole()
+
   useEffect(() => {
     document.title = 'Dashboard | BOM Manager'
   }, [])
 
   const greeting = () => {
-    const h = new Date().getHours()
-    if (h < 12) return 'Good morning'
-    if (h < 17) return 'Good afternoon'
+    const hour = new Date().getHours()
+    if (hour < 12) return 'Good morning'
+    if (hour < 17) return 'Good afternoon'
     return 'Good evening'
   }
 
-  const name = userEmail ? userEmail.split('@')[0].split('.')[0] : 'Engineer'
-  const nameDisplay = name.charAt(0).toUpperCase() + name.slice(1)
+  const displayName = userEmail
+    ? userEmail.split('@')[0].split('.').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+    : 'Team'
 
-  const { data: stats, isLoading: isLoadingStats } = useQuery({
+  const { data: currentUserId } = useQuery({
+    queryKey: ['dashboard-user-id'],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getUser()
+      return data.user?.id || null
+    },
+  })
+
+  const { data: stats } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: dashboardApi.getStats,
   })
 
-  const { data: recentProjects = [], isLoading: isLoadingProjects } = useQuery({
-    queryKey: ['recent-projects'],
-    queryFn: dashboardApi.getRecentProjects,
-  })
-
-  const { data: smartDashboard, isLoading: isLoadingSmart } = useQuery({
+  const { data: smartDashboard } = useQuery({
     queryKey: ['smart-dashboard'],
     queryFn: dashboardApi.getSmartDashboard,
   })
 
-  useEffect(() => {
-    if (smartDashboard?.generated_at) setLastUpdated(new Date(smartDashboard.generated_at))
-  }, [smartDashboard?.generated_at])
+  const { data: workDashboard, isLoading: isLoadingWork } = useQuery({
+    queryKey: ['work-dashboard', currentUserId],
+    queryFn: () => dashboardApi.getWorkDashboard(currentUserId as string),
+    enabled: !!currentUserId,
+  })
 
-  const PART_BREAKDOWN = [
-    { label: 'Mech. Manufacture', value: stats?.mechanical_manufacture ?? 0,  color: 'bg-navy-700', pct: 0 },
-    { label: 'Mech. Bought-Out',  value: stats?.mechanical_bought_out ?? 0,   color: 'bg-navy-500', pct: 0 },
-    { label: 'Elec. Manufacture', value: stats?.electrical_manufacture ?? 0,  color: 'bg-teal-600', pct: 0 },
-    { label: 'Elec. Bought-Out',  value: stats?.electrical_bought_out ?? 0,   color: 'bg-teal-400', pct: 0 },
-    { label: 'Pneumatic System',  value: stats?.pneumatic_bought_out ?? 0,    color: 'bg-amber-500', pct: 0 },
+  const topCards = [
+    {
+      title: 'Active Projects',
+      value: workDashboard?.counts.total_projects ?? stats?.active_projects ?? 0,
+      detail: `${workDashboard?.counts.total_open_items ?? 0} open work items`,
+      icon: FolderKanban,
+      cls: 'bg-navy-50 text-navy-700 border-navy-100',
+    },
+    {
+      title: 'My Open Work',
+      value: workDashboard?.counts.my_open_items ?? 0,
+      detail: `${workDashboard?.counts.waiting_on_me ?? 0} dependency alerts`,
+      icon: UserCircle2,
+      cls: 'bg-amber-50 text-amber-700 border-amber-100',
+    },
+    {
+      title: 'Completed Work',
+      value: workDashboard?.counts.completed_items ?? 0,
+      detail: `${smartDashboard?.kpis.projects_at_risk ?? 0} projects at risk`,
+      icon: CheckCircle2,
+      cls: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    },
+    {
+      title: 'Open PO Value',
+      value: formatCurrency(smartDashboard?.kpis.open_po_value),
+      detail: `${smartDashboard?.kpis.overdue_pos ?? 0} overdue POs`,
+      icon: ShoppingCart,
+      cls: 'bg-sky-50 text-sky-700 border-sky-100',
+    },
   ]
-  const totalPartsCount = PART_BREAKDOWN.reduce((s, r) => s + r.value, 0) || 1
-  PART_BREAKDOWN.forEach(r => { r.pct = Math.round((r.value / totalPartsCount) * 100) })
-
-  const runDashboardAI = async (prompt: string) => {
-    if (aiBusy) {
-      setAIOpen(true)
-      return
-    }
-    if (!isConfigured()) {
-      const dbSettings = await loadSettingsFromDB()
-      if (dbSettings?.apiKey) saveSettings(dbSettings)
-    }
-    if (!isConfigured()) {
-      setAIOpen(true)
-      showToast('error', 'Configure AI settings before running dashboard intelligence.')
-      return
-    }
-    setAIOpen(true)
-    await sendUserMessage(prompt)
-  }
 
   return (
-    <div className="page-container py-8 page-enter">
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{greeting()}, {nameDisplay}</h1>
-          <p className="text-secondary mt-1">Centralized orchestration of Bill of Materials, procurement cycles, and project lifecycle tracking.</p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="px-4 py-2 bg-emerald-100 text-emerald-700 text-xs font-black rounded-2xl flex items-center gap-2 border border-emerald-200 uppercase tracking-widest shadow-sm">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-            Active Infrastructure
+    <div className="page-container py-8 page-enter space-y-8">
+      <section className="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.06),_transparent_32%),linear-gradient(135deg,#ffffff_0%,#f8fafc_45%,#eef6ff_100%)] px-8 py-8 shadow-sm">
+        <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-amber-200/20 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-28 w-28 rounded-full bg-sky-200/30 blur-2xl" />
+        <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-3xl">
+            <p className="text-[11px] font-black uppercase tracking-[0.28em] text-slate-500">Project Workboard</p>
+            <h1 className="mt-3 text-4xl font-black tracking-tight text-navy-900">
+              {greeting()}, {displayName}
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+              Track multiple projects from one place, follow assigned work items, and catch cross-team dependencies the moment someone tags you to unblock their task.
+            </p>
           </div>
-        </div>
-      </div>
 
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-10">
-        <div className="card p-6 group hover:border-navy-200 transition-all">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-tertiary">Active Clusters</p>
-              <p className="text-4xl font-black text-navy-900 mt-2 font-mono tabular-nums">
-                {isLoadingStats ? '...' : (stats?.active_projects || 0)}
-              </p>
+          <div className="grid gap-3 sm:grid-cols-3 xl:w-[540px]">
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Team Queue</div>
+              <div className="mt-2 text-3xl font-black text-navy-900">{workDashboard?.counts.total_open_items ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Open work items across all projects</div>
             </div>
-            <div className="p-3 bg-navy-50 rounded-xl text-navy-600 group-hover:bg-navy-900 group-hover:text-white transition-all">
-              <FolderKanban className="h-6 w-6" />
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">My Queue</div>
+              <div className="mt-2 text-3xl font-black text-navy-900">{workDashboard?.counts.my_open_items ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Assigned to me right now</div>
             </div>
-          </div>
-        </div>
-
-        <div className="card p-6 group hover:border-amber-200 transition-all">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-tertiary">Parts in Registry</p>
-              <p className="text-4xl font-black text-navy-900 mt-2 font-mono tabular-nums">
-                {isLoadingStats ? '...' : (stats?.total_parts || 0).toLocaleString()}
-              </p>
-            </div>
-            <div className="p-3 bg-amber-50 rounded-xl text-amber-600 group-hover:bg-amber-500 group-hover:text-white transition-all">
-              <Package className="h-6 w-6" />
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Alerts</div>
+              <div className="mt-2 text-3xl font-black text-navy-900">{workDashboard?.notifications.length ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Assignments and tagged blockers</div>
             </div>
           </div>
         </div>
+      </section>
 
-        <div className="card p-6 group hover:border-teal-200 transition-all">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-tertiary">Open Manifests</p>
-              <p className="text-4xl font-black text-navy-900 mt-2 font-mono tabular-nums">
-                {isLoadingStats ? '...' : (stats?.pending_pos || 0)}
-              </p>
-            </div>
-            <div className="p-3 bg-teal-50 rounded-xl text-teal-600 group-hover:bg-teal-600 group-hover:text-white transition-all">
-              <ShoppingCart className="h-6 w-6" />
-            </div>
-          </div>
-        </div>
-
-        <div className="card p-6 group hover:border-emerald-200 transition-all">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-tertiary">Open PO Value</p>
-              <p className="text-4xl font-black text-navy-900 mt-2 font-mono tabular-nums italic">
-                {isLoadingSmart ? '...' : formatCurrency(smartDashboard?.kpis.open_po_value)}
-              </p>
-            </div>
-            <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600 group-hover:bg-emerald-500 group-hover:text-white transition-all">
-              <TrendingUp className="h-6 w-6" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Smart dashboard signals */}
-      <div className="card overflow-hidden mb-10 border-navy-100 shadow-lg">
-        <div className="px-6 py-5 border-b border-slate-100 bg-navy-900 text-white flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
-              <Zap size={22} className="text-amber-300" />
-            </div>
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <span className="px-2.5 py-1 rounded-full bg-emerald-400/10 text-emerald-200 border border-emerald-300/20 text-[9px] font-black uppercase tracking-widest">
-                  Live Signals
-                </span>
+      <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+        {topCards.map(({ title, value, detail, icon: Icon, cls }) => (
+          <div key={title} className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{title}</div>
+                <div className="mt-3 text-3xl font-black text-navy-900">{value}</div>
+                <div className="mt-2 text-xs font-semibold text-slate-500">{detail}</div>
               </div>
-              <p className="text-sm text-navy-100 max-w-3xl">
-                BOM coverage, draft PO value, supplier delivery risk, and project-part mapping gaps are scored from current project and procurement data.
-              </p>
-            </div>
-          </div>
-          <div className="text-left lg:text-right">
-            <div className="text-[10px] font-black uppercase tracking-widest text-navy-200">Last analysis</div>
-            <div className="text-sm font-bold text-white">
-              {lastUpdated.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {[
-              { label: 'Draft PO Value', value: formatCurrency(smartDashboard?.kpis.draft_po_value), icon: FileText },
-              { label: 'Overdue POs', value: smartDashboard?.kpis.overdue_pos ?? 0, icon: AlertTriangle },
-              { label: 'Parts Need PO', value: smartDashboard?.kpis.pending_procurement_parts ?? 0, icon: Package },
-              { label: 'BOM/PO Gap', value: formatCurrency(smartDashboard?.kpis.bom_po_gap_value), icon: TrendingUp },
-              { label: 'Projects at Risk', value: smartDashboard?.kpis.projects_at_risk ?? 0, icon: Activity },
-              { label: 'BOM Health Issues', value: smartDashboard?.kpis.bom_health_issues ?? 0, icon: Zap },
-              { label: 'Price Spikes', value: smartDashboard?.kpis.price_spikes ?? 0, icon: TrendingUp },
-              { label: 'Duplicate Risks', value: smartDashboard?.kpis.duplicate_part_groups ?? 0, icon: AlertTriangle },
-              { label: 'PO PDFs Missing', value: smartDashboard?.kpis.po_pdf_missing ?? 0, icon: FileText },
-            ].map(({ label, value, icon: Icon }) => (
-              <div key={label} className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-tertiary">{label}</span>
-                  <Icon size={15} className="text-navy-400 shrink-0" />
-                </div>
-                <div className="mt-3 text-2xl font-black text-navy-900 font-mono tabular-nums">
-                  {isLoadingSmart ? '...' : value}
-                </div>
+              <div className={`rounded-2xl border p-3 ${cls}`}>
+                <Icon className="h-5 w-5" />
               </div>
-            ))}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.35fr,0.95fr]">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-black text-navy-900">My Work Queue</h2>
+              <p className="mt-1 text-sm font-medium text-slate-500">Every work item assigned to you, sorted so urgent open work stays at the top.</p>
+            </div>
+            <Link to="/projects" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-primary-600 hover:text-primary-700">
+              All Projects
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
-            {(smartDashboard?.insights || []).map((insight) => {
-              const style = INSIGHT_STYLE[insight.severity]
-              const Icon = style.icon
-              return (
+          {isLoadingWork ? (
+            <div className="space-y-3">
+              <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+              <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+              <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+            </div>
+          ) : workDashboard?.my_work_items.length ? (
+            <div className="space-y-3">
+              {workDashboard.my_work_items.slice(0, 6).map((item) => (
                 <Link
-                  key={insight.id}
-                  to={insight.to}
-                  className={`rounded-2xl border p-4 transition-all hover:shadow-md group ${style.panel}`}
+                  key={item.id}
+                  to={`/projects/${item.project_id}?tab=work_items`}
+                  className="group block rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition-all hover:border-primary-200 hover:bg-white hover:shadow-sm"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${style.badge}`}>
-                      <Icon size={16} />
-                    </div>
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${style.text}`}>{insight.metric}</span>
-                  </div>
-                  <h3 className="mt-4 text-sm font-black text-navy-900">{insight.title}</h3>
-                  <p className="mt-2 text-xs leading-relaxed text-navy-500 min-h-[48px]">{insight.message}</p>
-                  <div className="mt-4 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-navy-700">
-                    {insight.action_label}
-                    <ArrowUpRight size={13} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                  </div>
-                </Link>
-              )
-            })}
-            {isLoadingSmart && [1, 2, 3, 4].map((i) => (
-              <div key={i} className="skeleton h-44 rounded-2xl" />
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="xl:col-span-2 rounded-2xl border border-slate-100 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
-                <div>
-                  <h3 className="section-title !mb-0">Project Risk Queue</h3>
-                  <p className="text-[10px] font-bold text-tertiary uppercase tracking-widest mt-1">Lowest health score first</p>
-                </div>
-                <Link to="/projects" className="btn btn-ghost btn-sm">
-                  Projects <ArrowRight size={13} />
-                </Link>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {(smartDashboard?.priority_projects || []).map((project) => (
-                  <Link
-                    key={project.project_id}
-                    to={`/projects/${project.project_id}`}
-                    className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 px-5 py-4 hover:bg-slate-50 transition-colors group"
-                  >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-black text-navy-900 truncate group-hover:text-amber-700">{project.project_name}</span>
-                        <span className="font-mono text-[10px] font-black text-navy-400">{project.project_number}</span>
-                        <span className={`badge ${(STATUS_BADGE[project.status] || STATUS_BADGE.planning).cls} !px-2 !py-0.5`}>
-                          {(STATUS_BADGE[project.status] || STATUS_BADGE.planning).label}
+                        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${priorityClass[item.priority] || priorityClass.Medium}`}>
+                          {item.priority}
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+                          {statusLabel[item.status] || item.status}
+                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          {item.project_number}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-navy-500">{project.risk_reason}</p>
-                      <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-sm">
-                        <div
-                          className={`h-full rounded-full ${project.health_score >= 80 ? 'bg-emerald-500' : project.health_score >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
-                          style={{ width: `${project.health_score}%` }}
-                        />
-                      </div>
+                      <h3 className="mt-3 text-lg font-black text-navy-900 group-hover:text-primary-700">{item.name}</h3>
+                      <p className="mt-1 text-sm font-semibold text-slate-500">{item.project_name}</p>
+                      <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">
+                        {item.description || 'Open the work item to add details, references, or dependency tags for teammates.'}
+                      </p>
                     </div>
-                    <div className="grid grid-cols-3 gap-4 md:min-w-[330px]">
-                      <div>
-                        <div className="text-[9px] font-black uppercase tracking-widest text-tertiary">Health</div>
-                        <div className="text-lg font-black font-mono text-navy-900">{project.health_score}</div>
-                      </div>
-                      <div>
-                        <div className="text-[9px] font-black uppercase tracking-widest text-tertiary">Gap</div>
-                        <div className="text-sm font-black font-mono text-navy-900">{formatCurrency(project.gap_value)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[9px] font-black uppercase tracking-widest text-tertiary">Need PO</div>
-                        <div className="text-lg font-black font-mono text-navy-900">{project.pending_parts}</div>
-                      </div>
+
+                    <div className="min-w-[180px] rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Requested By</div>
+                      <div className="mt-2 text-sm font-bold text-navy-900">{item.requester_name || item.requester_email || 'Unknown'}</div>
+                      <div className="mt-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Last Update</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-500">{formatDateTime(item.updated_at || item.created_at)}</div>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-[1.75rem] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-12 text-center">
+              <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
+              <h3 className="mt-4 text-lg font-black text-navy-900">Your queue is clear</h3>
+              <p className="mt-2 text-sm font-medium text-slate-500">When work items are assigned to you, they will appear here with project context and priority.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-6">
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3 text-amber-700">
+                <Bell className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-navy-900">Dashboard Alerts</h2>
+                <p className="text-sm font-medium text-slate-500">Tagged dependencies and active assignments that need your attention.</p>
+              </div>
+            </div>
+
+            {workDashboard?.notifications.length ? (
+              <div className="space-y-3">
+                {workDashboard.notifications.map((notification) => (
+                  <Link
+                    key={notification.id}
+                    to={`/projects/${notification.project_id}?tab=work_items`}
+                    className="block rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition-all hover:border-primary-200 hover:bg-white"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
+                        notification.kind === 'mention'
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : 'border-sky-200 bg-sky-50 text-sky-700'
+                      }`}>
+                        {notification.kind === 'mention' ? 'Dependency Tag' : 'Assigned'}
+                      </span>
+                      <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                        {formatShortDate(notification.created_at)}
+                      </span>
+                    </div>
+                    <h3 className="mt-3 text-sm font-black text-navy-900">{notification.work_item_name}</h3>
+                    <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
+                      {notification.project_name} • {notification.project_number}
+                    </p>
+                    <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{notification.message}</p>
+                    <div className="mt-3 text-xs font-semibold text-slate-500">
+                      {notification.from_name || notification.from_email || 'System'}
                     </div>
                   </Link>
                 ))}
-                {!isLoadingSmart && (smartDashboard?.priority_projects || []).length === 0 && (
-                  <div className="p-8 text-sm font-bold text-tertiary text-center">No project risk signals yet.</div>
-                )}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-10 text-center">
+                <Bell className="mx-auto h-8 w-8 text-slate-300" />
+                <p className="mt-3 text-sm font-semibold text-slate-500">No active alerts right now.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="rounded-2xl border border-sky-100 bg-sky-50 p-3 text-sky-700">
+                <Users className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-navy-900">Team Workload</h2>
+                <p className="text-sm font-medium text-slate-500">Open work distribution based on current assignees.</p>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-100 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/60">
-                <h3 className="section-title !mb-0">Supplier Focus</h3>
-                <p className="text-[10px] font-bold text-tertiary uppercase tracking-widest mt-1">Open PO exposure</p>
-              </div>
-              <div className="p-4 space-y-3">
-                {(smartDashboard?.supplier_focus || []).map((supplier) => (
-                  <div key={`${supplier.supplier_id}-${supplier.supplier_name}`} className="rounded-2xl border border-slate-100 bg-white p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-black text-sm text-navy-900 truncate">{supplier.supplier_name}</div>
-                        <div className="text-[10px] font-bold text-tertiary uppercase tracking-widest mt-1">
-                          {supplier.open_po_count} open PO{supplier.open_po_count === 1 ? '' : 's'}
-                        </div>
-                      </div>
-                      {supplier.overdue_po_count > 0 && (
-                        <span className="badge badge-danger !px-2 !py-0.5">{supplier.overdue_po_count} late</span>
-                      )}
+            <div className="space-y-3">
+              {(workDashboard?.workload.length ? workDashboard.workload : []).map((user) => (
+                <div key={user.user_id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-black text-navy-900">{user.name}</div>
+                      <div className="text-xs font-medium text-slate-500">{user.email || 'No email'}</div>
                     </div>
-                    <div className="mt-3 text-xl font-black font-mono text-navy-900">{formatCurrency(supplier.open_po_value)}</div>
+                    <div className="text-right">
+                      <div className="text-2xl font-black text-navy-900">{user.open_items}</div>
+                      <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Open Items</div>
+                    </div>
                   </div>
-                ))}
-                {!isLoadingSmart && (smartDashboard?.supplier_focus || []).length === 0 && (
-                  <div className="p-6 text-sm font-bold text-tertiary text-center">No open supplier exposure.</div>
-                )}
-                {isLoadingSmart && [1, 2, 3].map((i) => <div key={i} className="skeleton h-24 rounded-2xl" />)}
-              </div>
+                  <div className="mt-3 flex items-center justify-between text-xs font-semibold text-slate-500">
+                    <span>{user.urgent_items} urgent</span>
+                    {isAdmin && <span>Use Work Items tab to rebalance load</span>}
+                  </div>
+                </div>
+              ))}
+
+              {!workDashboard?.workload.length && (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm font-semibold text-slate-500">
+                  Team workload will appear after work items are assigned to users.
+                </div>
+              )}
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Main Content Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left: Recent Activity */}
-        <div className="lg:col-span-2 space-y-8">
-          <div className="card overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 bg-slate-50/30">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-navy-50 rounded-lg text-navy-600">
-                  <Activity size={18} />
-                </div>
-                <h3 className="section-title">Recent Project Stream</h3>
-              </div>
-              <Link to="/projects" className="btn btn-ghost btn-sm group">
-                REVEAL ALL <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
-              </Link>
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.3fr,0.7fr]">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-black text-navy-900">Project Progress Tracker</h2>
+              <p className="mt-1 text-sm font-medium text-slate-500">Completion is based on work items marked completed inside each project.</p>
             </div>
-            
-            {isLoadingProjects ? (
-              <div className="p-8 space-y-4">
-                {[1, 2, 3].map(i => <div key={i} className="skeleton h-16 w-full rounded-xl" />)}
-              </div>
-            ) : recentProjects.length === 0 ? (
-              <div className="empty-state py-16">
-                <FolderKanban size={32} className="text-slate-200 mb-4" />
-                <p className="text-sm font-bold text-tertiary">No project entities found</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-50">
-                {recentProjects.map((project) => {
-                  const badge = STATUS_BADGE[project.status] || STATUS_BADGE.planning
-                  const pct = [
-                    project.mechanical_design_status,
-                    project.ee_design_status,
-                    project.pneumatic_design_status,
-                    project.po_release_status,
-                    project.part_arrival_status,
-                    project.machine_build_status,
-                  ].filter(s => s === 'completed').length / 6 * 100
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-bold text-slate-500">
+              {workDashboard?.active_projects.length ?? 0} tracked projects
+            </div>
+          </div>
 
-                  return (
-                    <Link
-                      key={project.id}
-                      to={`/projects/${project.id}`}
-                      className="flex items-center gap-6 px-6 py-5 hover:bg-slate-50 transition-all group"
-                    >
-                      <div className="w-12 h-12 bg-navy-900 rounded-2xl flex items-center justify-center shrink-0 shadow-lg shadow-navy-900/10 group-hover:scale-105 transition-transform">
-                        <span className="font-mono text-[10px] font-black text-white opacity-60 uppercase">{project.project_number?.slice(-3)}</span>
-                      </div>
-                      
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-1.5">
-                          <span className="text-base font-black text-navy-900 truncate group-hover:text-amber-600 transition-colors">
-                            {project.project_name}
-                          </span>
-                          <span className={`badge ${badge.cls} !px-2.5 !py-0.5`}>{badge.label}</span>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <span className="font-mono text-[9px] font-black text-navy-400 tracking-tighter">
-                            {project.project_number}
-                          </span>
-                          <div className="h-1.5 w-24 bg-slate-100 rounded-full overflow-hidden">
-                            <div 
-                              className={`h-full rounded-full transition-all duration-700 ${pct === 100 ? 'bg-emerald-500' : 'bg-navy-500'}`} 
-                              style={{ width: `${pct}%` }} 
-                            />
-                          </div>
-                          <span className="font-mono text-[10px] font-black text-navy-400">{Math.round(pct)}%</span>
-                        </div>
-                      </div>
-                      <ChevronRight size={18} className="text-slate-200 group-hover:text-navy-400 group-hover:translate-x-1 transition-all shrink-0" />
-                    </Link>
-                  )
-                })}
+          <div className="space-y-4">
+            {(workDashboard?.active_projects || []).map((project) => (
+              <Link
+                key={project.project_id}
+                to={`/projects/${project.project_id}?tab=work_items`}
+                className="block rounded-[1.5rem] border border-slate-200 bg-slate-50/70 p-5 transition-all hover:border-primary-200 hover:bg-white"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{project.project_number}</span>
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+                        {project.status || 'active'}
+                      </span>
+                    </div>
+                    <h3 className="mt-2 text-lg font-black text-navy-900">{project.project_name}</h3>
+                    <div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-navy-700 via-sky-600 to-emerald-500"
+                        style={{ width: `${Math.max(project.completion_percent, 4)}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 text-xs font-semibold text-slate-500">
+                      {project.completed_items}/{project.total_items} work items completed
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-4 lg:min-w-[420px]">
+                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Open</div>
+                      <div className="mt-2 text-2xl font-black text-navy-900">{project.open_items}</div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Mine</div>
+                      <div className="mt-2 text-2xl font-black text-navy-900">{project.my_open_items}</div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Waiting On Me</div>
+                      <div className="mt-2 text-2xl font-black text-navy-900">{project.waiting_on_me_count}</div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Activity</div>
+                      <div className="mt-2 text-sm font-black text-navy-900">{formatShortDate(project.last_activity_at)}</div>
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            ))}
+
+            {!workDashboard?.active_projects.length && (
+              <div className="rounded-[1.75rem] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-12 text-center">
+                <Layers3 className="mx-auto h-10 w-10 text-slate-300" />
+                <h3 className="mt-4 text-lg font-black text-navy-900">No work items yet</h3>
+                <p className="mt-2 text-sm font-medium text-slate-500">Create project work items to start tracking progress across multiple projects from this dashboard.</p>
               </div>
             )}
           </div>
         </div>
 
-        {/* Right: Insights & Quick Nav */}
-        <div className="space-y-8">
-          {/* Registry Breakdown */}
-          <div className="card shadow-sm">
-            <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3 bg-slate-50/30">
-              <div className="p-2 bg-teal-50 rounded-lg text-teal-600">
-                <Globe size={18} />
-              </div>
-              <h3 className="section-title">Asset Inventory</h3>
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="rounded-2xl border border-red-100 bg-red-50 p-3 text-red-700">
+              <AlertTriangle className="h-5 w-5" />
             </div>
-            <div className="p-6 space-y-6">
-              {PART_BREAKDOWN.map(row => (
-                <div key={row.label} className="group">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="label-caps !text-[9px] !text-secondary group-hover:!text-navy-900 transition-colors">{row.label}</span>
-                    <span className="font-mono text-[11px] font-black text-navy-900">
-                      {isLoadingStats ? '—' : row.value.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full ${row.color} rounded-full transition-all duration-1000 group-hover:opacity-80`}
-                      style={{ width: `${row.pct}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+            <div>
+              <h2 className="text-xl font-black text-navy-900">Operational Watch</h2>
+              <p className="text-sm font-medium text-slate-500">A quick pulse on risk around project delivery and procurement.</p>
             </div>
           </div>
 
-          {/* System Access Keys */}
-          <div className="card shadow-sm">
-            <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3 bg-slate-50/30">
-              <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
-                <Zap size={18} />
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Projects At Risk</span>
+                <Clock3 className="h-4 w-4 text-amber-600" />
               </div>
-              <h3 className="section-title">Quick Control</h3>
+              <div className="mt-2 text-3xl font-black text-navy-900">{smartDashboard?.kpis.projects_at_risk ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Projects with procurement or completion pressure</div>
             </div>
-            <div className="p-3 grid grid-cols-1 gap-1">
-              {[
-                { label: 'ASSET REGISTRY', icon: Database, to: '/parts', sub: 'Master Repository Access' },
-                { label: 'Project Control',    icon: FolderKanban, to: '/projects',        sub: 'Hierarchy & BOM Orchestration' },
-                { label: 'Procurement Cycle',  icon: ShoppingCart, to: '/purchase-orders', sub: 'Vendor Manifest Generation' },
-                { label: 'Movement Logs',      icon: ArrowUpDown,  to: '/stock-movement',  sub: 'Logistical Inbound/Outbound' },
-              ].map(({ label, icon: Icon, to, sub }) => (
-                <Link
-                  key={to}
-                  to={to}
-                  className="flex items-center gap-4 p-3 rounded-2xl hover:bg-slate-50 transition-all group"
-                >
-                  <div className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center shrink-0 shadow-sm group-hover:shadow-md transition-all group-hover:bg-navy-900 group-hover:rotate-6">
-                    <Icon size={16} className="text-navy-400 group-hover:text-white transition-colors" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-black text-navy-900 group-hover:text-amber-700 transition-colors uppercase tracking-tight">{label}</div>
-                    <div className="text-[10px] font-bold text-tertiary opacity-70 truncate">{sub}</div>
-                  </div>
-                  <ChevronRight size={14} className="text-slate-200 group-hover:text-navy-400 group-hover:translate-x-1 transition-all" />
-                </Link>
-              ))}
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <p className="px-3 mb-2 text-[10px] font-black uppercase tracking-widest text-tertiary">AI Intelligence</p>
-                {[
-                  {
-                    label: 'BOM Health Audit',
-                    icon: Activity,
-                    prompt: 'Run a cross-project smart BOM health audit. Check missing images, missing suppliers, zero prices, duplicate project mappings, and parts without PO coverage. Show the highest-risk projects first. Do not change any data.',
-                  },
-                  {
-                    label: 'Price Watch',
-                    icon: TrendingUp,
-                    prompt: 'Run price change intelligence for the last 90 days with a 10% threshold. Show biggest increases/decreases and what should be reviewed first. Do not change any data.',
-                  },
-                  {
-                    label: 'Supplier Intel',
-                    icon: ShoppingCart,
-                    prompt: 'Run supplier intelligence across open POs. Show overdue suppliers, open PO value, draft exposure, and follow-up priorities. Do not change any data.',
-                  },
-                  {
-                    label: 'Risk Score',
-                    icon: AlertTriangle,
-                    prompt: 'Run project procurement risk scoring. Show low-health projects, BOM/PO gaps, overdue POs, parts needing PO coverage, and the first project to fix. Do not change any data.',
-                  },
-                ].map(({ label, icon: Icon, prompt }) => (
-                  <button
-                    key={label}
-                    onClick={() => runDashboardAI(prompt)}
-                    disabled={aiBusy}
-                    className="w-full flex items-center gap-4 p-3 rounded-2xl hover:bg-navy-50 transition-all group disabled:opacity-60"
-                  >
-                    <div className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center shrink-0 shadow-sm group-hover:shadow-md transition-all group-hover:bg-amber-500">
-                      <Icon size={16} className="text-amber-600 group-hover:text-white transition-colors" />
-                    </div>
-                    <div className="flex-1 text-left min-w-0">
-                      <div className="text-xs font-black text-navy-900 group-hover:text-amber-700 transition-colors uppercase tracking-tight">{label}</div>
-                      <div className="text-[10px] font-bold text-tertiary opacity-70 truncate">Open assistant and run analysis</div>
-                    </div>
-                    <ChevronRight size={14} className="text-slate-200 group-hover:text-navy-400 group-hover:translate-x-1 transition-all" />
-                  </button>
-                ))}
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">BOM / PO Gap</span>
+                <ShoppingCart className="h-4 w-4 text-sky-600" />
               </div>
+              <div className="mt-2 text-3xl font-black text-navy-900">{formatCurrency(smartDashboard?.kpis.bom_po_gap_value)}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Value still uncovered by purchase orders</div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Pending Procurement</span>
+                <FolderKanban className="h-4 w-4 text-navy-600" />
+              </div>
+              <div className="mt-2 text-3xl font-black text-navy-900">{smartDashboard?.kpis.pending_procurement_parts ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">BOM parts not yet mapped to PO lines</div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Latest Analysis</span>
+                <Bell className="h-4 w-4 text-emerald-600" />
+              </div>
+              <div className="mt-2 text-sm font-black text-navy-900">{formatDateTime(smartDashboard?.generated_at)}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Smart dashboard signals refreshed from live project and PO data</div>
             </div>
           </div>
-
-          {/* Admin Diagnostics */}
-          {isAdmin && (
-            <div className="card shadow-lg border-navy-100 bg-navy-50/20 overflow-hidden animate-in slide-in-from-bottom-5">
-              <div className="px-6 py-5 border-b border-navy-100 flex items-center justify-between bg-navy-900 text-white">
-                <div className="flex items-center gap-3">
-                  <Activity size={18} className="text-amber-400" />
-                  <h3 className="section-title !text-white !mb-0">System Integrity</h3>
-                </div>
-                {isHealing && <RefreshCcw size={16} className="animate-spin text-amber-400" />}
-              </div>
-              <div className="p-6">
-                <p className="text-[10px] font-bold text-navy-400 uppercase tracking-widest mb-4">Diagnostic Tools</p>
-                
-                <button
-                  onClick={async () => {
-                    if (!window.confirm('HEAL PRICING: This will scan all parts and synchronize master prices with the latest historical audit entries. Proceed?')) return;
-                    setIsHealing(true);
-                    showToast('info', 'Synchronizing registry valuations...');
-                    try {
-                      const result = await partsApi.healPriceSynchronicity();
-                      setHealResult({ sync: result.synchronizedCount, err: result.errorCount });
-                      showToast('success', `Database Healed: ${result.synchronizedCount} records synchronized.`);
-                      queryClient.invalidateQueries();
-                    } catch (err) {
-                      showToast('error', 'Integrity check failed');
-                    } finally {
-                      setIsHealing(false);
-                    }
-                  }}
-                  disabled={isHealing}
-                  className="w-full flex items-center justify-between p-4 bg-white border border-navy-100 rounded-2xl hover:border-navy-400 hover:shadow-md transition-all group"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-navy-50 rounded-xl flex items-center justify-center group-hover:bg-navy-900 transition-colors">
-                      <ArrowUpDown size={16} className="text-navy-600 group-hover:text-white" />
-                    </div>
-                    <div className="text-left">
-                      <div className="text-xs font-black text-navy-900 uppercase tracking-tight">Repair Registry Pricing</div>
-                      <div className="text-[9px] font-bold text-navy-400 opacity-70">Sync Master Tables with Audit Trail</div>
-                    </div>
-                  </div>
-                  <ChevronRight size={14} className="text-slate-200 group-hover:text-navy-900" />
-                </button>
-
-                {healResult && (
-                  <div className="mt-4 p-3 bg-emerald-50 rounded-xl border border-emerald-100 animate-in fade-in">
-                    <div className="flex items-center gap-2 text-[10px] font-black text-emerald-700 uppercase tracking-widest">
-                      <CheckCircle size={12} />
-                      Repair Complete
-                    </div>
-                    <div className="mt-1 text-[10px] font-medium text-emerald-600">
-                      {healResult.sync} entities synchronized. {healResult.err ? `${healResult.err} errors encountered.` : 'Integrity 100% verified.'}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
-      </div>
-
-      {/* Build info footer */}
-      <div className="mt-6 flex items-center justify-end gap-3 px-1">
-        <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest">Build</span>
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-900 text-gray-100 rounded-full text-[11px] font-mono font-black tracking-tight select-all">
-          #{__GIT_HASH__}
-        </span>
-        <span className="text-[10px] text-gray-300 font-bold">
-          {new Date(__BUILD_TIME__).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-        </span>
-      </div>
+      </section>
     </div>
   )
 }
-
-export default Dashboard

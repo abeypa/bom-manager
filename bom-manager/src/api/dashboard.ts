@@ -55,6 +55,77 @@ export interface SupplierFocusSignal {
   overdue_po_count: number
 }
 
+export interface WorkDashboardItem {
+  id: number
+  project_id: number
+  project_name: string
+  project_number: string
+  name: string
+  description: string | null
+  status: 'Pending' | 'Approved' | 'Rejected'
+  priority: 'Urgent' | 'High' | 'Medium' | 'Low'
+  assigned_to: string | null
+  created_by: string | null
+  assignee_name: string | null
+  assignee_email: string | null
+  requester_name: string | null
+  requester_email: string | null
+  updated_at: string | null
+  created_at: string
+}
+
+export interface WorkDashboardProject {
+  project_id: number
+  project_name: string
+  project_number: string
+  status: string
+  total_items: number
+  open_items: number
+  completed_items: number
+  needs_rework_items: number
+  my_open_items: number
+  waiting_on_me_count: number
+  completion_percent: number
+  last_activity_at: string | null
+}
+
+export interface WorkDashboardNotification {
+  id: string
+  kind: 'assignment' | 'mention'
+  project_id: number
+  work_item_id: number
+  project_name: string
+  project_number: string
+  work_item_name: string
+  created_at: string
+  message: string
+  from_name: string | null
+  from_email: string | null
+  priority: 'Urgent' | 'High' | 'Medium' | 'Low'
+}
+
+export interface WorkDashboardWorkload {
+  user_id: string
+  name: string
+  email: string | null
+  open_items: number
+  urgent_items: number
+}
+
+export interface WorkDashboardData {
+  counts: {
+    total_projects: number
+    total_open_items: number
+    my_open_items: number
+    completed_items: number
+    waiting_on_me: number
+  }
+  my_work_items: WorkDashboardItem[]
+  active_projects: WorkDashboardProject[]
+  notifications: WorkDashboardNotification[]
+  workload: WorkDashboardWorkload[]
+}
+
 export interface SmartDashboard {
   generated_at: string
   kpis: {
@@ -102,6 +173,25 @@ const getPercentChange = (oldPrice: any, newPrice: any) => {
   const newValue = Number(newPrice || 0)
   if (!oldValue || !Number.isFinite(oldValue) || !Number.isFinite(newValue)) return null
   return ((newValue - oldValue) / oldValue) * 100
+}
+
+const priorityWeight: Record<WorkDashboardItem['priority'], number> = {
+  Urgent: 4,
+  High: 3,
+  Medium: 2,
+  Low: 1,
+}
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const hasUserMention = (message: string | null | undefined, aliases: string[]) => {
+  if (!message) return false
+  return aliases.some((alias) => {
+    const clean = alias.trim()
+    if (!clean) return false
+    const pattern = new RegExp(`(^|\\W)@${escapeRegExp(clean)}(?=\\s|$|[^\\w\\s])`, 'i')
+    return pattern.test(message)
+  })
 }
 
 export const dashboardApi = {
@@ -161,6 +251,253 @@ export const dashboardApi = {
       
     if (error) throw error
     return data as Project[]
+  },
+
+  getWorkDashboard: async (userId: string): Promise<WorkDashboardData> => {
+    const { data: currentProfile } = await (supabase as any)
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('id', userId)
+      .maybeSingle()
+
+    const aliases = Array.from(new Set([
+      currentProfile?.full_name,
+      currentProfile?.email,
+    ].filter(Boolean))) as string[]
+
+    const { data: pendingParts, error: pendingPartsError } = await (supabase as any)
+      .from('pending_parts')
+      .select(`
+        id,
+        project_id,
+        name,
+        description,
+        status,
+        priority,
+        created_by,
+        assigned_to,
+        created_at,
+        updated_at
+      `)
+      .order('updated_at', { ascending: false, nullsFirst: false })
+
+    if (pendingPartsError) throw pendingPartsError
+
+    const parts = pendingParts || []
+    const projectIds = Array.from(new Set(parts.map((part: any) => part.project_id).filter(Boolean)))
+    const userIds = Array.from(new Set(
+      parts.flatMap((part: any) => [part.created_by, part.assigned_to]).filter(Boolean)
+    ))
+
+    const [{ data: projectsData }, { data: profilesData }] = await Promise.all([
+      projectIds.length
+        ? (supabase as any)
+            .from('projects')
+            .select('id, project_name, project_number, status')
+            .in('id', projectIds)
+        : Promise.resolve({ data: [] }),
+      userIds.length
+        ? (supabase as any)
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', userIds)
+        : Promise.resolve({ data: [] }),
+    ])
+
+    const profilesMap = new Map<string, { full_name: string | null; email: string | null }>()
+    for (const profile of profilesData || []) {
+      profilesMap.set(profile.id, { full_name: profile.full_name, email: profile.email })
+    }
+
+    const projectsMap = new Map<number, { project_name: string; project_number: string; status: string }>()
+    for (const project of projectsData || []) {
+      projectsMap.set(project.id, {
+        project_name: project.project_name,
+        project_number: project.project_number,
+        status: project.status,
+      })
+    }
+
+    const items: WorkDashboardItem[] = parts.map((part: any) => {
+      const project = projectsMap.get(part.project_id)
+      const assignee = part.assigned_to ? profilesMap.get(part.assigned_to) : null
+      const requester = part.created_by ? profilesMap.get(part.created_by) : null
+
+      return {
+        id: part.id,
+        project_id: part.project_id,
+        project_name: project?.project_name || `Project #${part.project_id}`,
+        project_number: project?.project_number || `P-${part.project_id}`,
+        name: part.name,
+        description: part.description,
+        status: part.status,
+        priority: part.priority || 'Medium',
+        assigned_to: part.assigned_to,
+        created_by: part.created_by,
+        assignee_name: assignee?.full_name || null,
+        assignee_email: assignee?.email || null,
+        requester_name: requester?.full_name || null,
+        requester_email: requester?.email || null,
+        updated_at: part.updated_at,
+        created_at: part.created_at,
+      }
+    })
+
+    const { data: commentsData } = await (supabase as any)
+      .from('pending_part_comments')
+      .select('id, pending_part_id, user_id, message, created_at')
+      .order('created_at', { ascending: false })
+      .limit(400)
+
+    const comments = commentsData || []
+    const commentAuthorIds = Array.from(new Set(comments.map((comment: any) => comment.user_id).filter(Boolean)))
+
+    if (commentAuthorIds.length > 0) {
+      const { data: commentProfiles } = await (supabase as any)
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', commentAuthorIds)
+
+      for (const profile of commentProfiles || []) {
+        profilesMap.set(profile.id, { full_name: profile.full_name, email: profile.email })
+      }
+    }
+
+    const itemMap = new Map<number, WorkDashboardItem>(items.map((item) => [item.id, item]))
+
+    const mentionNotifications: WorkDashboardNotification[] = comments
+      .filter((comment: any) => comment.user_id !== userId && hasUserMention(comment.message, aliases))
+      .map((comment: any) => {
+        const workItem = itemMap.get(comment.pending_part_id)
+        if (!workItem) return null
+        const author = comment.user_id ? profilesMap.get(comment.user_id) : null
+
+        return {
+          id: `mention-${comment.id}`,
+          kind: 'mention' as const,
+          project_id: workItem.project_id,
+          work_item_id: workItem.id,
+          project_name: workItem.project_name,
+          project_number: workItem.project_number,
+          work_item_name: workItem.name,
+          created_at: comment.created_at,
+          message: comment.message || 'You were tagged in a work item discussion.',
+          from_name: author?.full_name || null,
+          from_email: author?.email || null,
+          priority: workItem.priority,
+        }
+      })
+      .filter(Boolean) as WorkDashboardNotification[]
+
+    const assignmentNotifications: WorkDashboardNotification[] = items
+      .filter((item) => item.assigned_to === userId && item.status === 'Pending')
+      .map((item) => ({
+        id: `assignment-${item.id}`,
+        kind: 'assignment' as const,
+        project_id: item.project_id,
+        work_item_id: item.id,
+        project_name: item.project_name,
+        project_number: item.project_number,
+        work_item_name: item.name,
+        created_at: item.updated_at || item.created_at,
+        message: item.description || 'This work item is assigned to you.',
+        from_name: item.requester_name,
+        from_email: item.requester_email,
+        priority: item.priority,
+      }))
+
+    const activeProjects: WorkDashboardProject[] = Array.from(
+      items.reduce((map, item) => {
+        const existing = map.get(item.project_id) || {
+          project_id: item.project_id,
+          project_name: item.project_name,
+          project_number: item.project_number,
+          status: projectsMap.get(item.project_id)?.status || 'active',
+          total_items: 0,
+          open_items: 0,
+          completed_items: 0,
+          needs_rework_items: 0,
+          my_open_items: 0,
+          waiting_on_me_count: 0,
+          completion_percent: 0,
+          last_activity_at: null,
+        }
+
+        existing.total_items += 1
+        if (item.status === 'Pending') existing.open_items += 1
+        if (item.status === 'Approved') existing.completed_items += 1
+        if (item.status === 'Rejected') existing.needs_rework_items += 1
+        if (item.assigned_to === userId && item.status === 'Pending') existing.my_open_items += 1
+        const activityAt = item.updated_at || item.created_at
+        if (!existing.last_activity_at || activityAt > existing.last_activity_at) {
+          existing.last_activity_at = activityAt
+        }
+
+        map.set(item.project_id, existing)
+        return map
+      }, new Map<number, WorkDashboardProject>()).values()
+    ).map((project) => ({
+      ...project,
+      waiting_on_me_count: mentionNotifications.filter((note) => note.project_id === project.project_id).length,
+      completion_percent: project.total_items
+        ? Math.round((project.completed_items / project.total_items) * 100)
+        : 0,
+    }))
+
+    const workload = Array.from(
+      items
+        .filter((item) => item.assigned_to && item.status === 'Pending')
+        .reduce((map, item) => {
+          const id = item.assigned_to as string
+          const existing = map.get(id) || {
+            user_id: id,
+            name: item.assignee_name || item.assignee_email || 'Unassigned',
+            email: item.assignee_email,
+            open_items: 0,
+            urgent_items: 0,
+          }
+          existing.open_items += 1
+          if (item.priority === 'Urgent') existing.urgent_items += 1
+          map.set(id, existing)
+          return map
+        }, new Map<string, WorkDashboardWorkload>())
+        .values()
+    ).sort((a, b) => b.open_items - a.open_items || b.urgent_items - a.urgent_items)
+
+    const myWorkItems = items
+      .filter((item) => item.assigned_to === userId)
+      .sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'Pending' ? -1 : 1
+        if (priorityWeight[a.priority] !== priorityWeight[b.priority]) {
+          return priorityWeight[b.priority] - priorityWeight[a.priority]
+        }
+        return String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at))
+      })
+
+    const notifications = [...mentionNotifications, ...assignmentNotifications]
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, 10)
+
+    const completedItems = items.filter((item) => item.status === 'Approved').length
+    const openItems = items.filter((item) => item.status === 'Pending').length
+
+    return {
+      counts: {
+        total_projects: activeProjects.length,
+        total_open_items: openItems,
+        my_open_items: myWorkItems.filter((item) => item.status === 'Pending').length,
+        completed_items: completedItems,
+        waiting_on_me: mentionNotifications.length,
+      },
+      my_work_items: myWorkItems,
+      active_projects: activeProjects.sort((a, b) => {
+        if (a.my_open_items !== b.my_open_items) return b.my_open_items - a.my_open_items
+        if (a.waiting_on_me_count !== b.waiting_on_me_count) return b.waiting_on_me_count - a.waiting_on_me_count
+        return b.open_items - a.open_items
+      }),
+      notifications,
+      workload: workload.slice(0, 6),
+    }
   },
 
   getSmartDashboard: async (): Promise<SmartDashboard> => {
