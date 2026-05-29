@@ -29,23 +29,25 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex bg-[#f8fafc]">
+    <div className="min-h-screen flex bg-[var(--bg-app)]">
       <div className="hidden lg:flex flex-col justify-between w-2/5 p-16 relative overflow-hidden bg-navy-950">
         <div
           className="absolute inset-0 opacity-[0.03] pointer-events-none"
           style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '50px 50px' }}
         />
 
-        <div className="absolute -bottom-24 -right-24 w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute -top-24 -left-24 w-[400px] h-[400px] bg-navy-500/10 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute -bottom-24 -right-24 w-[600px] h-[600px] bg-sky-400/15 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute -top-24 -left-24 w-[400px] h-[400px] bg-navy-400/20 rounded-full blur-[100px] pointer-events-none" />
 
         <div className="relative z-10">
-          <div className="w-16 h-16 bg-navy-900 border border-white/10 rounded-2xl flex items-center justify-center mb-10 shadow-2xl">
-            <span className="font-syne font-black text-xs text-white uppercase tracking-tighter">BEP-V3</span>
-          </div>
+          <img
+            src="/bep-logo.svg"
+            alt="BEP"
+            className="mb-10 h-16 w-16 rounded-2xl border border-white/15 bg-white object-contain p-2 shadow-2xl shadow-sky-950/30"
+          />
 
           <div className="space-y-4">
-            <div className="label-caps !text-amber-500 !tracking-[0.3em] font-black !text-[10px]">Precision Logic</div>
+            <div className="label-caps !text-sky-300 !tracking-[0.3em] font-black !text-[10px]">Precision Logic</div>
             <h1 className="font-syne font-bold text-5xl text-white leading-[1.1] tracking-tight">
               Engineering
               <br />
@@ -80,9 +82,7 @@ export default function Login() {
       <div className="flex-1 flex items-center justify-center p-8 lg:p-16">
         <div className="w-full max-w-[420px] page-enter">
           <div className="lg:hidden flex items-center gap-3 mb-10">
-            <div className="w-10 h-10 bg-navy-950 rounded-xl flex items-center justify-center">
-              <span className="font-syne font-black text-[10px] text-white">BEP</span>
-            </div>
+            <img src="/bep-logo.svg" alt="BEP" className="h-10 w-10 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm" />
             <span className="font-syne font-bold font-black text-xl text-navy-950 uppercase tracking-tighter">BOM Manager</span>
           </div>
 

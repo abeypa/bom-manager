@@ -56,18 +56,23 @@ interface SidebarProps {
 
 function Sidebar({ isAdmin, initials, displayName, onClose, onLogout }: SidebarProps) {
   return (
-    <aside className="flex flex-col h-full" style={{ background: '#131313' }}>
+    <aside
+      className="flex h-full flex-col"
+      style={{
+        background:
+          'radial-gradient(circle at 20% 0%, rgba(14, 165, 233, 0.18), transparent 34%), linear-gradient(180deg, #061428 0%, #07172d 50%, #06111f 100%)',
+      }}
+    >
       <div className="px-6 py-6 flex items-center justify-between mb-2">
         <div className="flex items-center gap-3">
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, #1a3f7c, #2550a0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: 'white', letterSpacing: '-0.03em', flexShrink: 0 }}>
-            BEP
-          </div>
+          <img
+            src="/bep-logo.svg"
+            alt="BEP"
+            className="h-10 w-10 shrink-0 rounded-xl border border-white/15 bg-white object-contain p-1 shadow-lg shadow-sky-950/30"
+          />
           <div>
-            <div className="font-semibold text-sm text-white/90 leading-none mb-1 tracking-tight">
+            <div className="font-semibold text-sm text-white leading-none tracking-tight">
               BOM Manager
-            </div>
-            <div className="text-[9px] font-medium text-white/30 tracking-[0.15em] uppercase">
-              V3.0 Cinematic
             </div>
           </div>
         </div>
@@ -90,14 +95,14 @@ function Sidebar({ isAdmin, initials, displayName, onClose, onLogout }: SidebarP
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${
                       isActive
-                        ? 'bg-white/8 text-white'
-                        : 'text-white/40 hover:text-white/70 hover:bg-white/4'
+                        ? 'bg-sky-400/15 text-white ring-1 ring-sky-300/15 shadow-lg shadow-sky-950/20'
+                        : 'text-slate-300/70 hover:text-white hover:bg-white/7'
                     }`
                   }
                 >
                   {({ isActive }) => (
                     <>
-                      <Icon size={16} className={`shrink-0 transition-all ${isActive ? 'text-[#0071e3]' : ''}`} />
+                      <Icon size={16} className={`shrink-0 transition-all ${isActive ? 'text-sky-300' : ''}`} />
                       <span className="text-xs font-medium tracking-wide">{label}</span>
                     </>
                   )}
@@ -115,8 +120,8 @@ function Sidebar({ isAdmin, initials, displayName, onClose, onLogout }: SidebarP
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${
                   isActive
-                    ? 'bg-white/8 text-white'
-                    : 'text-white/40 hover:text-white/70 hover:bg-white/4'
+                    ? 'bg-sky-400/15 text-white ring-1 ring-sky-300/15 shadow-lg shadow-sky-950/20'
+                    : 'text-slate-300/70 hover:text-white hover:bg-white/7'
                 }`
               }
             >
@@ -128,8 +133,8 @@ function Sidebar({ isAdmin, initials, displayName, onClose, onLogout }: SidebarP
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${
                   isActive
-                    ? 'bg-white/8 text-white'
-                    : 'text-white/40 hover:text-white/70 hover:bg-white/4'
+                    ? 'bg-sky-400/15 text-white ring-1 ring-sky-300/15 shadow-lg shadow-sky-950/20'
+                    : 'text-slate-300/70 hover:text-white hover:bg-white/7'
                 }`
               }
             >
@@ -140,9 +145,9 @@ function Sidebar({ isAdmin, initials, displayName, onClose, onLogout }: SidebarP
         )}
       </nav>
 
-      <div className="px-4 py-5 border-t border-white/5">
-        <div className="flex items-center gap-3 p-3 rounded-xl bg-white/4 group transition-all">
-          <div className="w-9 h-9 rounded-lg bg-[#1b1b1b] border border-white/10 flex items-center justify-center text-xs font-semibold text-white/80">
+      <div className="px-4 py-5 border-t border-white/10">
+        <div className="flex items-center gap-3 p-3 rounded-xl bg-white/7 ring-1 ring-white/10 group transition-all">
+          <div className="w-9 h-9 rounded-lg bg-sky-400/15 border border-sky-200/15 flex items-center justify-center text-xs font-semibold text-white/90">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
@@ -218,7 +223,7 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f8fafc]">
+    <div className="flex h-screen overflow-hidden bg-[var(--bg-app)]">
       <div className="hidden lg:flex w-64 flex-col flex-shrink-0">
         <Sidebar
           isAdmin={isAdmin}
@@ -245,15 +250,15 @@ export default function AppLayout() {
       )}
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-14 bg-white flex items-center justify-between px-6 shrink-0 z-40" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+        <header className="h-14 bg-white/90 flex items-center justify-between px-6 shrink-0 z-40 backdrop-blur-xl" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
           <div className="flex items-center gap-4">
-            <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 text-gray-400 hover:text-gray-900 rounded-lg">
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 text-slate-400 hover:text-navy-900 rounded-lg">
               <Menu size={20} />
             </button>
-            <div className="flex items-center gap-2 text-xs font-medium text-gray-400 tracking-wide">
+            <div className="flex items-center gap-2 text-xs font-medium text-slate-400 tracking-wide">
               <span className="opacity-50">BEP-CORE</span>
               <ChevronRight size={12} />
-              <span className="text-[#1d1d1f] font-semibold">
+              <span className="text-navy-900 font-semibold">
                 {NAV_SECTIONS.flatMap(s => s.items).find(i => location.pathname.startsWith(i.to))?.label || (location.pathname === '/admin' ? 'Admin Panel' : 'System Node')}
               </span>
             </div>
@@ -262,19 +267,19 @@ export default function AppLayout() {
           <div className="flex items-center gap-3">
             <div
               onClick={() => setSearchOpen(true)}
-              className="hidden md:flex items-center gap-3 bg-[#f5f5f7] rounded-full px-4 py-2 hover:bg-[#ececee] transition-all cursor-pointer group"
+              className="hidden md:flex items-center gap-3 bg-slate-50 rounded-full px-4 py-2 hover:bg-navy-50 transition-all cursor-pointer group border border-slate-100"
             >
-              <Search size={14} className="text-gray-400 group-hover:text-[#0071e3] transition-colors" />
-              <span className="text-[11px] font-medium text-gray-500 group-hover:text-gray-700 transition-colors">Global Search</span>
+              <Search size={14} className="text-slate-400 group-hover:text-sky-600 transition-colors" />
+              <span className="text-[11px] font-medium text-slate-500 group-hover:text-navy-700 transition-colors">Global Search</span>
               <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-md" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
-                <span className="text-[9px] font-medium text-gray-400">Ctrl/Cmd</span>
-                <span className="text-[9px] font-medium text-gray-400">K</span>
+                <span className="text-[9px] font-medium text-slate-400">Ctrl/Cmd</span>
+                <span className="text-[9px] font-medium text-slate-400">K</span>
               </div>
             </div>
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto custom-scrollbar bg-[#f5f5f7]">
+        <main className="flex-1 overflow-auto custom-scrollbar bg-[var(--bg-app)]">
           <div className="px-6 py-6">
             <Outlet />
           </div>
@@ -302,7 +307,7 @@ function AILauncher() {
   return (
     <button
       onClick={() => setOpen(true)}
-      className="fixed bottom-4 right-4 z-40 w-14 h-14 rounded-full shadow-2xl bg-gradient-to-br from-navy-700 to-navy-900 text-white flex items-center justify-center hover:scale-105 transition-transform"
+      className="fixed bottom-4 right-4 z-40 w-14 h-14 rounded-full shadow-2xl shadow-sky-950/25 bg-gradient-to-br from-sky-500 via-navy-700 to-navy-950 text-white flex items-center justify-center hover:scale-105 transition-transform"
       title="AI assistant"
       aria-label="Open AI assistant"
     >

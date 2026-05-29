@@ -244,7 +244,7 @@ export default function Reports() {
           {/* Project status */}
           {tab === 'projects' && (
             <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}
-              className="text-xs font-medium border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0071e3]/20">
+              className="text-xs font-medium border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/20">
               <option value="all">All Statuses</option>
               {['planning','design','build','testing','completed','on_hold','cancelled'].map(s => (
                 <option key={s} value={s}>{s.replace('_',' ')}</option>
@@ -254,7 +254,7 @@ export default function Reports() {
 
           {/* PO status */}
           <select value={filters.poStatus} onChange={e => setFilters(f => ({ ...f, poStatus: e.target.value }))}
-            className="text-xs font-medium border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0071e3]/20">
+            className="text-xs font-medium border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/20">
             <option value="all">All PO Statuses</option>
             {['Draft','Released','Pending','Sent','Confirmed','Partial','Received','Cancelled'].map(s => (
               <option key={s} value={s}>{s}</option>
@@ -264,7 +264,7 @@ export default function Reports() {
           {/* Customer */}
           {tab === 'projects' && customers.length > 0 && (
             <select value={filters.customer || ''} onChange={e => setFilters(f => ({ ...f, customer: e.target.value || undefined }))}
-              className="text-xs font-medium border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0071e3]/20">
+              className="text-xs font-medium border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/20">
               <option value="">All Customers</option>
               {customers.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -272,10 +272,10 @@ export default function Reports() {
 
           {/* Date range */}
           <input type="date" value={filters.dateFrom || ''} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value || undefined }))}
-            className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0071e3]/20" />
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/20" />
           <span className="text-gray-300 text-xs">→</span>
           <input type="date" value={filters.dateTo || ''} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value || undefined }))}
-            className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0071e3]/20" />
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/20" />
 
           {/* Search */}
           <div className="ml-auto flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 min-w-[200px]">

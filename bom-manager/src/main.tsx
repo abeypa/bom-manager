@@ -16,14 +16,14 @@ class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: '2rem', fontFamily: 'sans-serif', background: '#f5f5f7', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 16, padding: '2rem 2.5rem', maxWidth: 480, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+        <div style={{ padding: '2rem', fontFamily: 'sans-serif', background: '#eef4fb', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: 24, padding: '2rem 2.5rem', maxWidth: 480, border: '1px solid rgba(31,73,117,0.13)', boxShadow: '0 12px 30px rgba(6,20,40,0.10)' }}>
             <div style={{ fontSize: 32, marginBottom: 8, fontWeight: 700 }} aria-hidden="true">!</div>
             <h2 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700 }}>Something went wrong</h2>
-            <p style={{ color: '#6e6e73', margin: '0 0 1.5rem', fontSize: 14 }}>{this.state.message}</p>
+            <p style={{ color: '#425c78', margin: '0 0 1.5rem', fontSize: 14 }}>{this.state.message}</p>
             <button
               onClick={() => window.location.reload()}
-              style={{ background: '#1a3f7c', color: 'white', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 600, cursor: 'pointer' }}
+              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #0f6cbf 45%, #0c2244 100%)', color: 'white', border: 'none', borderRadius: 999, padding: '10px 20px', fontWeight: 600, cursor: 'pointer' }}
             >
               Reload
             </button>
