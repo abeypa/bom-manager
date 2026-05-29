@@ -58,6 +58,13 @@ const statusLabel: Record<string, string> = {
   Rejected: 'Needs Rework',
 }
 
+const formatCommitDate = (value: string) =>
+  new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+
 export default function Dashboard() {
   const { userEmail, isAdmin } = useRole()
 
@@ -138,6 +145,7 @@ export default function Dashboard() {
   const queueDescription = isAdmin
     ? 'Admin view of every open work item across all projects, so nothing stays hidden in individual project tabs.'
     : 'Every work item assigned to you, sorted so urgent open work stays at the top.'
+  const commitDate = formatCommitDate(__GIT_COMMIT_DATE__)
 
   return (
     <div className="page-container py-8 page-enter space-y-8">
@@ -149,6 +157,15 @@ export default function Dashboard() {
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-sky-100">
               <Sparkles size={12} />
               Execution Dashboard
+            </div>
+            <div className="mt-4 inline-flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-black/15 px-4 py-2 text-[11px] font-bold text-slate-100 shadow-sm backdrop-blur">
+              <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-sky-100">
+                v{__APP_VERSION__}
+              </span>
+              <span className="text-white/70">Last commit</span>
+              <span>{commitDate}</span>
+              <span className="text-white/40">•</span>
+              <span className="font-mono text-sky-100">{__GIT_HASH__}</span>
             </div>
             <h1 className="mt-4 text-4xl font-black tracking-tight">
               {greeting()}, {displayName}

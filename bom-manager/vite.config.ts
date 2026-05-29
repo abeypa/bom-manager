@@ -2,6 +2,7 @@ import { execSync } from 'child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import pkg from './package.json'
 
 // Get git hash for version display
 const getGitHash = () => {
@@ -9,6 +10,14 @@ const getGitHash = () => {
     return execSync('git rev-parse --short HEAD').toString().trim()
   } catch (e) {
     return 'unknown'
+  }
+}
+
+const getGitCommitDate = () => {
+  try {
+    return execSync('git log -1 --date=short --pretty=format:%cd').toString().trim()
+  } catch (e) {
+    return new Date().toISOString().slice(0, 10)
   }
 }
 
@@ -51,6 +60,8 @@ export default defineConfig({
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __CACHE_BUST__: JSON.stringify('v3.2_2026-04-23_0649'),
     __GIT_HASH__: JSON.stringify(getGitHash()),
+    __GIT_COMMIT_DATE__: JSON.stringify(getGitCommitDate()),
+    __APP_VERSION__: JSON.stringify(pkg.version),
   },
 })
 // cache-bust: 2026-04-23_0650

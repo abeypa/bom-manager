@@ -10,5 +10,7 @@ interface ImportMeta {
 }
 
 declare const __GIT_HASH__: string;
+declare const __GIT_COMMIT_DATE__: string;
+declare const __APP_VERSION__: string;
 declare const __BUILD_TIME__: string;
 declare const __CACHE_BUST__: string;
