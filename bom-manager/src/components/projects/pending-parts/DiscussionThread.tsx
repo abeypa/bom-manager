@@ -216,11 +216,15 @@ function CommentNode({ comment, depth, onReply, profiles }: CommentNodeProps) {
 export default function DiscussionThread({
   pendingPartId,
   projectId,
-  partStatus
+  partStatus,
+  mode = 'work_item',
+  refreshKeys = [],
 }: {
   pendingPartId: number;
-  projectId: number;
+  projectId: number | null;
   partStatus: 'Pending' | 'Approved' | 'Rejected';
+  mode?: 'work_item' | 'discussion';
+  refreshKeys?: string[][];
 }) {
   const { isAdmin } = useRole();
   const [comment, setComment] = useState('');
@@ -266,6 +270,7 @@ export default function DiscussionThread({
       pendingPartsApi.updatePendingPartStatus(pendingPartId, status, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-parts', projectId] });
+      refreshKeys.forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
       showToast('success', 'Status updated');
       setIsRejecting(false);
     },
@@ -380,7 +385,7 @@ export default function DiscussionThread({
       )}
 
       {/* Admin actions (Approve / Reject) */}
-      {isAdmin && partStatus === 'Pending' && (
+      {mode === 'work_item' && isAdmin && partStatus === 'Pending' && (
         <div className="px-5 pt-4 pb-2 border-b border-slate-100">
           {isRejecting ? (
             <div className="bg-red-50 border border-red-100 rounded-2xl p-4 animate-in fade-in slide-in-from-top-2 duration-200">

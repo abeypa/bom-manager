@@ -9,13 +9,16 @@ import {
   Clock3,
   FolderKanban,
   Layers3,
+  Shield,
   ShoppingCart,
+  Sparkles,
   UserCircle2,
   Users,
 } from 'lucide-react'
 import { dashboardApi } from '@/api/dashboard'
 import { useRole } from '@/hooks/useRole'
 import { supabase } from '@/lib/supabase'
+import DiscussionHub from '@/components/dashboard/DiscussionHub'
 
 const formatCurrency = (value?: number) => {
   const amount = Number(value || 0)
@@ -92,8 +95,8 @@ export default function Dashboard() {
   })
 
   const { data: workDashboard, isLoading: isLoadingWork } = useQuery({
-    queryKey: ['work-dashboard', currentUserId],
-    queryFn: () => dashboardApi.getWorkDashboard(currentUserId as string),
+    queryKey: ['work-dashboard', currentUserId, isAdmin],
+    queryFn: () => dashboardApi.getWorkDashboard(currentUserId as string, isAdmin),
     enabled: !!currentUserId,
   })
 
@@ -106,18 +109,20 @@ export default function Dashboard() {
       cls: 'bg-navy-50 text-navy-700 border-navy-100',
     },
     {
-      title: 'My Open Work',
-      value: workDashboard?.counts.my_open_items ?? 0,
-      detail: `${workDashboard?.counts.waiting_on_me ?? 0} dependency alerts`,
-      icon: UserCircle2,
+      title: isAdmin ? 'Admin Queue' : 'My Open Work',
+      value: isAdmin ? workDashboard?.admin_open_work_items.length ?? 0 : workDashboard?.counts.my_open_items ?? 0,
+      detail: isAdmin
+        ? 'All pending work across the team'
+        : `${workDashboard?.counts.waiting_on_me ?? 0} dependency alerts`,
+      icon: isAdmin ? Shield : UserCircle2,
       cls: 'bg-amber-50 text-amber-700 border-amber-100',
     },
     {
-      title: 'Completed Work',
-      value: workDashboard?.counts.completed_items ?? 0,
-      detail: `${smartDashboard?.kpis.projects_at_risk ?? 0} projects at risk`,
-      icon: CheckCircle2,
-      cls: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+      title: 'Open Discussions',
+      value: workDashboard?.counts.open_discussions ?? 0,
+      detail: `${workDashboard?.counts.closed_discussions ?? 0} archived`,
+      icon: Bell,
+      cls: 'bg-violet-50 text-violet-700 border-violet-100',
     },
     {
       title: 'Open PO Value',
@@ -128,37 +133,51 @@ export default function Dashboard() {
     },
   ]
 
+  const queueItems = isAdmin ? workDashboard?.admin_open_work_items || [] : workDashboard?.my_work_items || []
+  const queueTitle = isAdmin ? 'All Pending Work' : 'My Work Queue'
+  const queueDescription = isAdmin
+    ? 'Admin view of every open work item across all projects, so nothing stays hidden in individual project tabs.'
+    : 'Every work item assigned to you, sorted so urgent open work stays at the top.'
+
   return (
     <div className="page-container py-8 page-enter space-y-8">
-      <section className="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.06),_transparent_32%),linear-gradient(135deg,#ffffff_0%,#f8fafc_45%,#eef6ff_100%)] px-8 py-8 shadow-sm">
-        <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-amber-200/20 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-28 w-28 rounded-full bg-sky-200/30 blur-2xl" />
-        <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-[11px] font-black uppercase tracking-[0.28em] text-slate-500">Project Workboard</p>
-            <h1 className="mt-3 text-4xl font-black tracking-tight text-navy-900">
+      <section className="relative overflow-hidden rounded-[2.25rem] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.55),_transparent_24%),radial-gradient(circle_at_bottom_right,_rgba(56,189,248,0.20),_transparent_22%),linear-gradient(135deg,#071428_0%,#123258_45%,#eef7ff_100%)] px-8 py-10 shadow-xl shadow-slate-900/5">
+        <div className="absolute -left-10 top-10 h-40 w-40 rounded-full bg-cyan-300/15 blur-3xl" />
+        <div className="absolute right-16 top-0 h-48 w-48 rounded-full bg-amber-300/15 blur-3xl" />
+        <div className="relative flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-3xl text-white">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-sky-100">
+              <Sparkles size={12} />
+              Execution Dashboard
+            </div>
+            <h1 className="mt-4 text-4xl font-black tracking-tight">
               {greeting()}, {displayName}
             </h1>
-            <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-              Track multiple projects from one place, follow assigned work items, and catch cross-team dependencies the moment someone tags you to unblock their task.
+            <p className="mt-4 max-w-2xl text-sm font-medium leading-7 text-slate-100">
+              Track multiple projects, monitor every pending work item, open discussions that may sit inside or outside projects, and keep finished threads out of the way in a clean archive.
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3 xl:w-[540px]">
-            <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Team Queue</div>
-              <div className="mt-2 text-3xl font-black text-navy-900">{workDashboard?.counts.total_open_items ?? 0}</div>
-              <div className="mt-1 text-xs font-semibold text-slate-500">Open work items across all projects</div>
+          <div className="grid gap-3 sm:grid-cols-4 xl:min-w-[720px]">
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-white backdrop-blur">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-100">Team Queue</div>
+              <div className="mt-2 text-3xl font-black">{workDashboard?.counts.total_open_items ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-200">Open work across projects</div>
             </div>
-            <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">My Queue</div>
-              <div className="mt-2 text-3xl font-black text-navy-900">{workDashboard?.counts.my_open_items ?? 0}</div>
-              <div className="mt-1 text-xs font-semibold text-slate-500">Assigned to me right now</div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-white backdrop-blur">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-100">Alerts</div>
+              <div className="mt-2 text-3xl font-black">{workDashboard?.notifications.length ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-200">Tags and assignments</div>
             </div>
-            <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Alerts</div>
-              <div className="mt-2 text-3xl font-black text-navy-900">{workDashboard?.notifications.length ?? 0}</div>
-              <div className="mt-1 text-xs font-semibold text-slate-500">Assignments and tagged blockers</div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-white backdrop-blur">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-100">Discussions</div>
+              <div className="mt-2 text-3xl font-black">{workDashboard?.counts.open_discussions ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-200">Open team threads</div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-white backdrop-blur">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-100">At Risk</div>
+              <div className="mt-2 text-3xl font-black">{smartDashboard?.kpis.projects_at_risk ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-200">Projects needing attention</div>
             </div>
           </div>
         </div>
@@ -166,7 +185,7 @@ export default function Dashboard() {
 
       <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
         {topCards.map(({ title, value, detail, icon: Icon, cls }) => (
-          <div key={title} className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div key={title} className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm transition-transform hover:-translate-y-0.5">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{title}</div>
@@ -185,8 +204,8 @@ export default function Dashboard() {
         <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-5 flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl font-black text-navy-900">My Work Queue</h2>
-              <p className="mt-1 text-sm font-medium text-slate-500">Every work item assigned to you, sorted so urgent open work stays at the top.</p>
+              <h2 className="text-xl font-black text-navy-900">{queueTitle}</h2>
+              <p className="mt-1 text-sm font-medium text-slate-500">{queueDescription}</p>
             </div>
             <Link to="/projects" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-primary-600 hover:text-primary-700">
               All Projects
@@ -200,12 +219,12 @@ export default function Dashboard() {
               <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
               <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
             </div>
-          ) : workDashboard?.my_work_items.length ? (
+          ) : queueItems.length ? (
             <div className="space-y-3">
-              {workDashboard.my_work_items.slice(0, 6).map((item) => (
+              {queueItems.map((item) => (
                 <Link
                   key={item.id}
-                  to={`/projects/${item.project_id}?tab=work_items`}
+                  to={item.project_id ? `/projects/${item.project_id}?tab=work_items` : '/dashboard'}
                   className="group block rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition-all hover:border-primary-200 hover:bg-white hover:shadow-sm"
                 >
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -218,19 +237,18 @@ export default function Dashboard() {
                           {statusLabel[item.status] || item.status}
                         </span>
                         <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                          {item.project_number}
+                          {item.project_name}
                         </span>
                       </div>
                       <h3 className="mt-3 text-lg font-black text-navy-900 group-hover:text-primary-700">{item.name}</h3>
-                      <p className="mt-1 text-sm font-semibold text-slate-500">{item.project_name}</p>
                       <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">
                         {item.description || 'Open the work item to add details, references, or dependency tags for teammates.'}
                       </p>
                     </div>
 
-                    <div className="min-w-[180px] rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Requested By</div>
-                      <div className="mt-2 text-sm font-bold text-navy-900">{item.requester_name || item.requester_email || 'Unknown'}</div>
+                    <div className="min-w-[190px] rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Owner</div>
+                      <div className="mt-2 text-sm font-bold text-navy-900">{item.assignee_name || item.assignee_email || 'Unassigned'}</div>
                       <div className="mt-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Last Update</div>
                       <div className="mt-1 text-xs font-semibold text-slate-500">{formatDateTime(item.updated_at || item.created_at)}</div>
                     </div>
@@ -241,8 +259,10 @@ export default function Dashboard() {
           ) : (
             <div className="rounded-[1.75rem] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-12 text-center">
               <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
-              <h3 className="mt-4 text-lg font-black text-navy-900">Your queue is clear</h3>
-              <p className="mt-2 text-sm font-medium text-slate-500">When work items are assigned to you, they will appear here with project context and priority.</p>
+              <h3 className="mt-4 text-lg font-black text-navy-900">Nothing pending right now</h3>
+              <p className="mt-2 text-sm font-medium text-slate-500">
+                {isAdmin ? 'No team work is currently pending.' : 'When work items are assigned to you, they will appear here with project context and priority.'}
+              </p>
             </div>
           )}
         </div>
@@ -261,34 +281,37 @@ export default function Dashboard() {
 
             {workDashboard?.notifications.length ? (
               <div className="space-y-3">
-                {workDashboard.notifications.map((notification) => (
-                  <Link
-                    key={notification.id}
-                    to={`/projects/${notification.project_id}?tab=work_items`}
-                    className="block rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition-all hover:border-primary-200 hover:bg-white"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
-                        notification.kind === 'mention'
-                          ? 'border-red-200 bg-red-50 text-red-700'
-                          : 'border-sky-200 bg-sky-50 text-sky-700'
-                      }`}>
-                        {notification.kind === 'mention' ? 'Dependency Tag' : 'Assigned'}
-                      </span>
-                      <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
-                        {formatShortDate(notification.created_at)}
-                      </span>
-                    </div>
-                    <h3 className="mt-3 text-sm font-black text-navy-900">{notification.work_item_name}</h3>
-                    <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
-                      {notification.project_name} • {notification.project_number}
-                    </p>
-                    <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{notification.message}</p>
-                    <div className="mt-3 text-xs font-semibold text-slate-500">
-                      {notification.from_name || notification.from_email || 'System'}
-                    </div>
-                  </Link>
-                ))}
+                {workDashboard.notifications.map((notification) => {
+                  const target = notification.project_id ? `/projects/${notification.project_id}?tab=work_items` : '/dashboard'
+                  return (
+                    <Link
+                      key={notification.id}
+                      to={target}
+                      className="block rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition-all hover:border-primary-200 hover:bg-white"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
+                          notification.kind === 'mention'
+                            ? 'border-red-200 bg-red-50 text-red-700'
+                            : 'border-sky-200 bg-sky-50 text-sky-700'
+                        }`}>
+                          {notification.kind === 'mention' ? 'Dependency Tag' : 'Assigned'}
+                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                          {formatShortDate(notification.created_at)}
+                        </span>
+                      </div>
+                      <h3 className="mt-3 text-sm font-black text-navy-900">{notification.work_item_name}</h3>
+                      <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
+                        {notification.project_name} • {notification.project_number}
+                      </p>
+                      <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{notification.message}</p>
+                      <div className="mt-3 text-xs font-semibold text-slate-500">
+                        {notification.from_name || notification.from_email || 'System'}
+                      </div>
+                    </Link>
+                  )
+                })}
               </div>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-10 text-center">
@@ -324,7 +347,7 @@ export default function Dashboard() {
                   </div>
                   <div className="mt-3 flex items-center justify-between text-xs font-semibold text-slate-500">
                     <span>{user.urgent_items} urgent</span>
-                    {isAdmin && <span>Use Work Items tab to rebalance load</span>}
+                    {isAdmin && <span>Admin can rebalance from the project work tabs</span>}
                   </div>
                 </div>
               ))}
@@ -460,6 +483,11 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+
+      <DiscussionHub
+        openDiscussions={workDashboard?.open_discussions || []}
+        closedDiscussions={workDashboard?.closed_discussions || []}
+      />
     </div>
   )
 }

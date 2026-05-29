@@ -57,13 +57,15 @@ export interface SupplierFocusSignal {
 
 export interface WorkDashboardItem {
   id: number
-  project_id: number
+  project_id: number | null
   project_name: string
   project_number: string
   name: string
   description: string | null
   status: 'Pending' | 'Approved' | 'Rejected'
   priority: 'Urgent' | 'High' | 'Medium' | 'Low'
+  item_type?: 'work_item' | 'discussion'
+  discussion_status?: 'open' | 'closed'
   assigned_to: string | null
   created_by: string | null
   assignee_name: string | null
@@ -72,6 +74,7 @@ export interface WorkDashboardItem {
   requester_email: string | null
   updated_at: string | null
   created_at: string
+  comment_count?: number
 }
 
 export interface WorkDashboardProject {
@@ -119,8 +122,13 @@ export interface WorkDashboardData {
     my_open_items: number
     completed_items: number
     waiting_on_me: number
+    open_discussions: number
+    closed_discussions: number
   }
   my_work_items: WorkDashboardItem[]
+  admin_open_work_items: WorkDashboardItem[]
+  open_discussions: WorkDashboardItem[]
+  closed_discussions: WorkDashboardItem[]
   active_projects: WorkDashboardProject[]
   notifications: WorkDashboardNotification[]
   workload: WorkDashboardWorkload[]
@@ -253,7 +261,7 @@ export const dashboardApi = {
     return data as Project[]
   },
 
-  getWorkDashboard: async (userId: string): Promise<WorkDashboardData> => {
+  getWorkDashboard: async (userId: string, isAdmin = false): Promise<WorkDashboardData> => {
     const { data: currentProfile } = await (supabase as any)
       .from('profiles')
       .select('id, full_name, email')
@@ -274,6 +282,8 @@ export const dashboardApi = {
         description,
         status,
         priority,
+        item_type,
+        discussion_status,
         created_by,
         assigned_to,
         created_at,
@@ -327,11 +337,13 @@ export const dashboardApi = {
         id: part.id,
         project_id: part.project_id,
         project_name: project?.project_name || `Project #${part.project_id}`,
-        project_number: project?.project_number || `P-${part.project_id}`,
+        project_number: project?.project_number || (part.project_id ? `P-${part.project_id}` : 'GENERAL'),
         name: part.name,
         description: part.description,
         status: part.status,
         priority: part.priority || 'Medium',
+        item_type: part.item_type || 'work_item',
+        discussion_status: part.discussion_status || 'open',
         assigned_to: part.assigned_to,
         created_by: part.created_by,
         assignee_name: assignee?.full_name || null,
@@ -375,7 +387,7 @@ export const dashboardApi = {
         return {
           id: `mention-${comment.id}`,
           kind: 'mention' as const,
-          project_id: workItem.project_id,
+          project_id: workItem.project_id ?? 0,
           work_item_id: workItem.id,
           project_name: workItem.project_name,
           project_number: workItem.project_number,
@@ -394,7 +406,7 @@ export const dashboardApi = {
       .map((item) => ({
         id: `assignment-${item.id}`,
         kind: 'assignment' as const,
-        project_id: item.project_id,
+        project_id: item.project_id ?? 0,
         work_item_id: item.id,
         project_name: item.project_name,
         project_number: item.project_number,
@@ -406,13 +418,17 @@ export const dashboardApi = {
         priority: item.priority,
       }))
 
+    const workItems = items.filter((item) => item.item_type !== 'discussion')
+    const discussions = items.filter((item) => item.item_type === 'discussion')
+
     const activeProjects: WorkDashboardProject[] = Array.from(
-      items.reduce((map, item) => {
-        const existing = map.get(item.project_id) || {
-          project_id: item.project_id,
+      workItems.filter((item) => item.project_id != null).reduce((map, item) => {
+        const projectId = item.project_id as number
+        const existing = map.get(projectId) || {
+          project_id: projectId,
           project_name: item.project_name,
           project_number: item.project_number,
-          status: projectsMap.get(item.project_id)?.status || 'active',
+          status: projectsMap.get(projectId)?.status || 'active',
           total_items: 0,
           open_items: 0,
           completed_items: 0,
@@ -433,7 +449,7 @@ export const dashboardApi = {
           existing.last_activity_at = activityAt
         }
 
-        map.set(item.project_id, existing)
+        map.set(projectId, existing)
         return map
       }, new Map<number, WorkDashboardProject>()).values()
     ).map((project) => ({
@@ -445,7 +461,7 @@ export const dashboardApi = {
     }))
 
     const workload = Array.from(
-      items
+      workItems
         .filter((item) => item.assigned_to && item.status === 'Pending')
         .reduce((map, item) => {
           const id = item.assigned_to as string
@@ -464,7 +480,7 @@ export const dashboardApi = {
         .values()
     ).sort((a, b) => b.open_items - a.open_items || b.urgent_items - a.urgent_items)
 
-    const myWorkItems = items
+    const myWorkItems = workItems
       .filter((item) => item.assigned_to === userId)
       .sort((a, b) => {
         if (a.status !== b.status) return a.status === 'Pending' ? -1 : 1
@@ -474,12 +490,29 @@ export const dashboardApi = {
         return String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at))
       })
 
+    const adminOpenWorkItems = workItems
+      .filter((item) => item.status === 'Pending')
+      .sort((a, b) => {
+        if (priorityWeight[a.priority] !== priorityWeight[b.priority]) {
+          return priorityWeight[b.priority] - priorityWeight[a.priority]
+        }
+        return String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at))
+      })
+
+    const openDiscussions = discussions
+      .filter((item) => item.discussion_status !== 'closed')
+      .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)))
+
+    const closedDiscussions = discussions
+      .filter((item) => item.discussion_status === 'closed')
+      .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)))
+
     const notifications = [...mentionNotifications, ...assignmentNotifications]
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .slice(0, 10)
 
-    const completedItems = items.filter((item) => item.status === 'Approved').length
-    const openItems = items.filter((item) => item.status === 'Pending').length
+    const completedItems = workItems.filter((item) => item.status === 'Approved').length
+    const openItems = workItems.filter((item) => item.status === 'Pending').length
 
     return {
       counts: {
@@ -488,8 +521,13 @@ export const dashboardApi = {
         my_open_items: myWorkItems.filter((item) => item.status === 'Pending').length,
         completed_items: completedItems,
         waiting_on_me: mentionNotifications.length,
+        open_discussions: openDiscussions.length,
+        closed_discussions: closedDiscussions.length,
       },
       my_work_items: myWorkItems,
+      admin_open_work_items: isAdmin ? adminOpenWorkItems : [],
+      open_discussions: openDiscussions,
+      closed_discussions: closedDiscussions,
       active_projects: activeProjects.sort((a, b) => {
         if (a.my_open_items !== b.my_open_items) return b.my_open_items - a.my_open_items
         if (a.waiting_on_me_count !== b.waiting_on_me_count) return b.waiting_on_me_count - a.waiting_on_me_count
