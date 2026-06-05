@@ -52,6 +52,7 @@ import {
   DndContext,
   closestCenter,
   pointerWithin,
+  type CollisionDetection,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -360,22 +361,67 @@ const ProjectDetails = () => {
 
   // Basket state handled by Zustand store
 
-  const handleDragStart = (event: any) => {
-    const { active } = event
-    const dragMeta = active?.data?.current
-    if (dragMeta?.type === 'master_part') {
-      setActiveDragItem(dragMeta.data)
-      return
+  const findDraggedEntity = (dragId: string) => {
+    if (dragId.startsWith('section-')) {
+      const sectionId = parseInt(dragId.split('-')[1], 10)
+      const section = project?.sections?.find((item: any) => item.id === sectionId)
+      return section ? { type: 'section', data: section } : null
     }
 
-    let draggedPart = null
-    project?.sections?.forEach((s: any) => {
-      s.subsections?.forEach((sub: any) => {
-        const p = sub.parts?.find((part: any) => `part-${part.id}` === active.id)
-        if (p) draggedPart = p
-      })
-    })
-    setActiveDragItem(draggedPart)
+    if (dragId.startsWith('sub-')) {
+      const subsectionId = parseInt(dragId.split('-')[1], 10)
+      const subsection = project?.sections
+        ?.flatMap((section: any) => section.subsections || [])
+        .find((item: any) => item.id === subsectionId)
+      return subsection ? { type: 'subsection', data: subsection } : null
+    }
+
+    if (dragId.startsWith('part-')) {
+      const partId = parseInt(dragId.split('-')[1], 10)
+      const part = project?.sections
+        ?.flatMap((section: any) => section.subsections || [])
+        .flatMap((subsection: any) => subsection.parts || [])
+        .find((item: any) => item.id === partId)
+      return part ? { type: 'part', data: part } : null
+    }
+
+    return null
+  }
+
+  const resolveDragPayload = (active: any) => {
+    const dragMeta = active?.data?.current
+    if (dragMeta?.type === 'master_part') return dragMeta
+    if (dragMeta?.type && dragMeta?.data) return dragMeta
+    return findDraggedEntity(String(active?.id || ''))
+  }
+
+  const collectDraggedParts = (type: string, data: any): any[] => {
+    if (type === 'part') return data ? [data] : []
+    if (type === 'subsection') return data?.parts || []
+    if (type === 'section') {
+      return (data?.subsections || []).flatMap((sub: any) => sub.parts || [])
+    }
+    return []
+  }
+
+  const collisionDetection: CollisionDetection = (args) => {
+    const pointerHits = pointerWithin(args)
+    if (pointerHits.length > 0) return pointerHits
+    return closestCenter(args)
+  }
+
+  const handleDragStart = (event: any) => {
+    const { active } = event
+    const dragPayload = resolveDragPayload(active)
+    if (dragPayload?.type === 'master_part') {
+      setActiveDragItem(dragPayload.data)
+      return
+    }
+    if (dragPayload?.type === 'part') {
+      setActiveDragItem(dragPayload.data)
+      return
+    }
+    setActiveDragItem(dragPayload?.data || null)
   }
 
   const handleDragEnd = async (event: any) => {
@@ -388,17 +434,8 @@ const ProjectDetails = () => {
 
     // 1. DROP INTO BOM BASKET
     if (overId === 'bom-basket') {
-      const draggedData = active.data.current
+      const draggedData = resolveDragPayload(active)
       if (!draggedData) return
-
-      const collectParts = (type: string, data: any): any[] => {
-        if (type === 'part') return [data]
-        if (type === 'subsection') return data.parts || []
-        if (type === 'section') {
-          return (data.subsections || []).flatMap((sub: any) => sub.parts || [])
-        }
-        return []
-      }
 
       if (draggedData.type === 'master_part') {
         addToBOMBasket(projectId, [draggedData.data])
@@ -407,7 +444,7 @@ const ProjectDetails = () => {
         return
       }
 
-      const partsToAdd = collectParts(draggedData.type, draggedData.data)
+      const partsToAdd = collectDraggedParts(draggedData.type, draggedData.data)
       if (partsToAdd.length > 0) {
         addToBOMBasket(
           projectId,
@@ -424,17 +461,8 @@ const ProjectDetails = () => {
 
     // 2. DROP INTO PO BASKET
     if (overId === 'po-basket') {
-      const draggedData = active.data.current
+      const draggedData = resolveDragPayload(active)
       if (!draggedData) return
-
-      const collectParts = (type: string, data: any): any[] => {
-        if (type === 'part') return [data]
-        if (type === 'subsection') return data.parts || []
-        if (type === 'section') {
-          return (data.subsections || []).flatMap((sub: any) => sub.parts || [])
-        }
-        return []
-      }
 
       // Check for multi-select
       if (draggedData.type === 'part' && selectedPartIds.has(draggedData.data.id) && selectedPartIds.size > 1) {
@@ -442,7 +470,7 @@ const ProjectDetails = () => {
         addToBasket(selectedParts)
         setSelectedPartIds(new Set())
       } else {
-        const partsToAdd = collectParts(draggedData.type, draggedData.data)
+        const partsToAdd = collectDraggedParts(draggedData.type, draggedData.data)
         if (partsToAdd.length > 0) {
           addToBasket(partsToAdd)
           showToast('success', `${partsToAdd.length} ${partsToAdd.length === 1 ? 'part' : 'parts'} added to basket`)
@@ -561,7 +589,7 @@ const ProjectDetails = () => {
   return (
     <DndContext 
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={collisionDetection}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
