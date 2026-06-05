@@ -53,6 +53,46 @@ export type ProjectTrackingDashboard = {
   recent_updates: TrackingRecentUpdate[]
 }
 
+export type TrackingProjectLookup = {
+  id: number
+  project_name: string
+  project_number: string
+}
+
+export type TrackingSectionLookup = {
+  id: number
+  project_id: number
+  name: string
+}
+
+export type TrackingSubsectionLookup = {
+  id: number
+  project_id: number
+  section_id: number | null
+  section_name: string
+}
+
+export type TrackingSupplierLookup = {
+  id: number
+  name: string
+}
+
+export type TrackingProfileLookup = {
+  id: string
+  full_name: string | null
+  email: string | null
+}
+
+export type TrackingLookupBundle = {
+  projects: TrackingProjectLookup[]
+  suppliers: TrackingSupplierLookup[]
+  profiles: TrackingProfileLookup[]
+}
+
+export type SupplierAssignmentInsert = Database['public']['Tables']['supplier_assignments']['Insert']
+export type SupplierAssignmentUpdate = Database['public']['Tables']['supplier_assignments']['Update']
+export type WorkItemUpdateInsert = Database['public']['Tables']['work_item_updates']['Insert']
+
 const enrichWorkItems = async (items: PendingPartRow[]): Promise<TrackingWorkItem[]> => {
   const projectIds = Array.from(new Set(items.map((item) => item.project_id).filter(Boolean))) as number[]
   const supplierIds = Array.from(new Set(items.map((item) => item.supplier_id).filter(Boolean))) as number[]
@@ -160,6 +200,39 @@ const enrichUpdates = async (updates: WorkItemUpdateRow[]): Promise<TrackingRece
 }
 
 export const projectTrackingApi = {
+  getLookupBundle: async (): Promise<TrackingLookupBundle> => {
+    const [projects, suppliers, profiles] = await Promise.all([
+      supabase.from('projects').select('id, project_name, project_number').order('project_name', { ascending: true }),
+      supabase.from('suppliers').select('id, name').order('name', { ascending: true }),
+      supabase.from('profiles').select('id, full_name, email').order('full_name', { ascending: true }),
+    ])
+
+    if (projects.error) throw projects.error
+    if (suppliers.error) throw suppliers.error
+    if (profiles.error) throw profiles.error
+
+    return {
+      projects: (projects.data || []) as TrackingProjectLookup[],
+      suppliers: (suppliers.data || []) as TrackingSupplierLookup[],
+      profiles: (profiles.data || []) as TrackingProfileLookup[],
+    }
+  },
+
+  getProjectContext: async (projectId: number): Promise<{ sections: TrackingSectionLookup[]; subsections: TrackingSubsectionLookup[] }> => {
+    const [sections, subsections] = await Promise.all([
+      supabase.from('project_sections').select('id, project_id, name').eq('project_id', projectId).order('order_index', { ascending: true }),
+      supabase.from('project_subsections').select('id, project_id, section_id, section_name').eq('project_id', projectId).order('sort_order', { ascending: true }),
+    ])
+
+    if (sections.error) throw sections.error
+    if (subsections.error) throw subsections.error
+
+    return {
+      sections: (sections.data || []) as TrackingSectionLookup[],
+      subsections: (subsections.data || []) as TrackingSubsectionLookup[],
+    }
+  },
+
   getDashboard: async (userId: string, isAdmin: boolean): Promise<ProjectTrackingDashboard> => {
     const today = new Date().toISOString().slice(0, 10)
 
@@ -223,5 +296,61 @@ export const projectTrackingApi = {
       blocked_work_items: await enrichWorkItems(blockedItemsRaw),
       recent_updates: await enrichUpdates(recentUpdates),
     }
+  },
+
+  createSupplierAssignment: async (payload: SupplierAssignmentInsert): Promise<SupplierAssignmentRow> => {
+    const { data: auth } = await supabase.auth.getUser()
+    const enrichedPayload = {
+      ...payload,
+      last_updated_by: auth.user?.id || null,
+      last_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+
+    const { data, error } = await supabase.from('supplier_assignments').insert([enrichedPayload]).select('*').single()
+    if (error) throw error
+    return data as SupplierAssignmentRow
+  },
+
+  updateSupplierAssignment: async (id: number, payload: SupplierAssignmentUpdate): Promise<SupplierAssignmentRow> => {
+    const { data: auth } = await supabase.auth.getUser()
+    const enrichedPayload = {
+      ...payload,
+      last_updated_by: auth.user?.id || null,
+      last_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+
+    const { data, error } = await supabase.from('supplier_assignments').update(enrichedPayload).eq('id', id).select('*').single()
+    if (error) throw error
+    return data as SupplierAssignmentRow
+  },
+
+  createWorkItemUpdate: async (payload: WorkItemUpdateInsert): Promise<WorkItemUpdateRow> => {
+    const { data: auth } = await supabase.auth.getUser()
+    const finalPayload = {
+      ...payload,
+      user_id: auth.user?.id || payload.user_id || null,
+    }
+
+    const { data, error } = await supabase.from('work_item_updates').insert([finalPayload]).select('*').single()
+    if (error) throw error
+
+    const workItemPatch: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    }
+    if (payload.status !== undefined) workItemPatch.tracking_status = payload.status
+    if (payload.progress_percent !== undefined) workItemPatch.progress_percent = payload.progress_percent
+    if (payload.blocker !== undefined) workItemPatch.blocker = payload.blocker
+    if (payload.next_step !== undefined) workItemPatch.next_action = payload.next_step
+
+    const { error: workItemError } = await supabase
+      .from('pending_parts')
+      .update(workItemPatch)
+      .eq('id', payload.work_item_id)
+
+    if (workItemError) throw workItemError
+
+    return data as WorkItemUpdateRow
   },
 }

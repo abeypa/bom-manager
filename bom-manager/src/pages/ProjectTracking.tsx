@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -7,13 +7,16 @@ import {
   Briefcase,
   Clock3,
   FolderKanban,
+  Plus,
   PackageCheck,
   ShieldAlert,
   Truck,
 } from 'lucide-react'
-import { projectTrackingApi } from '@/api/project-tracking'
+import { projectTrackingApi, type TrackingSupplierAssignment, type TrackingWorkItem } from '@/api/project-tracking'
 import { useAuth } from '@/context/AuthContext'
 import { useRole } from '@/hooks/useRole'
+import SupplierAssignmentModal from '@/components/project-tracking/SupplierAssignmentModal'
+import WorkItemUpdateModal from '@/components/project-tracking/WorkItemUpdateModal'
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'No target date'
@@ -45,6 +48,9 @@ const statusTone: Record<string, string> = {
 export default function ProjectTracking() {
   const { user } = useAuth()
   const { isAdmin } = useRole()
+  const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
+  const [editingAssignment, setEditingAssignment] = useState<TrackingSupplierAssignment | null>(null)
+  const [updateItem, setUpdateItem] = useState<TrackingWorkItem | null>(null)
 
   useEffect(() => {
     document.title = 'Project Tracking | BOM Manager'
@@ -115,6 +121,17 @@ export default function ProjectTracking() {
               <div>Work-item linkage to project hierarchy</div>
               <div>Timestamped progress updates</div>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingAssignment(null)
+                setAssignmentModalOpen(true)
+              }}
+              className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-white/15"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New Assignment
+            </button>
           </div>
         </div>
       </section>
@@ -219,8 +236,17 @@ export default function ProjectTracking() {
                 <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-sm font-black text-navy-900">{item.name}</div>
-                    <div className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${statusTone[item.tracking_status || 'blocked'] || statusTone.blocked}`}>
-                      {item.tracking_status || 'blocked'}
+                    <div className="flex items-center gap-2">
+                      <div className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${statusTone[item.tracking_status || 'blocked'] || statusTone.blocked}`}>
+                        {item.tracking_status || 'blocked'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setUpdateItem(item)}
+                        className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-primary-600 hover:border-primary-200 hover:bg-primary-50"
+                      >
+                        Update
+                      </button>
                     </div>
                   </div>
                   <div className="mt-2 text-xs font-semibold text-slate-500">{item.project_name || 'General'}{item.supplier_name ? ` • ${item.supplier_name}` : ''}</div>
@@ -262,6 +288,16 @@ export default function ProjectTracking() {
                       {assignment.current_status}
                     </div>
                     <div className="mt-2 text-xs font-semibold text-slate-500">{formatDate(assignment.target_date)}</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingAssignment(assignment)
+                        setAssignmentModalOpen(true)
+                      }}
+                      className="mt-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary-600 hover:text-primary-700"
+                    >
+                      Edit
+                    </button>
                   </div>
                 </div>
               </div>
@@ -301,6 +337,21 @@ export default function ProjectTracking() {
           </div>
         </div>
       </section>
+
+      <SupplierAssignmentModal
+        isOpen={assignmentModalOpen}
+        onClose={() => {
+          setAssignmentModalOpen(false)
+          setEditingAssignment(null)
+        }}
+        assignment={editingAssignment}
+      />
+
+      <WorkItemUpdateModal
+        isOpen={!!updateItem}
+        onClose={() => setUpdateItem(null)}
+        item={updateItem}
+      />
     </div>
   )
 }

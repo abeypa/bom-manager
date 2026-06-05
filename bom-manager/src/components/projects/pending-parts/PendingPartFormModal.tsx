@@ -4,6 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { pendingPartsApi, PendingPartInsert, PendingPart, PendingPartUpdate } from '@/api/pending-parts'
 import { useToast } from '@/context/ToastContext'
 import { supabase } from '@/lib/supabase'
+import { projectsApi } from '@/api/projects'
+import { suppliersApi } from '@/api/suppliers'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 
 interface Props {
   isOpen: boolean
@@ -22,6 +25,9 @@ const CATEGORIES = [
 
 const BLANK: PendingPartInsert = {
   project_id: 0,
+  section_id: null,
+  subsection_id: null,
+  supplier_id: null,
   name: '',
   description: '',
   category: 'mechanical_bought_out',
@@ -32,6 +38,13 @@ const BLANK: PendingPartInsert = {
   created_by: null,
   rejection_reason: null,
   assigned_to: null,
+  due_date: null,
+  target_date: null,
+  next_action: null,
+  blocker: null,
+  progress_percent: 0,
+  tracking_status: 'not_started',
+  risk_level: 'normal',
 }
 
 export default function PendingPartFormModal({ isOpen, onClose, projectId, editPart }: Props) {
@@ -52,11 +65,21 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
         category: editPart.category || 'mechanical_bought_out',
         status: editPart.status,
         priority: editPart.priority || 'Medium',
+        section_id: editPart.section_id || null,
+        subsection_id: editPart.subsection_id || null,
+        supplier_id: editPart.supplier_id || null,
         images: editPart.images || [],
         links: editPart.links || [],
         created_by: editPart.created_by,
         rejection_reason: editPart.rejection_reason,
         assigned_to: editPart.assigned_to,
+        due_date: editPart.due_date || null,
+        target_date: editPart.target_date || null,
+        next_action: editPart.next_action || null,
+        blocker: editPart.blocker || null,
+        progress_percent: editPart.progress_percent ?? 0,
+        tracking_status: editPart.tracking_status || 'not_started',
+        risk_level: editPart.risk_level || 'normal',
       })
       return
     }
@@ -67,6 +90,18 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
   const { data: profiles } = useQuery({
     queryKey: ['profiles'],
     queryFn: () => pendingPartsApi.getProfiles(),
+  })
+
+  const { data: project } = useQuery({
+    queryKey: ['project', projectId],
+    queryFn: () => projectsApi.getProject(projectId),
+    enabled: isOpen && !!projectId,
+  })
+
+  const { data: suppliers } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => suppliersApi.getSuppliers(),
+    enabled: isOpen,
   })
 
   const createMut = useMutation({
@@ -128,9 +163,19 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
         description: formData.description,
         category: formData.category,
         priority: formData.priority,
+        section_id: formData.section_id,
+        subsection_id: formData.subsection_id,
+        supplier_id: formData.supplier_id,
         images: formData.images,
         links: formData.links,
         assigned_to: formData.assigned_to,
+        due_date: formData.due_date,
+        target_date: formData.target_date,
+        next_action: formData.next_action,
+        blocker: formData.blocker,
+        progress_percent: formData.progress_percent,
+        tracking_status: formData.tracking_status,
+        risk_level: formData.risk_level,
       })
       return
     }
@@ -140,6 +185,23 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
 
   const assignedProfile = profiles?.find((profile) => profile.id === formData.assigned_to)
   const getInitial = (name: string | null, email: string | null) => (name || email || '?')[0].toUpperCase()
+  const sectionOptions = (project?.sections || []).map((section: any) => ({
+    value: String(section.id),
+    label: section.name,
+  }))
+  const subsectionOptions = ((project?.sections || []) as any[])
+    .flatMap((section) => section.subsections || [])
+    .filter((subsection: any) => !formData.section_id || subsection.section_id === formData.section_id)
+    .map((subsection: any) => ({
+      value: String(subsection.id),
+      label: subsection.section_name,
+      subLabel: subsection.description || undefined,
+    }))
+  const supplierOptions = (suppliers || []).map((supplier) => ({
+    value: String(supplier.id),
+    label: supplier.name,
+    subLabel: supplier.contact_person || undefined,
+  }))
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto bg-navy-900/40 px-4 py-10 backdrop-blur-sm">
@@ -219,6 +281,39 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
               </div>
             </div>
 
+            <div>
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Section</label>
+              <SearchableSelect
+                options={sectionOptions}
+                value={formData.section_id ? String(formData.section_id) : ''}
+                onChange={(value) => setFormData({ ...formData, section_id: Number(value), subsection_id: null })}
+                placeholder="Optional section"
+                disabled={!sectionOptions.length}
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Subsection</label>
+              <SearchableSelect
+                options={subsectionOptions}
+                value={formData.subsection_id ? String(formData.subsection_id) : ''}
+                onChange={(value) => setFormData({ ...formData, subsection_id: Number(value) })}
+                placeholder="Optional subsection"
+                disabled={!subsectionOptions.length}
+              />
+            </div>
+
+            <div className="col-span-2">
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Supplier</label>
+              <SearchableSelect
+                options={supplierOptions}
+                value={formData.supplier_id ? String(formData.supplier_id) : ''}
+                onChange={(value) => setFormData({ ...formData, supplier_id: Number(value) })}
+                placeholder="Optional supplier"
+                disabled={!supplierOptions.length}
+              />
+            </div>
+
             <div className="col-span-2">
               <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Assign To</label>
               <div className="relative">
@@ -248,6 +343,64 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
               )}
             </div>
 
+            <div>
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Tracking Status</label>
+              <select
+                value={formData.tracking_status || 'not_started'}
+                onChange={(e) => setFormData({ ...formData, tracking_status: e.target.value })}
+                className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 pr-10 text-sm font-bold shadow-sm"
+              >
+                {['not_started', 'in_progress', 'waiting_supplier', 'quoted', 'po_released', 'dispatched', 'received', 'blocked', 'closed'].map((status) => (
+                  <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Risk Level</label>
+              <select
+                value={formData.risk_level || 'normal'}
+                onChange={(e) => setFormData({ ...formData, risk_level: e.target.value as PendingPart['risk_level'] })}
+                className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 pr-10 text-sm font-bold shadow-sm"
+              >
+                {['low', 'normal', 'high', 'critical'].map((risk) => (
+                  <option key={risk} value={risk}>{risk}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Due Date</label>
+              <input
+                type="date"
+                value={formData.due_date || ''}
+                onChange={(e) => setFormData({ ...formData, due_date: e.target.value || null })}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold shadow-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Target Date</label>
+              <input
+                type="date"
+                value={formData.target_date || ''}
+                onChange={(e) => setFormData({ ...formData, target_date: e.target.value || null })}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold shadow-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Progress %</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={formData.progress_percent ?? 0}
+                onChange={(e) => setFormData({ ...formData, progress_percent: Number(e.target.value) })}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold shadow-sm"
+              />
+            </div>
+
             <div className="col-span-2">
               <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Detailed Context & Description</label>
               <textarea
@@ -256,6 +409,28 @@ export default function PendingPartFormModal({ isOpen, onClose, projectId, editP
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium leading-relaxed shadow-sm focus:ring-2 focus:ring-primary-500/20"
                 placeholder="Describe the job, expected output, references, and anything the assignee should wait for or coordinate with..."
+              />
+            </div>
+
+            <div className="col-span-2">
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Next Action</label>
+              <textarea
+                rows={2}
+                value={formData.next_action || ''}
+                onChange={(e) => setFormData({ ...formData, next_action: e.target.value })}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium shadow-sm"
+                placeholder="What should happen next and who needs to follow up?"
+              />
+            </div>
+
+            <div className="col-span-2">
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Blocker / Dependency</label>
+              <textarea
+                rows={2}
+                value={formData.blocker || ''}
+                onChange={(e) => setFormData({ ...formData, blocker: e.target.value })}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium shadow-sm"
+                placeholder="Optional blocker, pending input, or supplier dependency."
               />
             </div>
 

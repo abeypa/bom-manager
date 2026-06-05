@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import DiscussionThread from './DiscussionThread.tsx';
 import PendingPartFormModal from './PendingPartFormModal.tsx';
+import WorkItemUpdateModal from '@/components/project-tracking/WorkItemUpdateModal';
 
 const PRIORITY_CONFIG: Record<PendingPartPriority, { icon: React.ReactNode; label: string; cls: string }> = {
   Urgent: { icon: <AlertTriangle size={11} />, label: 'Urgent', cls: 'bg-red-50 text-red-600 border-red-200' },
@@ -24,6 +25,7 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
   const { showToast } = useToast();
   const [showThread, setShowThread] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   React.useEffect(() => {
@@ -90,6 +92,14 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
 
             {/* Edit + Delete */}
             <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => setUpdateOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-primary-600 hover:bg-primary-50 border border-transparent hover:border-primary-200 rounded-xl transition-all"
+                title="Post Update"
+              >
+                <MessageSquare size={12} />
+                Update
+              </button>
               {canEdit && (
                 <button
                   onClick={() => setEditOpen(true)}
@@ -142,6 +152,62 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
               </div>
             )}
           </div>
+
+          {(part.supplier_name || part.section_name || part.subsection_name) && (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {part.supplier_name && (
+                <span className="rounded-xl border border-sky-100 bg-sky-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-sky-700">
+                  Supplier: {part.supplier_name}
+                </span>
+              )}
+              {part.section_name && (
+                <span className="rounded-xl border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                  {part.section_name}
+                </span>
+              )}
+              {part.subsection_name && (
+                <span className="rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  {part.subsection_name}
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Tracking</div>
+              <div className="mt-1 text-xs font-bold text-slate-700">{(part.tracking_status || 'not_started').replace(/_/g, ' ')}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Progress</div>
+              <div className="mt-1 text-xs font-bold text-slate-700">{part.progress_percent ?? 0}%</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Due</div>
+              <div className="mt-1 text-xs font-bold text-slate-700">{part.due_date || 'Not set'}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Risk</div>
+              <div className="mt-1 text-xs font-bold text-slate-700">{part.risk_level || 'normal'}</div>
+            </div>
+          </div>
+
+          {(part.next_action || part.blocker) && (
+            <div className="mb-4 space-y-2 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+              {part.next_action && (
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Next Action</div>
+                  <div className="mt-1 text-sm text-slate-700">{part.next_action}</div>
+                </div>
+              )}
+              {part.blocker && (
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-red-500">Blocker</div>
+                  <div className="mt-1 text-sm text-red-700">{part.blocker}</div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Description */}
           {part.description && (
@@ -230,6 +296,10 @@ export default function PendingPartCard({ part, projectId }: { part: PendingPart
 
       {editOpen && (
         <PendingPartFormModal isOpen={editOpen} onClose={() => setEditOpen(false)} projectId={projectId} editPart={part} />
+      )}
+
+      {updateOpen && (
+        <WorkItemUpdateModal isOpen={updateOpen} onClose={() => setUpdateOpen(false)} item={part} />
       )}
     </>
   );

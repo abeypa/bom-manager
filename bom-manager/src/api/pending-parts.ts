@@ -13,6 +13,9 @@ export type DiscussionStatus = 'open' | 'closed'
 export type PendingPart = {
   id: number
   project_id: number | null
+  section_id?: number | null
+  subsection_id?: number | null
+  supplier_id?: number | null
   name: string
   description: string | null
   category: string | null
@@ -31,6 +34,13 @@ export type PendingPart = {
   approved_by: string | null
   closed_at?: string | null
   closed_by?: string | null
+  due_date?: string | null
+  target_date?: string | null
+  next_action?: string | null
+  blocker?: string | null
+  progress_percent?: number
+  tracking_status?: string | null
+  risk_level?: 'low' | 'normal' | 'high' | 'critical'
   author_email?: string
   author_name?: string
   author_avatar?: string
@@ -39,6 +49,9 @@ export type PendingPart = {
   assignee_email?: string
   project_name?: string | null
   project_number?: string | null
+  supplier_name?: string | null
+  section_name?: string | null
+  subsection_name?: string | null
   comment_count?: number
 }
 
@@ -65,7 +78,27 @@ export type PendingPartInsert = Omit<
 >
 
 export type PendingPartUpdate = Partial<
-  Pick<PendingPart, 'name' | 'description' | 'category' | 'images' | 'links' | 'assigned_to' | 'priority' | 'project_id'>
+  Pick<
+    PendingPart,
+    | 'name'
+    | 'description'
+    | 'category'
+    | 'images'
+    | 'links'
+    | 'assigned_to'
+    | 'priority'
+    | 'project_id'
+    | 'section_id'
+    | 'subsection_id'
+    | 'supplier_id'
+    | 'due_date'
+    | 'target_date'
+    | 'next_action'
+    | 'blocker'
+    | 'progress_percent'
+    | 'tracking_status'
+    | 'risk_level'
+  >
 >
 
 export type PendingPartComment = {
@@ -120,13 +153,25 @@ async function enrichPendingParts(parts: any[]): Promise<PendingPart[]> {
     ...new Set(parts.flatMap((part: any) => [part.created_by, part.approved_by, part.assigned_to, part.closed_by]).filter(Boolean)),
   ] as string[]
   const projectIds = [...new Set(parts.map((part: any) => part.project_id).filter(Boolean))] as number[]
+  const supplierIds = [...new Set(parts.map((part: any) => part.supplier_id).filter(Boolean))] as number[]
+  const sectionIds = [...new Set(parts.map((part: any) => part.section_id).filter(Boolean))] as number[]
+  const subsectionIds = [...new Set(parts.map((part: any) => part.subsection_id).filter(Boolean))] as number[]
 
-  const [profilesResult, projectsResult] = await Promise.all([
+  const [profilesResult, projectsResult, suppliersResult, sectionsResult, subsectionsResult] = await Promise.all([
     allUserIds.length
       ? supabase.from('profiles').select('id, full_name, email').in('id', allUserIds)
       : Promise.resolve({ data: [] as any[] }),
     projectIds.length
       ? supabase.from('projects').select('id, project_name, project_number').in('id', projectIds)
+      : Promise.resolve({ data: [] as any[] }),
+    supplierIds.length
+      ? supabase.from('suppliers').select('id, name').in('id', supplierIds)
+      : Promise.resolve({ data: [] as any[] }),
+    sectionIds.length
+      ? supabase.from('project_sections').select('id, name').in('id', sectionIds)
+      : Promise.resolve({ data: [] as any[] }),
+    subsectionIds.length
+      ? supabase.from('project_subsections').select('id, section_name').in('id', subsectionIds)
       : Promise.resolve({ data: [] as any[] }),
   ])
 
@@ -135,6 +180,12 @@ async function enrichPendingParts(parts: any[]): Promise<PendingPart[]> {
 
   const projectsMap: Record<number, any> = {}
   for (const project of projectsResult.data || []) projectsMap[project.id] = project
+  const suppliersMap: Record<number, any> = {}
+  for (const supplier of suppliersResult.data || []) suppliersMap[supplier.id] = supplier
+  const sectionsMap: Record<number, any> = {}
+  for (const section of sectionsResult.data || []) sectionsMap[section.id] = section
+  const subsectionsMap: Record<number, any> = {}
+  for (const subsection of subsectionsResult.data || []) subsectionsMap[subsection.id] = subsection
 
   const { data: countsData } = await supabase
     .from('pending_part_comments')
@@ -156,6 +207,9 @@ async function enrichPendingParts(parts: any[]): Promise<PendingPart[]> {
     assignee_email: profilesMap[item.assigned_to]?.email,
     project_name: item.project_id ? projectsMap[item.project_id]?.project_name || null : null,
     project_number: item.project_id ? projectsMap[item.project_id]?.project_number || null : null,
+    supplier_name: item.supplier_id ? suppliersMap[item.supplier_id]?.name || null : null,
+    section_name: item.section_id ? sectionsMap[item.section_id]?.name || null : null,
+    subsection_name: item.subsection_id ? subsectionsMap[item.subsection_id]?.section_name || null : null,
     comment_count: countsMap.get(item.id) || 0,
     images: Array.isArray(item.images) ? item.images : [],
     links: Array.isArray(item.links) ? item.links : [],
