@@ -65,6 +65,15 @@ const formatCommitDate = (value: string) =>
     year: 'numeric',
   })
 
+const formatMetaDateTime = (value: string) =>
+  new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
 export default function Dashboard() {
   const { userEmail, isAdmin } = useRole()
 
@@ -146,6 +155,8 @@ export default function Dashboard() {
     ? 'Admin view of every open work item across all projects, so nothing stays hidden in individual project tabs.'
     : 'Every work item assigned to you, sorted so urgent open work stays at the top.'
   const commitDate = formatCommitDate(__GIT_COMMIT_DATE__)
+  const commitTime = formatMetaDateTime(__GIT_COMMIT_TIME__)
+  const pushTime = formatMetaDateTime(__GIT_PUSH_TIME__)
 
   return (
     <div className="page-container py-8 page-enter space-y-8">
@@ -164,6 +175,11 @@ export default function Dashboard() {
               </span>
               <span className="text-white/70">Last commit</span>
               <span>{commitDate}</span>
+              <span className="text-white/40">|</span>
+              <span>{commitTime}</span>
+              <span className="text-white/40">|</span>
+              <span className="text-white/70">Last push</span>
+              <span>{pushTime}</span>
               <span className="text-white/40">•</span>
               <span className="font-mono text-sky-100">{__GIT_HASH__}</span>
             </div>

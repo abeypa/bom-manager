@@ -21,6 +21,26 @@ const getGitCommitDate = () => {
   }
 }
 
+const getGitCommitTime = () => {
+  try {
+    return execSync('git log -1 --date=iso-strict --pretty=format:%cI').toString().trim()
+  } catch (e) {
+    return new Date().toISOString()
+  }
+}
+
+const getGitPushTime = () => {
+  try {
+    return execSync('git log -1 --date=iso-strict --pretty=format:%cI @{upstream}').toString().trim()
+  } catch (e) {
+    try {
+      return execSync('git log -1 --date=iso-strict --pretty=format:%cI').toString().trim()
+    } catch {
+      return new Date().toISOString()
+    }
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -61,6 +81,8 @@ export default defineConfig({
     __CACHE_BUST__: JSON.stringify('v3.2_2026-04-23_0649'),
     __GIT_HASH__: JSON.stringify(getGitHash()),
     __GIT_COMMIT_DATE__: JSON.stringify(getGitCommitDate()),
+    __GIT_COMMIT_TIME__: JSON.stringify(getGitCommitTime()),
+    __GIT_PUSH_TIME__: JSON.stringify(getGitPushTime()),
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
 })

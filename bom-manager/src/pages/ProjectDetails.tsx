@@ -812,31 +812,47 @@ const ProjectDetails = () => {
 
             {/* ── Documents Tab ───────────────────────────────────── */}
             {activeTab === 'documents' && (
-              <div className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
-                <ProjectDocumentsTab projectId={projectId} />
+              <div className="flex flex-1 gap-4 min-h-0">
+                <div id="documents-scroll-container" className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
+                  <ProjectDocumentsTab projectId={projectId} />
+                </div>
+                <div className="hidden w-10 shrink-0 h-full py-1 xl:block">
+                  <FastScrollSlider containerId="documents-scroll-container" />
+                </div>
               </div>
             )}
 
             {/* ── Job Order Tab ───────────────────────────────────── */}
             {activeTab === 'jo' && (
-              <div className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
-                <JobOrderTab 
-                  projectId={projectId} 
-                  projectNumber={project.project_number} 
-                />
+              <div className="flex flex-1 gap-4 min-h-0">
+                <div id="job-order-scroll-container" className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
+                  <JobOrderTab 
+                    projectId={projectId} 
+                    projectNumber={project.project_number} 
+                  />
+                </div>
+                <div className="hidden w-10 shrink-0 h-full py-1 xl:block">
+                  <FastScrollSlider containerId="job-order-scroll-container" />
+                </div>
               </div>
             )}
 
             {/* ── Pending Parts Tab ───────────────────────────────────── */}
             {activeTab === 'pending_parts' && (
-              <div className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
-                <PendingPartsTab projectId={projectId} />
+              <div className="flex flex-1 gap-4 min-h-0">
+                <div id="pending-parts-scroll-container" className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
+                  <PendingPartsTab projectId={projectId} />
+                </div>
+                <div className="hidden w-10 shrink-0 h-full py-1 xl:block">
+                  <FastScrollSlider containerId="pending-parts-scroll-container" />
+                </div>
               </div>
             )}
 
             {/* ── POs Tab ───────────────────────────────────── */}
             {activeTab === 'pos' && (
-              <div className="flex-1 overflow-y-auto hidden-scrollbar pb-20 space-y-4">
+              <div className="flex flex-1 gap-4 min-h-0">
+                <div id="project-pos-scroll-container" className="flex-1 overflow-y-auto hidden-scrollbar pb-20 space-y-4">
                 <h2 className="text-lg font-bold text-gray-900 flex items-center pt-2">
                   <ShoppingCart className="h-5 w-5 mr-2 text-primary-600" />
                   Project Purchase Orders
@@ -889,6 +905,10 @@ const ProjectDetails = () => {
                     ))}
                   </div>
                 )}
+                </div>
+                <div className="hidden w-10 shrink-0 h-full py-1 xl:block">
+                  <FastScrollSlider containerId="project-pos-scroll-container" />
+                </div>
               </div>
             )}
           </div>

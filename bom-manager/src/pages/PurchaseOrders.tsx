@@ -4,6 +4,7 @@ import { purchaseOrdersApi } from '../api/purchase-orders';
 import PODetailModal from '../components/purchase-orders/PODetailModal';
 import exportUtils from '../utils/export';
 import { useToast } from '../context/ToastContext';
+import FastScrollSlider from '@/components/ui/FastScrollSlider';
 
 export default function PurchaseOrders() {
   const { showToast } = useToast();
@@ -117,7 +118,8 @@ export default function PurchaseOrders() {
       </div>
 
       {/* Main Table */}
-      <div className="min-h-[500px]">
+      <div className="min-h-[500px] flex gap-4">
+        <div id="purchase-orders-scroll-container" className="min-w-0 flex-1 overflow-y-auto hidden-scrollbar pb-6">
         {loading ? renderSkeletons() : filteredPOs.length === 0 ? (
           <div className="empty-state py-24">
             <div className="bg-slate-50 w-24 h-24 rounded-full flex items-center justify-center mb-6 border border-slate-100 shadow-inner">
@@ -201,6 +203,10 @@ export default function PurchaseOrders() {
             </table>
           </div>
         )}
+        </div>
+        <div className="hidden h-[calc(100vh-240px)] w-10 shrink-0 py-1 xl:block">
+          <FastScrollSlider containerId="purchase-orders-scroll-container" />
+        </div>
       </div>
 
       {selectedPOId && (

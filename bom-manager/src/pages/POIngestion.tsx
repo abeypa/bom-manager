@@ -65,10 +65,9 @@ export default function POIngestion() {
     queryFn: () => suppliersApi.getSuppliers(),
   })
 
-  const { data: selectedProject } = useQuery({
-    queryKey: ['project', Number(projectId), 'po-ingestion-targets'],
-    queryFn: () => projectsApi.getProject(Number(projectId)),
-    enabled: Boolean(projectId),
+  const { data: projectSubsections = [] } = useQuery({
+    queryKey: ['project-subsection-options', projectId || 'all'],
+    queryFn: () => projectsApi.getProjectSubsectionOptions(projectId ? Number(projectId) : null),
   })
 
   const { data: recentBatches = [] } = useQuery({
@@ -78,7 +77,7 @@ export default function POIngestion() {
 
   const saveMutation = useMutation({
     mutationFn: () => poIngestionApi.createBatch({
-      projectId: Number(projectId),
+      projectId: projectId ? Number(projectId) : null,
       notes,
       documents,
     }),
@@ -96,16 +95,25 @@ export default function POIngestion() {
 
   const addToProjectMutation = useMutation({
     mutationFn: () => poIngestionApi.createPartsAndProjectRows({
-      projectId: Number(projectId),
+      projectId: projectId ? Number(projectId) : null,
       notes,
       documents,
     }),
     onSuccess: (result: any) => {
       showToast(
         'success',
-        `Added to project: ${result.partsCreated} new parts, ${result.partsReused} reused, ${result.projectRowsCreated + result.projectRowsUpdated} BOM rows.`,
+        `Added to project tables: ${result.partsCreated} new parts, ${result.partsReused} reused, ${result.projectRowsCreated + result.projectRowsUpdated} BOM rows.`,
       )
-      queryClient.invalidateQueries({ queryKey: ['project', Number(projectId)] })
+      const impactedProjectIds = new Set<number>()
+      documents.forEach((doc) => {
+        doc.lines.forEach((line: any) => {
+          const subsection = projectSubsections.find((item: any) => item.id === line.target_project_subsection_id)
+          if (subsection?.project_id) impactedProjectIds.add(subsection.project_id)
+        })
+      })
+      impactedProjectIds.forEach((id) => {
+        queryClient.invalidateQueries({ queryKey: ['project', id] })
+      })
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['parts'] })
     },
@@ -123,16 +131,6 @@ export default function POIngestion() {
     const warnings = documents.reduce((sum, doc) => sum + doc.parse_warnings.length, 0)
     return { lines, value, warnings }
   }, [documents])
-
-  const projectSubsections = useMemo(() => {
-    const sections = (selectedProject as any)?.sections || []
-    return sections.flatMap((section: any) =>
-      (section.subsections || []).map((subsection: any) => ({
-        id: subsection.id,
-        label: `${section.name || section.section_name} / ${subsection.section_name}`,
-      })),
-    )
-  }, [selectedProject])
 
   const parseFiles = async (files: FileList | File[]) => {
     const fileList = Array.from(files)
@@ -250,13 +248,13 @@ export default function POIngestion() {
         <aside className="space-y-6">
           <div className="card p-5 space-y-5">
             <div>
-              <label className="label-caps mb-2 block">Target Project</label>
+              <label className="label-caps mb-2 block">Project Filter</label>
               <select
                 className="input"
                 value={projectId}
                 onChange={event => setProjectId(event.target.value)}
               >
-                <option value="">Select project...</option>
+                <option value="">All projects...</option>
                 {projects.map((project: any) => (
                   <option key={project.id} value={project.id}>
                     {project.project_number} - {project.project_name}
@@ -299,12 +297,12 @@ export default function POIngestion() {
             <button
               className="btn btn-primary w-full"
               disabled={
-                !projectId ||
                 documents.length === 0 ||
                 saveMutation.isPending ||
                 reviewIssues.missingSuppliers > 0 ||
                 reviewIssues.missingCategories > 0 ||
-                reviewIssues.missingProjectTargets > 0
+                reviewIssues.missingProjectTargets > 0 ||
+                !projectId
               }
               onClick={() => saveMutation.mutate()}
             >
@@ -314,7 +312,6 @@ export default function POIngestion() {
             <button
               className="btn btn-secondary w-full"
               disabled={
-                !projectId ||
                 documents.length === 0 ||
                 addToProjectMutation.isPending ||
                 reviewIssues.missingSuppliers > 0 ||
@@ -322,12 +319,12 @@ export default function POIngestion() {
                 reviewIssues.missingProjectTargets > 0
               }
               onClick={() => {
-                if (!window.confirm('Create missing suppliers/master parts and add all reviewed lines to the selected project tables?')) return
+                if (!window.confirm('Create missing suppliers/master parts and add all reviewed lines to their selected project tables?')) return
                 addToProjectMutation.mutate()
               }}
             >
               {addToProjectMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
-              Add Parts to Project
+              Add Parts to Project(s)
             </button>
           </div>
 
@@ -381,9 +378,9 @@ export default function POIngestion() {
                 <Plus size={40} className="text-tertiary" />
               </div>
               <h3 className="section-title mb-2">No POs staged</h3>
-              <p className="text-secondary max-w-md text-center">
-                Select a project, upload one or more text-based PO PDFs, then review extracted headers and line items here.
-              </p>
+                <p className="text-secondary max-w-md text-center">
+                Filter to one project or leave it on all projects, then upload one or more text-based PO PDFs and map each line to the right project table.
+                </p>
             </div>
           ) : (
             <>

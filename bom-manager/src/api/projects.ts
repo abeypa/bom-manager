@@ -358,6 +358,45 @@ export const projectsApi = {
     return data
   },
 
+  getProjectSubsectionOptions: async (projectId?: number | null) => {
+    let query = (supabase as any)
+      .from('project_subsections')
+      .select(`
+        id,
+        project_id,
+        section_id,
+        section_name,
+        section:project_sections!project_subsections_section_id_fkey(
+          id,
+          name
+        ),
+        project:projects(
+          id,
+          project_name,
+          project_number
+        )
+      `)
+      .order('section_name', { ascending: true })
+
+    if (projectId) query = query.eq('project_id', projectId)
+
+    const { data, error } = await query
+    if (error) throw error
+
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      project_id: row.project_id,
+      section_id: row.section_id,
+      section_name: row.section_name,
+      project_name: row.project?.project_name || `Project #${row.project_id}`,
+      project_number: row.project?.project_number || '',
+      section_label: row.section?.name || 'Unassigned Section',
+      label: projectId
+        ? `${row.section?.name || 'Unassigned Section'} / ${row.section_name}`
+        : `${row.project?.project_number || 'Project'} - ${row.project?.project_name || 'Unknown'} / ${row.section?.name || 'Unassigned Section'} / ${row.section_name}`,
+    }))
+  },
+
   createSection: async (section: { project_id: number; name: string; order_index?: number }) => {
     const { data, error } = await (supabase as any)
       .from('project_sections')

@@ -29,13 +29,13 @@ const SMART_COMMANDS = [
     label: 'PO Ingest',
     icon: ClipboardList,
     prompt:
-      'PO ingest: I will attach one or more PO PDFs. Ask me for the target project if not clear. For each PO, resolve or create the supplier, create missing master parts, update existing part prices with the PO date, ask me when part category or project table is uncertain, map each part only once in the project, then draft the matching PO after mapping.',
+      'PO ingest: I will attach one or more PO PDFs. Ask me for the target project or projects if not clear, and allow mapping different PO lines across multiple projects when needed. For each PO, resolve or create the supplier, create missing master parts, update existing part prices with the PO date, ask me when part category or project table is uncertain, map each part only once in its target project, then draft the matching PO after mapping.',
   },
   {
     label: 'Select Project',
     icon: FolderKanban,
     prompt:
-      'Help me select the target project for PO ingestion. List matching projects and ask me to choose one before creating or mapping any parts.',
+      'Help me select the target project or projects for PO ingestion. List matching projects and let me choose one or multiple projects before creating or mapping any parts.',
   },
   {
     label: 'Part Category',
@@ -446,7 +446,7 @@ function SmartCommandPanel({
         </div>
         <p>1. Attach one or more PO PDFs.</p>
         <p>2. Click PO Ingest.</p>
-        <p>3. I will ask for project, supplier, category, and table choices only when needed.</p>
+        <p>3. I will ask for project or projects, supplier, category, and table choices only when needed.</p>
         <p>4. Approved actions appear here, then the draft PO is created.</p>
         <p>5. Use AI PO Audit to select a project and check stored POs against attached PDFs.</p>
       </div>
@@ -457,6 +457,7 @@ function SmartCommandPanel({
 // ── Context-aware quick replies ───────────────────────────────────────────────
 function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | undefined; onReply: (t: string) => void }) {
   const [projects, setProjects] = useState<any[]>([])
+  const [selectedProjectIds, setSelectedProjectIds] = useState<number[]>([])
   const [sections, setSections] = useState<any[]>([])
 
   const fullContent = lastMessage?.content ?? ''
@@ -479,7 +480,7 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
     .flatMap(line => Array.from(line.matchAll(/\(id\s*:\s*(\d+)/gi)).map(match => Number(match[1])))
     .filter(Number.isFinite)
 
-  const rawWantsProject = /which project|select.*project|target project|what project|choose.*project|add.*to.*project|project.*should i add|project.*list|project should i run|which project should i run/i.test(questionScope)
+  const rawWantsProject = /which projects?|select.*projects?|target projects?|what projects?|choose.*projects?|add.*to.*projects?|project.*should i add|projects?.*list|project should i run|which projects? should i run|multiple projects?|more than one project/i.test(questionScope)
   const rawWantsCategory = /part.*(type|category)|which category|classify|which type|what type/i.test(questionScope)
   const rawWantsSection = /which section|which table|which subsection|target.*(section|table|subsection)|(section|table|subsection).*should|map.*to.*(section|table|subsection)/i.test(questionScope)
   const wantsMapAndDraftChoice =
@@ -529,6 +530,10 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
   }, [wantsProject, fullContent])
 
   useEffect(() => {
+    setSelectedProjectIds([])
+  }, [lastMessage?.id, wantsProject])
+
+  useEffect(() => {
     if (wantsSection) {
       const numMatch = fullMsg.match(/project[^\d]*(\d+)/)
       const projectId = numMatch ? parseInt(numMatch[1]) : null
@@ -546,6 +551,15 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
   // Show only ONE group — the first match in priority order
   type Group = { label: string; color: string; children: React.ReactNode }
   let activeGroup: Group | null = null
+
+  const selectedProjects = projects.filter(p => selectedProjectIds.includes(p.id))
+  const sendSelectedProjects = () => {
+    if (!selectedProjects.length) return
+    const summary = selectedProjects
+      .map(p => `${p.project_name} (${p.project_number}), id ${p.id}`)
+      .join('; ')
+    onReply(selectedProjects.length === 1 ? `Use project: ${summary}` : `Use projects: ${summary}`)
+  }
 
   if (wantsMapAndDraftChoice) {
     activeGroup = {
@@ -572,19 +586,44 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
     }
   } else if (wantsProject && projects.length > 0) {
     activeGroup = {
-      label: 'Select project',
+      label: 'Select project(s)',
       color: 'border-navy-200 bg-navy-50/40',
       children: (
-        <div className="flex flex-wrap gap-1.5">
-          {projects.map(p => (
+        <>
+          <div className="flex flex-wrap gap-1.5">
+            {projects.map(p => {
+              const selected = selectedProjectIds.includes(p.id)
+              return (
+                <QuickChip
+                  key={p.id}
+                  label={`${selected ? '✓ ' : ''}${p.project_name} (${p.project_number})`}
+                  color={
+                    selected
+                      ? 'bg-navy-600 border-navy-700 text-white hover:bg-navy-700'
+                      : 'bg-white border-navy-300 text-navy-800 hover:bg-navy-100'
+                  }
+                  onClick={() => setSelectedProjectIds(current =>
+                    current.includes(p.id)
+                      ? current.filter(id => id !== p.id)
+                      : [...current, p.id]
+                  )}
+                />
+              )
+            })}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
             <QuickChip
-              key={p.id}
-              label={`${p.project_name} (${p.project_number})`}
-              color="bg-white border-navy-300 text-navy-800 hover:bg-navy-100"
-              onClick={() => onReply(`Use project: ${p.project_name} (${p.project_number}), id ${p.id}`)}
+              label={selectedProjects.length <= 1 ? 'Use selected project' : `Use ${selectedProjects.length} selected projects`}
+              color="bg-emerald-500 border-emerald-600 text-white hover:bg-emerald-600"
+              onClick={sendSelectedProjects}
             />
-          ))}
-        </div>
+            <QuickChip
+              label="Clear selection"
+              color="bg-white border-slate-300 text-slate-700 hover:bg-slate-100"
+              onClick={() => setSelectedProjectIds([])}
+            />
+          </div>
+        </>
       ),
     }
   } else if (wantsCategory) {

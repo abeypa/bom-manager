@@ -15,7 +15,7 @@ const PREFIX_BY_PART_TYPE: Record<string, string> = {
 }
 
 export interface CreatePOIngestionBatchInput {
-  projectId: number
+  projectId?: number | null
   notes?: string
   documents: ParsedPODocument[]
 }
@@ -115,7 +115,6 @@ async function ensurePONotAlreadyInDB(documents: ParsedPODocument[]) {
 
 export const poIngestionApi = {
   createBatch: async ({ projectId, notes, documents }: CreatePOIngestionBatchInput) => {
-    if (!projectId) throw new Error('Select a project before saving an ingestion batch.')
     if (!documents.length) throw new Error('Add at least one PO document.')
     await ensurePONotAlreadyInDB(documents)
 
@@ -129,7 +128,7 @@ export const poIngestionApi = {
     const { data: batch, error: batchError } = await (supabase as any)
       .from('po_ingestion_batches')
       .insert([{
-        project_id: projectId,
+        project_id: projectId || null,
         notes: notes || null,
         summary,
         created_by: userData.user?.id || null,
@@ -210,7 +209,6 @@ export const poIngestionApi = {
   },
 
   createPartsAndProjectRows: async ({ projectId, documents }: CreatePOIngestionBatchInput) => {
-    if (!projectId) throw new Error('Select a project before adding parts.')
     if (!documents.length) throw new Error('Add at least one PO document.')
     await ensurePONotAlreadyInDB(documents)
 
@@ -225,6 +223,7 @@ export const poIngestionApi = {
     const supplierCache = new Map<string, any>()
     const partCache = new Map<string, any>()
     const projectPartCache = new Map<string, any>()
+    const subsectionProjectCache = new Map<number, number>()
     const loggedPriceSnapshotKeys = new Set<string>()
 
     for (const doc of documents as any[]) {
@@ -278,6 +277,20 @@ export const poIngestionApi = {
         if (!category) throw new Error(`Part category is missing for ${doc.file_name} line ${line.line_no}.`)
         if (!subsectionId) throw new Error(`Project table is missing for ${doc.file_name} line ${line.line_no}.`)
         if (!line.item_code) throw new Error(`Item code is missing for ${doc.file_name} line ${line.line_no}.`)
+
+        let targetProjectId = subsectionProjectCache.get(subsectionId)
+        if (!targetProjectId) {
+          const { data: subsection, error: subsectionError } = await (supabase as any)
+            .from('project_subsections')
+            .select('id, project_id')
+            .eq('id', subsectionId)
+            .single()
+          if (subsectionError || !subsection?.project_id) {
+            throw subsectionError || new Error(`Target project could not be resolved for subsection ${subsectionId}.`)
+          }
+          targetProjectId = subsection.project_id
+          subsectionProjectCache.set(subsectionId, targetProjectId)
+        }
 
         const prefix = PREFIX_BY_PART_TYPE[category]
         if (!prefix) throw new Error(`Unsupported part category ${category}.`)
@@ -435,7 +448,7 @@ export const poIngestionApi = {
           if (!isProjectPartDuplicateExemptMaster(part)) {
             projectWideExisting = await findExistingProjectPartInProject(
               supabase as any,
-              projectId,
+              targetProjectId,
               category,
               part.id,
             )
