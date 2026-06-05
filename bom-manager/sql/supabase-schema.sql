@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS projects (
   project_name                TEXT NOT NULL,
   project_number              TEXT NOT NULL UNIQUE,
   customer                    TEXT,
+  project_lead_id             UUID,
   description                 TEXT,
   status                      TEXT NOT NULL DEFAULT 'planning'
                                 CHECK (status IN ('planning','design','build','testing','completed','on_hold','cancelled')),
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_projects_number ON projects(project_number);
+CREATE INDEX IF NOT EXISTS idx_projects_project_lead_id ON projects(project_lead_id);
 
 -- --------------------------------------------------------
 -- project_sections

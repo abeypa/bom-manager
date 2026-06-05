@@ -4,7 +4,7 @@ import { projectsApi, Project } from '@/api/projects'
 import { reportsApi } from '@/api/reports'
 import {
   Search, Plus, Edit, Trash2, ChevronRight, LayoutGrid, List,
-  Filter, FolderKanban, ArrowUpDown, MoreVertical, ExternalLink
+  Filter, FolderKanban, ArrowUpDown, MoreVertical, ExternalLink, User
 } from 'lucide-react'
 import ProjectFormModal from '@/components/projects/ProjectFormModal'
 import { Link } from 'react-router-dom'
@@ -81,6 +81,9 @@ const Projects = () => {
     const done = PHASE_STEPS.filter(s => (p as any)[s.key] === 'completed').length
     return Math.round((done / PHASE_STEPS.length) * 100)
   }
+
+  const projectLeadLabel = (project: Project) =>
+    project.project_lead_name || project.project_lead_email || 'Unassigned'
 
   if (isLoading) {
     return (
@@ -178,11 +181,16 @@ const Projects = () => {
                   </div>
 
                   {project.customer && (
-                    <div className="mb-6 flex items-center gap-1.5 text-xs font-bold text-secondary">
+                    <div className="mb-3 flex items-center gap-1.5 text-xs font-bold text-secondary">
                       <ExternalLink size={12} className="text-tertiary" />
                       {project.customer}
                     </div>
                   )}
+
+                  <div className="mb-6 flex items-center gap-1.5 text-xs font-bold text-secondary">
+                    <User size={12} className="text-tertiary" />
+                    Lead: {projectLeadLabel(project)}
+                  </div>
 
                   {/* Live Project Value */}
                   {(() => {
@@ -267,6 +275,7 @@ const Projects = () => {
               <tr>
                 <th>Project</th>
                 <th>Reference</th>
+                <th>Project Lead</th>
                 <th>Status</th>
                 <th>BOM Value</th>
                 <th>PO Spend</th>
@@ -292,6 +301,11 @@ const Projects = () => {
                     <td>
                       <span className="font-mono text-xs font-bold text-tertiary">
                         {project.project_number}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="text-xs font-bold text-navy-800">
+                        {projectLeadLabel(project)}
                       </span>
                     </td>
                     <td><span className={`badge ${sm.cls}`}>{sm.label}</span></td>

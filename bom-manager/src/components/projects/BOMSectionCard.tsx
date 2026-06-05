@@ -13,6 +13,7 @@ interface BOMSectionCardProps {
   onEdit: () => void
   onDelete: () => void
   onAddSubsection: () => void
+  onCopySection: (section: any) => void
   onCopySubsection: (subsection: any) => void
   onAddPart: (subsection: any) => void
   onEditSubsection: (subsection: any) => void
@@ -33,6 +34,7 @@ const BOMSectionCard = ({
   onEdit,
   onDelete,
   onAddSubsection,
+  onCopySection,
   onCopySubsection,
   onAddPart,
   onEditSubsection,
@@ -82,7 +84,7 @@ const BOMSectionCard = ({
             <Edit2 className="h-4 w-4" />
           </button>
           <button
-            onClick={(e) => { e.stopPropagation(); onCopySubsection(section) }}
+            onClick={(e) => { e.stopPropagation(); onCopySection(section) }}
             className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10"
             title="Copy Section"
           >

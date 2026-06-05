@@ -437,6 +437,7 @@ interface BOMTreeViewProps {
   project: any
   projectId: number
   onEditSection: (section: any) => void
+  onCopySection: (section: any) => void
   onDeleteSection: (sectionId: number) => void
   onAddSubsection: (sectionId: number) => void
   onEditSubsection: (sub: any) => void
@@ -457,6 +458,7 @@ export default function BOMTreeView({
   project,
   projectId: _projectId,
   onEditSection,
+  onCopySection,
   onDeleteSection,
   onAddSubsection,
   onEditSubsection,
@@ -835,6 +837,7 @@ export default function BOMTreeView({
                     isExpanded={expandedNodes.has(`section-${section.id}`)}
                     onToggle={() => toggleNode(`section-${section.id}`)}
                     onEdit={() => onEditSection(section)}
+                    onCopy={() => onCopySection(section)}
                     onDelete={() => onDeleteSection(section.id)}
                     onAddChild={() => onAddSubsection(section.id)}
                     onImageClick={() => onImageClick(section, 'section')}

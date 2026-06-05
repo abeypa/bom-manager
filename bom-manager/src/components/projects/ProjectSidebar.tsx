@@ -7,6 +7,8 @@ interface ProjectSidebarProps {
 }
 
 const ProjectSidebar = ({ project, projectPOs, onCreatePO }: ProjectSidebarProps) => {
+  const projectLead = project.project_lead_name || project.project_lead_email || project.owner || 'Unassigned'
+
   return (
     <div className="w-80 space-y-6 shrink-0 sticky top-6">
       {/* Project Info Card */}
@@ -16,7 +18,7 @@ const ProjectSidebar = ({ project, projectPOs, onCreatePO }: ProjectSidebarProps
           <span className="label-caps !text-navy-500">Project Overview</span>
         </div>
         
-        <h2 className="text-xl font-black text-navy-900 mb-2 leading-tight">{project.name}</h2>
+        <h2 className="text-xl font-black text-navy-900 mb-2 leading-tight">{project.project_name || project.name}</h2>
         
         <div className="flex items-center gap-2 mb-8">
           <span className="text-[10px] font-black font-mono bg-navy-50 text-navy-600 px-2 py-0.5 rounded-lg border border-navy-100 uppercase tracking-tighter">
@@ -34,7 +36,10 @@ const ProjectSidebar = ({ project, projectPOs, onCreatePO }: ProjectSidebarProps
             </div>
             <div>
               <div className="label-caps mb-0.5">Project Lead</div>
-              <div className="text-sm font-black text-navy-900">{project.owner || 'Unassigned'}</div>
+              <div className="text-sm font-black text-navy-900">{projectLead}</div>
+              {project.project_lead_email && project.project_lead_name && (
+                <div className="mt-0.5 text-[10px] font-semibold text-slate-400">{project.project_lead_email}</div>
+              )}
             </div>
           </div>
           

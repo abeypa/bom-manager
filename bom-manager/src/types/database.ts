@@ -169,6 +169,7 @@ export interface Database {
           project_name: string
           project_number: string
           customer: string | null
+          project_lead_id: string | null
           description: string | null
           status: 'planning' | 'design' | 'build' | 'testing' | 'completed' | 'on_hold' | 'cancelled'
           start_date: string | null
@@ -188,6 +189,7 @@ export interface Database {
           project_name: string
           project_number: string
           customer?: string | null
+          project_lead_id?: string | null
           description?: string | null
           status?: 'planning' | 'design' | 'build' | 'testing' | 'completed' | 'on_hold' | 'cancelled'
           start_date?: string | null

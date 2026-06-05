@@ -11,6 +11,9 @@ export type Project = {
   project_name: string
   project_number: string
   customer: string | null
+  project_lead_id: string | null
+  project_lead_name?: string | null
+  project_lead_email?: string | null
   description: string | null
   status: string
   start_date: string | null
@@ -26,7 +29,13 @@ export type Project = {
   updated_date: string | null
 }
 
-export type ProjectInsert = Omit<Project, 'id' | 'created_date' | 'updated_date'>
+export type ProjectLeadProfile = {
+  id: string
+  full_name: string | null
+  email: string | null
+}
+
+export type ProjectInsert = Omit<Project, 'id' | 'created_date' | 'updated_date' | 'project_lead_name' | 'project_lead_email'>
 export type ProjectUpdate = Partial<ProjectInsert>
 
 // Section = top-level grouping (project_sections table, column: "name")
@@ -57,6 +66,8 @@ export type ProjectSubsection = {
   created_date: string
   updated_date: string | null
 }
+
+type CopyEntityType = 'section' | 'subsection'
 
 type PartCategory =
   | 'mechanical_manufacture'
@@ -112,7 +123,44 @@ export const projectsApi = {
       .select('*')
       .order('created_date', { ascending: false })
     if (error) throw error
-    return data
+    return projectsApi.withProjectLeadProfiles(data || [])
+  },
+
+  getProjectLeadProfiles: async (): Promise<ProjectLeadProfile[]> => {
+    const { data, error } = await (supabase as any)
+      .from('profiles')
+      .select('id, full_name, email')
+      .order('full_name', { ascending: true })
+
+    if (error) throw error
+    return data || []
+  },
+
+  withProjectLeadProfiles: async (projects: any[]) => {
+    const leadIds = Array.from(new Set(projects.map((project) => project.project_lead_id).filter(Boolean)))
+    if (leadIds.length === 0) return projects
+
+    const { data: profilesData, error } = await (supabase as any)
+      .from('profiles')
+      .select('id, full_name, email')
+      .in('id', leadIds)
+
+    if (error) {
+      console.warn('[projects] failed to load project lead profiles:', error)
+      return projects
+    }
+
+    const profilesMap = new Map<string, ProjectLeadProfile>()
+    for (const profile of profilesData || []) profilesMap.set(profile.id, profile)
+
+    return projects.map((project) => {
+      const lead = project.project_lead_id ? profilesMap.get(project.project_lead_id) : null
+      return {
+        ...project,
+        project_lead_name: lead?.full_name || null,
+        project_lead_email: lead?.email || null,
+      }
+    })
   },
 
   /**
@@ -262,8 +310,10 @@ export const projectsApi = {
       (sub: any) => !sub.section_id || !sectionIds.has(sub.section_id)
     )
 
+    const [projectWithLead] = await projectsApi.withProjectLeadProfiles([project])
+
     return {
-      ...project,
+      ...projectWithLead,
       sections: sectionsWithSubsections,
       orphaned_subsections: orphanedSubsections,
     }
@@ -406,30 +456,176 @@ export const projectsApi = {
 
   // ─── COPY SUBSECTION ───────────────────────────────────────────────────────
 
+  getNextSectionOrderIndex: async (projectId: number) => {
+    const { data, error } = await (supabase as any)
+      .from('project_sections')
+      .select('order_index')
+      .eq('project_id', projectId)
+      .order('order_index', { ascending: false })
+      .limit(1)
+
+    if (error) throw error
+    return ((data?.[0]?.order_index as number | null | undefined) ?? -1) + 1
+  },
+
+  getNextSubsectionSortOrder: async (sectionId: number) => {
+    const { data, error } = await (supabase as any)
+      .from('project_subsections')
+      .select('sort_order')
+      .eq('section_id', sectionId)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+
+    if (error) throw error
+    return ((data?.[0]?.sort_order as number | null | undefined) ?? -1) + 1
+  },
+
+  getUniqueSectionName: async (projectId: number, baseName: string) => {
+    const { data, error } = await (supabase as any)
+      .from('project_sections')
+      .select('name')
+      .eq('project_id', projectId)
+
+    if (error) throw error
+
+    const existing = new Set((data || []).map((row: any) => String(row.name || '').trim().toLowerCase()))
+    const trimmed = baseName.trim()
+    if (!existing.has(trimmed.toLowerCase())) return trimmed
+
+    let suffix = 1
+    let candidate = `${trimmed} (Copy)`
+    while (existing.has(candidate.toLowerCase())) {
+      suffix += 1
+      candidate = `${trimmed} (Copy ${suffix})`
+    }
+    return candidate
+  },
+
+  getUniqueSubsectionName: async (sectionId: number, baseName: string) => {
+    const { data, error } = await (supabase as any)
+      .from('project_subsections')
+      .select('section_name')
+      .eq('section_id', sectionId)
+
+    if (error) throw error
+
+    const existing = new Set((data || []).map((row: any) => String(row.section_name || '').trim().toLowerCase()))
+    const trimmed = baseName.trim()
+    if (!existing.has(trimmed.toLowerCase())) return trimmed
+
+    let suffix = 1
+    let candidate = `${trimmed} (Copy)`
+    while (existing.has(candidate.toLowerCase())) {
+      suffix += 1
+      candidate = `${trimmed} (Copy ${suffix})`
+    }
+    return candidate
+  },
+
+  copyProjectPartsToSubsection: async (sourceSubsectionId: number, targetSubsectionId: number) => {
+    const { data: existingParts, error } = await (supabase as any)
+      .from('project_parts')
+      .select('*')
+      .eq('project_section_id', sourceSubsectionId)
+      .order('sort_order', { ascending: true })
+
+    if (error) throw error
+
+    const rawParts = existingParts || []
+    if (rawParts.length === 0) return
+
+    const partsToCopy = rawParts.map((p: any, index: number) => ({
+      project_section_id: targetSubsectionId,
+      part_type: p.part_type,
+      part_id: p.part_id,
+      quantity: p.quantity,
+      unit_price: p.unit_price,
+      currency: p.currency,
+      discount_percent: p.discount_percent || 0,
+      reference_designator: p.reference_designator,
+      notes: p.notes,
+      sort_order: p.sort_order ?? index,
+    }))
+
+    const { error: partsErr } = await (supabase as any).from('project_parts').insert(partsToCopy)
+    if (partsErr) throw partsErr
+  },
+
+  ensureTargetSectionForSubsectionCopy: async (
+    sourceSubsection: any,
+    targetProjectId: number,
+    targetSectionId?: number,
+  ) => {
+    if (targetSectionId) {
+      const { data: targetSection, error } = await (supabase as any)
+        .from('project_sections')
+        .select('*')
+        .eq('id', targetSectionId)
+        .eq('project_id', targetProjectId)
+        .single()
+
+      if (error || !targetSection) {
+        throw new Error('Target section not found in the selected project.')
+      }
+      return targetSection
+    }
+
+    const sourceSectionName = sourceSubsection.parent_section?.name?.trim()
+    if (!sourceSectionName) {
+      throw new Error('Source subsection is not attached to a section, so a destination section is required.')
+    }
+
+    const { data: existingSection, error } = await (supabase as any)
+      .from('project_sections')
+      .select('*')
+      .eq('project_id', targetProjectId)
+      .ilike('name', sourceSectionName)
+      .maybeSingle()
+
+    if (error) throw error
+    if (existingSection) return existingSection
+
+    const uniqueName = await projectsApi.getUniqueSectionName(targetProjectId, sourceSectionName)
+    const orderIndex = await projectsApi.getNextSectionOrderIndex(targetProjectId)
+    const { data: createdSection, error: createErr } = await (supabase as any)
+      .from('project_sections')
+      .insert([{
+        project_id: targetProjectId,
+        name: uniqueName,
+        order_index: orderIndex,
+      }])
+      .select()
+      .single()
+
+    if (createErr) throw createErr
+    return createdSection
+  },
+
   copySubsection: async (subsectionId: number, targetProjectId: number, targetSectionId?: number) => {
     const { data: sub, error: subErr } = await (supabase as any)
       .from('project_subsections')
-      .select('*')
+      .select('*, parent_section:project_sections!project_subsections_section_id_fkey(id, project_id, name)')
       .eq('id', subsectionId)
       .single()
     if (subErr) throw subErr
 
-    const { data: existingParts } = await (supabase as any)
-      .from('project_parts')
-      .select('*')
-      .eq('project_section_id', subsectionId)
+    const targetSection = await projectsApi.ensureTargetSectionForSubsectionCopy(sub, targetProjectId, targetSectionId)
+    const uniqueName = await projectsApi.getUniqueSubsectionName(targetSection.id, sub.section_name)
+    const sortOrder = await projectsApi.getNextSubsectionSortOrder(targetSection.id)
 
     const { data: newSub, error: insErr } = await (supabase as any)
       .from('project_subsections')
       .insert([{
         project_id: targetProjectId,
-        section_id: targetSectionId ?? sub.section_id,
-        section_name: `${sub.section_name} (Copy)`,
+        section_id: targetSection.id,
+        section_name: uniqueName,
         description: sub.description,
-        status: 'planning',
+        status: sub.status || 'planning',
         estimated_cost: sub.estimated_cost,
-        actual_cost: 0,
-        sort_order: (sub.sort_order || 0) + 1,
+        actual_cost: sub.actual_cost,
+        start_date: sub.start_date,
+        target_completion_date: sub.target_completion_date,
+        sort_order: sortOrder,
         image_path: sub.image_path,
         drawing_path: sub.drawing_path,
         datasheet_path: sub.datasheet_path,
@@ -438,28 +634,81 @@ export const projectsApi = {
       .single()
     if (insErr) throw insErr
 
-    const rawParts = existingParts || []
-    if (rawParts.length > 0) {
-      const partsToCopy = rawParts.map((p: any) => ({
-        project_section_id: newSub.id,
-        part_type: p.part_type,
-        part_id: p.part_id,
-        quantity: p.quantity,
-        unit_price: p.unit_price,
-        currency: p.currency,
-        reference_designator: p.reference_designator,
-        notes: p.notes,
-      }))
-      const { error: partsErr } = await (supabase as any).from('project_parts').insert(partsToCopy)
-      if (partsErr) throw partsErr
-    }
+    await projectsApi.copyProjectPartsToSubsection(subsectionId, newSub.id)
 
-    return newSub
+    return {
+      entity_type: 'subsection' as CopyEntityType,
+      section: targetSection,
+      subsection: newSub,
+    }
   },
 
-  // Backward compat alias (used by ProjectSectionCopyModal)
+  copySectionToProject: async (sectionId: number, targetProjectId: number) => {
+    const { data: sourceSection, error: sectionErr } = await (supabase as any)
+      .from('project_sections')
+      .select('*')
+      .eq('id', sectionId)
+      .single()
+
+    if (sectionErr || !sourceSection) throw sectionErr || new Error('Section not found')
+
+    const { data: sourceSubsections, error: subsectionErr } = await (supabase as any)
+      .from('project_subsections')
+      .select('*')
+      .eq('section_id', sectionId)
+      .order('sort_order', { ascending: true })
+
+    if (subsectionErr) throw subsectionErr
+
+    const uniqueSectionName = await projectsApi.getUniqueSectionName(targetProjectId, sourceSection.name)
+    const orderIndex = await projectsApi.getNextSectionOrderIndex(targetProjectId)
+    const { data: newSection, error: createErr } = await (supabase as any)
+      .from('project_sections')
+      .insert([{
+        project_id: targetProjectId,
+        name: uniqueSectionName,
+        order_index: orderIndex,
+      }])
+      .select()
+      .single()
+
+    if (createErr) throw createErr
+
+    for (const subsection of sourceSubsections || []) {
+      const uniqueSubName = await projectsApi.getUniqueSubsectionName(newSection.id, subsection.section_name)
+      const { data: newSub, error: newSubErr } = await (supabase as any)
+        .from('project_subsections')
+        .insert([{
+          project_id: targetProjectId,
+          section_id: newSection.id,
+          section_name: uniqueSubName,
+          description: subsection.description,
+          status: subsection.status || 'planning',
+          estimated_cost: subsection.estimated_cost,
+          actual_cost: subsection.actual_cost,
+          start_date: subsection.start_date,
+          target_completion_date: subsection.target_completion_date,
+          sort_order: subsection.sort_order ?? 0,
+          image_path: subsection.image_path,
+          drawing_path: subsection.drawing_path,
+          datasheet_path: subsection.datasheet_path,
+        }])
+        .select()
+        .single()
+
+      if (newSubErr) throw newSubErr
+      await projectsApi.copyProjectPartsToSubsection(subsection.id, newSub.id)
+    }
+
+    return {
+      entity_type: 'section' as CopyEntityType,
+      section: newSection,
+    }
+  },
+
+  // Backward compat alias
   copySection: async (sectionId: number, targetProjectId: number) => {
-    return projectsApi.copySubsection(sectionId, targetProjectId)
+    return projectsApi.copySectionToProject(sectionId, targetProjectId)
   },
 
   // ─── PARTS ─────────────────────────────────────────────────────────────────

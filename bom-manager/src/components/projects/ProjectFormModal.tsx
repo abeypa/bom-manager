@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { X, Save, Clock, Target, CreditCard, Layers } from 'lucide-react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { X, Save } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { projectsApi, Project, ProjectInsert, ProjectUpdate } from '@/api/projects'
 
@@ -16,6 +16,7 @@ const ProjectFormModal = ({ isOpen, onClose, projectToEdit }: ProjectFormModalPr
     project_name: '',
     project_number: '',
     customer: '',
+    project_lead_id: null,
     description: '',
     status: 'planning',
     start_date: null,
@@ -36,6 +37,7 @@ const ProjectFormModal = ({ isOpen, onClose, projectToEdit }: ProjectFormModalPr
         project_name: '',
         project_number: '',
         customer: '',
+        project_lead_id: null,
         description: '',
         status: 'planning',
         start_date: null,
@@ -51,6 +53,12 @@ const ProjectFormModal = ({ isOpen, onClose, projectToEdit }: ProjectFormModalPr
   }, [projectToEdit, isOpen])
 
   const navigate = useNavigate();
+
+  const { data: leadProfiles = [] } = useQuery({
+    queryKey: ['project-lead-profiles'],
+    queryFn: projectsApi.getProjectLeadProfiles,
+    enabled: isOpen,
+  })
 
   const createMutation = useMutation({
     mutationFn: (newProject: ProjectInsert) => projectsApi.createProject(newProject),
@@ -78,10 +86,28 @@ const ProjectFormModal = ({ isOpen, onClose, projectToEdit }: ProjectFormModalPr
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    const payload: ProjectUpdate = {
+      project_name: formData.project_name || '',
+      project_number: formData.project_number || '',
+      customer: formData.customer || null,
+      project_lead_id: formData.project_lead_id || null,
+      description: formData.description || null,
+      status: formData.status || 'planning',
+      start_date: formData.start_date || null,
+      target_completion_date: formData.target_completion_date || null,
+      actual_completion_date: formData.actual_completion_date || null,
+      mechanical_design_status: formData.mechanical_design_status || 'not_started',
+      ee_design_status: formData.ee_design_status || 'not_started',
+      pneumatic_design_status: formData.pneumatic_design_status || 'not_started',
+      po_release_status: formData.po_release_status || 'not_started',
+      part_arrival_status: formData.part_arrival_status || 'not_started',
+      machine_build_status: formData.machine_build_status || 'not_started',
+    }
+
     if (projectToEdit) {
-      updateMutation.mutate({ id: projectToEdit.id, project: formData as ProjectUpdate })
+      updateMutation.mutate({ id: projectToEdit.id, project: payload })
     } else {
-      createMutation.mutate(formData as ProjectInsert)
+      createMutation.mutate(payload as ProjectInsert)
     }
   }
 
@@ -89,7 +115,7 @@ const ProjectFormModal = ({ isOpen, onClose, projectToEdit }: ProjectFormModalPr
     const { name, value } = e.target
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: name === 'project_lead_id' ? value || null : value
     }))
   }
 
@@ -144,6 +170,23 @@ const ProjectFormModal = ({ isOpen, onClose, projectToEdit }: ProjectFormModalPr
                 onChange={handleChange}
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Project Lead</label>
+              <select
+                name="project_lead_id"
+                value={formData.project_lead_id || ''}
+                onChange={handleChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+              >
+                <option value="">Unassigned</option>
+                {leadProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.full_name || profile.email || profile.id}
+                  </option>
+                ))}
+              </select>
             </div>
             
             <div>

@@ -119,8 +119,9 @@ const ProjectDetails = () => {
 
   const [copyModal, setCopyModal] = useState<{
     open: boolean
-    subsectionId: number
-    subsectionName: string
+    entityId: number
+    entityName: string
+    entityType: 'section' | 'subsection'
   } | null>(null)
 
   const [selectedPartIds, setSelectedPartIds] = useState<Set<number>>(new Set())
@@ -301,9 +302,12 @@ const ProjectDetails = () => {
   }
 
   const handleEditSection = (section: any) => setSectionModal({ open: true, editing: section })
+  const handleCopySection = (section: any) =>
+    setCopyModal({ open: true, entityId: section.id, entityName: section.name, entityType: 'section' })
   const handleAddSubsection = (sectionId: number) => setSubsectionModal({ open: true, sectionId, sectionName: '', editing: null })
   const handleEditSubsection = (sub: any) => setSubsectionModal({ open: true, sectionId: sub.section_id, sectionName: sub.section_name, editing: sub })
-  const handleCopySubsection = (sub: any) => setCopyModal({ open: true, subsectionId: sub.id, subsectionName: sub.section_name })
+  const handleCopySubsection = (sub: any) =>
+    setCopyModal({ open: true, entityId: sub.id, entityName: sub.section_name, entityType: 'subsection' })
   const handleAddPart = (sub: any) => setAddPartModal({ open: true, subsectionId: sub.id, subsectionName: sub.section_name })
   const handleEditPart = (part: any) => setEditPartModal({ open: true, part })
 
@@ -715,6 +719,7 @@ const ProjectDetails = () => {
                           project={project}
                           projectId={projectId}
                           onEditSection={handleEditSection}
+                          onCopySection={handleCopySection}
                           onDeleteSection={handleDeleteSection}
                           onAddSubsection={handleAddSubsection}
                           onEditSubsection={handleEditSubsection}
@@ -924,8 +929,9 @@ const ProjectDetails = () => {
           <ProjectSectionCopyModal
             isOpen={copyModal.open}
             onClose={() => setCopyModal(null)}
-            sectionId={copyModal.subsectionId}
-            sectionName={copyModal.subsectionName}
+            entityId={copyModal.entityId}
+            entityName={copyModal.entityName}
+            entityType={copyModal.entityType}
             currentProjectId={projectId}
           />
         )}
