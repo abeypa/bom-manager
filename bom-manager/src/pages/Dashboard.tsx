@@ -119,15 +119,15 @@ export default function Dashboard() {
       title: isAdmin ? 'Admin Queue' : 'My Open Work',
       value: isAdmin ? workDashboard?.admin_open_work_items.length ?? 0 : workDashboard?.counts.my_open_items ?? 0,
       detail: isAdmin
-        ? 'All pending work across the team'
+        ? `${workDashboard?.counts.overdue_items ?? 0} overdue items`
         : `${workDashboard?.counts.waiting_on_me ?? 0} dependency alerts`,
       icon: isAdmin ? Shield : UserCircle2,
       cls: 'bg-amber-50 text-amber-700 border-amber-100',
     },
     {
-      title: 'Open Discussions',
-      value: workDashboard?.counts.open_discussions ?? 0,
-      detail: `${workDashboard?.counts.closed_discussions ?? 0} archived`,
+      title: 'Tracking Escalations',
+      value: (workDashboard?.counts.blocked_items ?? 0) + (workDashboard?.counts.overdue_supplier_assignments ?? 0),
+      detail: `${workDashboard?.counts.blocked_items ?? 0} blocked • ${workDashboard?.counts.overdue_supplier_assignments ?? 0} supplier overdue`,
       icon: Bell,
       cls: 'bg-violet-50 text-violet-700 border-violet-100',
     },
@@ -187,9 +187,9 @@ export default function Dashboard() {
               <div className="mt-1 text-xs font-semibold text-slate-200">Tags and assignments</div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-white backdrop-blur">
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-100">Discussions</div>
-              <div className="mt-2 text-3xl font-black">{workDashboard?.counts.open_discussions ?? 0}</div>
-              <div className="mt-1 text-xs font-semibold text-slate-200">Open team threads</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-100">Overdue</div>
+              <div className="mt-2 text-3xl font-black">{workDashboard?.counts.overdue_items ?? 0}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-200">Execution items past due</div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-white backdrop-blur">
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-100">At Risk</div>
@@ -310,9 +310,17 @@ export default function Dashboard() {
                         <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
                           notification.kind === 'mention'
                             ? 'border-red-200 bg-red-50 text-red-700'
-                            : 'border-sky-200 bg-sky-50 text-sky-700'
+                            : notification.kind === 'overdue' || notification.kind === 'supplier_followup'
+                              ? 'border-amber-200 bg-amber-50 text-amber-700'
+                              : 'border-sky-200 bg-sky-50 text-sky-700'
                         }`}>
-                          {notification.kind === 'mention' ? 'Dependency Tag' : 'Assigned'}
+                          {notification.kind === 'mention'
+                            ? 'Dependency Tag'
+                            : notification.kind === 'overdue'
+                              ? 'Overdue'
+                              : notification.kind === 'supplier_followup'
+                                ? 'Supplier Follow-up'
+                                : 'Assigned'}
                         </span>
                         <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
                           {formatShortDate(notification.created_at)}
@@ -374,6 +382,56 @@ export default function Dashboard() {
                   Team workload will appear after work items are assigned to users.
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black text-navy-900">Escalation Queue</h2>
+              <p className="mt-1 text-sm font-medium text-slate-500">Overdue items and blocked work that should be cleared first.</p>
+            </div>
+            <Link to="/project-tracking" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-primary-600 hover:text-primary-700">
+              Tracking
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-700">Overdue Items</div>
+              <div className="mt-2 text-3xl font-black text-amber-900">{workDashboard?.counts.overdue_items ?? 0}</div>
+            </div>
+            <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-red-700">Blocked Items</div>
+              <div className="mt-2 text-3xl font-black text-red-900">{workDashboard?.counts.blocked_items ?? 0}</div>
+            </div>
+            <div className="rounded-2xl border border-violet-100 bg-violet-50 p-4">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-700">Supplier Delays</div>
+              <div className="mt-2 text-3xl font-black text-violet-900">{workDashboard?.counts.overdue_supplier_assignments ?? 0}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4">
+            <h2 className="text-xl font-black text-navy-900">Execution Signals</h2>
+            <p className="mt-1 text-sm font-medium text-slate-500">Cross-check project risk against open execution debt.</p>
+          </div>
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Projects At Risk</div>
+              <div className="mt-2 text-3xl font-black text-navy-900">{smartDashboard?.kpis.projects_at_risk ?? 0}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Open Discussions</div>
+              <div className="mt-2 text-3xl font-black text-navy-900">{workDashboard?.counts.open_discussions ?? 0}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Notifications</div>
+              <div className="mt-2 text-3xl font-black text-navy-900">{workDashboard?.notifications.length ?? 0}</div>
             </div>
           </div>
         </div>

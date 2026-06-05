@@ -53,6 +53,18 @@ export type ProjectTrackingDashboard = {
   recent_updates: TrackingRecentUpdate[]
 }
 
+export type TrackingWorkItemFilter = {
+  projectId?: number
+  assignedTo?: string
+  overdueOnly?: boolean
+}
+
+export type TrackingAssignmentFilter = {
+  projectId?: number
+  assignedUserId?: string
+  overdueOnly?: boolean
+}
+
 export type TrackingProjectLookup = {
   id: number
   project_name: string
@@ -200,6 +212,43 @@ const enrichUpdates = async (updates: WorkItemUpdateRow[]): Promise<TrackingRece
 }
 
 export const projectTrackingApi = {
+  getWorkItems: async (filters?: TrackingWorkItemFilter): Promise<TrackingWorkItem[]> => {
+    let query = supabase
+      .from('pending_parts')
+      .select('*')
+      .eq('item_type', 'work_item')
+      .order('updated_at', { ascending: false, nullsFirst: false })
+
+    if (filters?.projectId) query = query.eq('project_id', filters.projectId)
+    if (filters?.assignedTo) query = query.eq('assigned_to', filters.assignedTo)
+    if (filters?.overdueOnly) {
+      const today = new Date().toISOString().slice(0, 10)
+      query = query.lt('due_date', today).neq('status', 'Approved')
+    }
+
+    const { data, error } = await query
+    if (error) throw error
+    return enrichWorkItems((data || []) as PendingPartRow[])
+  },
+
+  getSupplierAssignments: async (filters?: TrackingAssignmentFilter): Promise<TrackingSupplierAssignment[]> => {
+    let query = supabase
+      .from('supplier_assignments')
+      .select('*')
+      .order('target_date', { ascending: true, nullsFirst: false })
+
+    if (filters?.projectId) query = query.eq('project_id', filters.projectId)
+    if (filters?.assignedUserId) query = query.eq('assigned_user_id', filters.assignedUserId)
+    if (filters?.overdueOnly) {
+      const today = new Date().toISOString().slice(0, 10)
+      query = query.lt('target_date', today).neq('current_status', 'closed')
+    }
+
+    const { data, error } = await query
+    if (error) throw error
+    return enrichAssignments((data || []) as SupplierAssignmentRow[])
+  },
+
   getLookupBundle: async (): Promise<TrackingLookupBundle> => {
     const [projects, suppliers, profiles] = await Promise.all([
       supabase.from('projects').select('id, project_name, project_number').order('project_name', { ascending: true }),

@@ -7,7 +7,7 @@ import PendingPartFormModal from './PendingPartFormModal.tsx';
 
 export default function PendingPartsTab({ projectId }: { projectId: number }) {
   const [modalOpen, setModalOpen] = useState(false);
-  const [filter, setFilter] = useState<'All' | 'Pending' | 'Approved' | 'Rejected'>('All');
+  const [filter, setFilter] = useState<'All' | 'Pending' | 'Approved' | 'Rejected' | 'Overdue' | 'Blocked'>('All');
   const [search, setSearch] = useState('');
 
   const { data: parts, isLoading } = useQuery<PendingPart[]>({
@@ -16,11 +16,18 @@ export default function PendingPartsTab({ projectId }: { projectId: number }) {
   });
 
   const filteredParts = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10)
     return (parts || []).filter(part => {
-      const matchesFilter = filter === 'All' || part.status === filter;
+      const matchesFilter =
+        filter === 'All' ||
+        part.status === filter ||
+        (filter === 'Overdue' && !!part.due_date && part.due_date < today && part.status !== 'Approved') ||
+        (filter === 'Blocked' && (part.tracking_status === 'blocked' || !!part.blocker || part.risk_level === 'critical'))
       const matchesSearch = 
         part.name.toLowerCase().includes(search.toLowerCase()) || 
-        (part.description || '').toLowerCase().includes(search.toLowerCase());
+        (part.description || '').toLowerCase().includes(search.toLowerCase()) ||
+        (part.supplier_name || '').toLowerCase().includes(search.toLowerCase()) ||
+        (part.assignee_name || '').toLowerCase().includes(search.toLowerCase());
       return matchesFilter && matchesSearch;
     });
   }, [parts, filter, search]);
@@ -29,7 +36,7 @@ export default function PendingPartsTab({ projectId }: { projectId: number }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between gap-4 bg-white p-4 rounded-3xl border border-slate-200 shadow-sm animate-in slide-in-from-top-4">
         <div className="flex gap-2 bg-slate-50 p-1.5 rounded-2xl overflow-x-auto no-scrollbar">
-          {['All', 'Pending', 'Approved', 'Rejected'].map(f => (
+          {['All', 'Pending', 'Approved', 'Rejected', 'Overdue', 'Blocked'].map(f => (
             <button
               key={f}
               onClick={() => setFilter(f as any)}

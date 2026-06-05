@@ -75,6 +75,12 @@ export interface WorkDashboardItem {
   updated_at: string | null
   created_at: string
   comment_count?: number
+  tracking_status?: string | null
+  risk_level?: 'low' | 'normal' | 'high' | 'critical'
+  due_date?: string | null
+  progress_percent?: number
+  blocker?: string | null
+  supplier_name?: string | null
 }
 
 export interface WorkDashboardProject {
@@ -94,7 +100,7 @@ export interface WorkDashboardProject {
 
 export interface WorkDashboardNotification {
   id: string
-  kind: 'assignment' | 'mention'
+  kind: 'assignment' | 'mention' | 'overdue' | 'supplier_followup'
   project_id: number
   work_item_id: number
   project_name: string
@@ -124,6 +130,9 @@ export interface WorkDashboardData {
     waiting_on_me: number
     open_discussions: number
     closed_discussions: number
+    overdue_items: number
+    blocked_items: number
+    overdue_supplier_assignments: number
   }
   my_work_items: WorkDashboardItem[]
   admin_open_work_items: WorkDashboardItem[]
@@ -278,6 +287,7 @@ export const dashboardApi = {
       .select(`
         id,
         project_id,
+        supplier_id,
         name,
         description,
         status,
@@ -287,7 +297,12 @@ export const dashboardApi = {
         created_by,
         assigned_to,
         created_at,
-        updated_at
+        updated_at,
+        tracking_status,
+        risk_level,
+        due_date,
+        progress_percent,
+        blocker
       `)
       .order('updated_at', { ascending: false, nullsFirst: false })
 
@@ -295,11 +310,12 @@ export const dashboardApi = {
 
     const parts = pendingParts || []
     const projectIds = Array.from(new Set(parts.map((part: any) => part.project_id).filter(Boolean)))
+    const supplierIds = Array.from(new Set(parts.map((part: any) => part.supplier_id).filter(Boolean)))
     const userIds = Array.from(new Set(
       parts.flatMap((part: any) => [part.created_by, part.assigned_to]).filter(Boolean)
     ))
 
-    const [{ data: projectsData }, { data: profilesData }] = await Promise.all([
+    const [{ data: projectsData }, { data: profilesData }, { data: suppliersData }] = await Promise.all([
       projectIds.length
         ? (supabase as any)
             .from('projects')
@@ -311,6 +327,12 @@ export const dashboardApi = {
             .from('profiles')
             .select('id, full_name, email')
             .in('id', userIds)
+        : Promise.resolve({ data: [] }),
+      supplierIds.length
+        ? (supabase as any)
+            .from('suppliers')
+            .select('id, name')
+            .in('id', supplierIds)
         : Promise.resolve({ data: [] }),
     ])
 
@@ -326,6 +348,10 @@ export const dashboardApi = {
         project_number: project.project_number,
         status: project.status,
       })
+    }
+    const suppliersMap = new Map<number, { name: string }>()
+    for (const supplier of suppliersData || []) {
+      suppliersMap.set(supplier.id, { name: supplier.name })
     }
 
     const items: WorkDashboardItem[] = parts.map((part: any) => {
@@ -352,8 +378,24 @@ export const dashboardApi = {
         requester_email: requester?.email || null,
         updated_at: part.updated_at,
         created_at: part.created_at,
+        tracking_status: part.tracking_status || null,
+        risk_level: part.risk_level || 'normal',
+        due_date: part.due_date || null,
+        progress_percent: part.progress_percent ?? 0,
+        blocker: part.blocker || null,
+        supplier_name: part.supplier_id ? suppliersMap.get(part.supplier_id)?.name || null : null,
       }
     })
+
+    const today = new Date().toISOString().slice(0, 10)
+    const { data: supplierAssignmentsData } = await (supabase as any)
+      .from('supplier_assignments')
+      .select('id, project_id, work_item_id, supplier_id, assigned_user_id, current_status, target_date, remarks, last_updated_at')
+      .order('target_date', { ascending: true, nullsFirst: false })
+
+    const overdueSupplierAssignments = (supplierAssignmentsData || []).filter((assignment: any) =>
+      assignment.target_date && assignment.target_date < today && assignment.current_status !== 'closed'
+    )
 
     const { data: commentsData } = await (supabase as any)
       .from('pending_part_comments')
@@ -401,6 +443,9 @@ export const dashboardApi = {
       })
       .filter(Boolean) as WorkDashboardNotification[]
 
+    const workItems = items.filter((item) => item.item_type !== 'discussion')
+    const discussions = items.filter((item) => item.item_type === 'discussion')
+
     const assignmentNotifications: WorkDashboardNotification[] = items
       .filter((item) => item.assigned_to === userId && item.status === 'Pending')
       .map((item) => ({
@@ -418,8 +463,44 @@ export const dashboardApi = {
         priority: item.priority,
       }))
 
-    const workItems = items.filter((item) => item.item_type !== 'discussion')
-    const discussions = items.filter((item) => item.item_type === 'discussion')
+    const overdueNotifications: WorkDashboardNotification[] = workItems
+      .filter((item) => item.status === 'Pending' && item.due_date && item.due_date < today)
+      .filter((item) => isAdmin || item.assigned_to === userId)
+      .map((item) => ({
+        id: `overdue-${item.id}`,
+        kind: 'overdue' as const,
+        project_id: item.project_id ?? 0,
+        work_item_id: item.id,
+        project_name: item.project_name,
+        project_number: item.project_number,
+        work_item_name: item.name,
+        created_at: item.updated_at || item.created_at,
+        message: item.blocker || `This work item is overdue since ${item.due_date}.`,
+        from_name: item.assignee_name,
+        from_email: item.assignee_email,
+        priority: item.priority,
+      }))
+
+    const supplierFollowupNotifications: WorkDashboardNotification[] = overdueSupplierAssignments
+      .filter((assignment: any) => isAdmin || assignment.assigned_user_id === userId)
+      .map((assignment: any) => {
+        const project = projectsMap.get(assignment.project_id)
+        const supplier = assignment.supplier_id ? suppliersMap.get(assignment.supplier_id) : null
+        return {
+          id: `supplier-followup-${assignment.id}`,
+          kind: 'supplier_followup' as const,
+          project_id: assignment.project_id ?? 0,
+          work_item_id: assignment.work_item_id ?? 0,
+          project_name: project?.project_name || `Project #${assignment.project_id}`,
+          project_number: project?.project_number || `P-${assignment.project_id}`,
+          work_item_name: supplier?.name ? `Supplier follow-up: ${supplier.name}` : 'Supplier follow-up overdue',
+          created_at: assignment.last_updated_at || new Date().toISOString(),
+          message: assignment.remarks || `Supplier follow-up is overdue since ${assignment.target_date}.`,
+          from_name: null,
+          from_email: null,
+          priority: 'High' as const,
+        }
+      })
 
     const activeProjects: WorkDashboardProject[] = Array.from(
       workItems.filter((item) => item.project_id != null).reduce((map, item) => {
@@ -507,12 +588,14 @@ export const dashboardApi = {
       .filter((item) => item.discussion_status === 'closed')
       .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)))
 
-    const notifications = [...mentionNotifications, ...assignmentNotifications]
+    const notifications = [...mentionNotifications, ...assignmentNotifications, ...overdueNotifications, ...supplierFollowupNotifications]
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .slice(0, 10)
 
     const completedItems = workItems.filter((item) => item.status === 'Approved').length
     const openItems = workItems.filter((item) => item.status === 'Pending').length
+    const overdueItems = workItems.filter((item) => item.status === 'Pending' && item.due_date && item.due_date < today).length
+    const blockedItems = workItems.filter((item) => item.status !== 'Approved' && ((item.tracking_status || '') === 'blocked' || !!item.blocker || item.risk_level === 'critical')).length
 
     return {
       counts: {
@@ -523,6 +606,9 @@ export const dashboardApi = {
         waiting_on_me: mentionNotifications.length,
         open_discussions: openDiscussions.length,
         closed_discussions: closedDiscussions.length,
+        overdue_items: overdueItems,
+        blocked_items: blockedItems,
+        overdue_supplier_assignments: overdueSupplierAssignments.length,
       },
       my_work_items: myWorkItems,
       admin_open_work_items: isAdmin ? adminOpenWorkItems : [],
