@@ -31,6 +31,158 @@ export interface Database {
       }
 
       // ── TOP-LEVEL SECTIONS (formerly project_main_sections) ──
+      pending_parts: {
+        Row: {
+          id: number
+          project_id: number | null
+          section_id: number | null
+          subsection_id: number | null
+          supplier_id: number | null
+          name: string
+          description: string | null
+          category: string | null
+          status: string
+          priority: 'Urgent' | 'High' | 'Medium' | 'Low'
+          created_by: string | null
+          assigned_to: string | null
+          images: Json
+          links: Json
+          rejection_reason: string | null
+          created_at: string
+          updated_at: string | null
+          approved_at: string | null
+          approved_by: string | null
+          item_type: 'work_item' | 'discussion'
+          discussion_status: 'open' | 'closed'
+          closed_at: string | null
+          closed_by: string | null
+          due_date: string | null
+          target_date: string | null
+          next_action: string | null
+          blocker: string | null
+          progress_percent: number
+          tracking_status: string | null
+          risk_level: 'low' | 'normal' | 'high' | 'critical'
+        }
+        Insert: {
+          id?: number
+          project_id?: number | null
+          section_id?: number | null
+          subsection_id?: number | null
+          supplier_id?: number | null
+          name: string
+          description?: string | null
+          category?: string | null
+          status?: string
+          priority?: 'Urgent' | 'High' | 'Medium' | 'Low'
+          created_by?: string | null
+          assigned_to?: string | null
+          images?: Json
+          links?: Json
+          rejection_reason?: string | null
+          created_at?: string
+          updated_at?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          item_type?: 'work_item' | 'discussion'
+          discussion_status?: 'open' | 'closed'
+          closed_at?: string | null
+          closed_by?: string | null
+          due_date?: string | null
+          target_date?: string | null
+          next_action?: string | null
+          blocker?: string | null
+          progress_percent?: number
+          tracking_status?: string | null
+          risk_level?: 'low' | 'normal' | 'high' | 'critical'
+        }
+        Update: Partial<Database['public']['Tables']['pending_parts']['Insert']>
+      }
+
+      pending_part_comments: {
+        Row: {
+          id: number
+          pending_part_id: number
+          user_id: string | null
+          message: string
+          images: Json
+          parent_id: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          pending_part_id: number
+          user_id?: string | null
+          message: string
+          images?: Json
+          parent_id?: number | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['pending_part_comments']['Insert']>
+      }
+
+      supplier_assignments: {
+        Row: {
+          id: number
+          project_id: number
+          supplier_id: number
+          section_id: number | null
+          subsection_id: number | null
+          work_item_id: number | null
+          assigned_user_id: string | null
+          current_status: string
+          target_date: string | null
+          remarks: string | null
+          last_updated_by: string | null
+          last_updated_at: string | null
+          created_at: string
+          updated_at: string | null
+        }
+        Insert: {
+          id?: number
+          project_id: number
+          supplier_id: number
+          section_id?: number | null
+          subsection_id?: number | null
+          work_item_id?: number | null
+          assigned_user_id?: string | null
+          current_status?: string
+          target_date?: string | null
+          remarks?: string | null
+          last_updated_by?: string | null
+          last_updated_at?: string | null
+          created_at?: string
+          updated_at?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['supplier_assignments']['Insert']>
+      }
+
+      work_item_updates: {
+        Row: {
+          id: number
+          work_item_id: number
+          user_id: string | null
+          update_text: string
+          status: string | null
+          progress_percent: number | null
+          blocker: string | null
+          next_step: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          work_item_id: number
+          user_id?: string | null
+          update_text: string
+          status?: string | null
+          progress_percent?: number | null
+          blocker?: string | null
+          next_step?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['work_item_updates']['Insert']>
+      }
+
       project_sections: {
         Row: {
           id: number

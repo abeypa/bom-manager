@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, Package, ShoppingCart,
-  ArrowUpDown, LogOut, ShieldCheck, Truck, Factory,
+  ArrowUpDown, LogOut, ShieldCheck, Truck, Factory, BriefcaseBusiness,
   ChevronRight, Menu, X, Search, Activity, BarChart3, Bot
 } from 'lucide-react';
 import { useRole } from '../../hooks/useRole';
@@ -23,6 +23,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
       { to: '/projects', icon: FolderKanban, label: 'Projects' },
+      { to: '/project-tracking', icon: BriefcaseBusiness, label: 'Project Tracking' },
       { to: '/procurement', icon: Factory, label: 'Procurement' },
       // PO ingestion is paused as a standalone tab. Use AI chat commands instead.
       // { to: '/po-ingestion', icon: PackageSearch, label: 'PO Ingestion' },

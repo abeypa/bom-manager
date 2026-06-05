@@ -20,6 +20,7 @@ import Admin from './pages/Admin';
 import ChangeLog from './pages/ChangeLog';
 import ProcurementDashboard from './pages/ProcurementDashboard';
 import Reports from './pages/Reports';
+import ProjectTracking from './pages/ProjectTracking';
 // PO ingestion is handled through AI chat for now.
 // import POIngestion from './pages/POIngestion';
 
@@ -95,6 +96,12 @@ function App() {
                 <Route path="/projects/:id" element={
                   <RoleGuard>
                     <ProjectDetails />
+                  </RoleGuard>
+                } />
+
+                <Route path="/project-tracking" element={
+                  <RoleGuard>
+                    <ProjectTracking />
                   </RoleGuard>
                 } />
 
