@@ -39,8 +39,10 @@ export type TrackingWorkItem = PendingPartRow & {
 export type TrackingRecentUpdate = WorkItemUpdateRow & {
   images: string[]
   work_item_name: string
+  work_item_category?: string | null
   project_id: number | null
   project_name: string | null
+  project_status?: string | null
   supplier_name: string | null
   user_name: string | null
   user_email: string | null
@@ -218,7 +220,7 @@ const enrichUpdates = async (updates: WorkItemUpdateRow[]): Promise<TrackingRece
 
   const [{ data: workItems }, { data: profiles }] = await Promise.all([
     workItemIds.length
-      ? supabase.from('pending_parts').select('id, name, project_id, supplier_id').in('id', workItemIds)
+      ? supabase.from('pending_parts').select('id, name, project_id, supplier_id, category').in('id', workItemIds)
       : Promise.resolve({ data: [] as any[] }),
     userIds.length
       ? supabase.from('profiles').select('id, full_name, email').in('id', userIds)
@@ -230,7 +232,7 @@ const enrichUpdates = async (updates: WorkItemUpdateRow[]): Promise<TrackingRece
 
   const [{ data: suppliers }, { data: projects }] = await Promise.all([
     supplierIds.length ? supabase.from('suppliers').select('id, name').in('id', supplierIds) : Promise.resolve({ data: [] as any[] }),
-    projectIds.length ? supabase.from('projects').select('id, project_name').in('id', projectIds) : Promise.resolve({ data: [] as any[] }),
+    projectIds.length ? supabase.from('projects').select('id, project_name, status').in('id', projectIds) : Promise.resolve({ data: [] as any[] }),
   ])
 
   const workItemMap = new Map<number, any>((workItems || []).map((row: any) => [row.id, row]))
@@ -243,8 +245,10 @@ const enrichUpdates = async (updates: WorkItemUpdateRow[]): Promise<TrackingRece
     return {
       ...item,
       work_item_name: workItem?.name || `Work Item #${item.work_item_id}`,
+      work_item_category: workItem?.category || null,
       project_id: workItem?.project_id || null,
       project_name: workItem?.project_id ? projectMap.get(workItem.project_id)?.project_name || null : null,
+      project_status: workItem?.project_id ? projectMap.get(workItem.project_id)?.status || null : null,
       supplier_name: workItem?.supplier_id ? supplierMap.get(workItem.supplier_id)?.name || null : null,
       user_name: item.user_id ? profileMap.get(item.user_id)?.full_name || null : null,
       user_email: item.user_id ? profileMap.get(item.user_id)?.email || null : null,
@@ -648,12 +652,18 @@ export const projectTrackingApi = {
       .filter((item) => item.status !== 'Approved' && (!!item.blocker || item.risk_level === 'critical' || item.status === 'Rejected'))
       .slice(0, 12)
 
+    const filteredRecentUpdates = (await enrichUpdates(recentUpdates)).filter((update) => {
+      const isManufacturedUpdate = MANUFACTURED_PART_TYPES.includes((update.work_item_category || '') as ManufacturedPartType)
+      if (!isManufacturedUpdate) return true
+      return isTrackedProjectStatus(update.project_status)
+    })
+
     return {
       summaries,
       my_assignments: await enrichAssignments(myAssignmentsRaw.slice(0, 12)),
       overdue_assignments: await enrichAssignments(overdueAssignmentsRaw.slice(0, 12)),
       blocked_work_items: await enrichWorkItems(blockedItemsRaw),
-      recent_updates: await enrichUpdates(recentUpdates),
+      recent_updates: filteredRecentUpdates,
     }
   },
 
