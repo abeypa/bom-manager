@@ -2999,6 +2999,108 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
   },
   {
+    name: 'update_draft_po_header',
+    kind: 'write',
+    description:
+      'Update editable header fields on an existing Draft PO and recalculate totals. ' +
+      'Use this to set commercial adjustments such as packing, forwarding, freight, insurance, or round-off on a Draft PO without recreating it. ' +
+      'It can also update notes, expected delivery date, PO date, and PO number on Draft POs only.',
+    parameters: {
+      type: 'object',
+      required: ['po_id'],
+      properties: {
+        po_id: { type: 'number' },
+        po_number: { type: 'string', description: 'Optional replacement PO number. Must remain unique.' },
+        po_date: { type: 'string', description: 'Optional ISO PO date.' },
+        expected_delivery_date: { type: 'string', description: 'Optional ISO expected delivery date.' },
+        notes: { type: 'string', description: 'Optional notes to replace the current PO notes.' },
+        commercial_adjustment_label: { type: 'string', description: 'Optional commercial adjustment label such as "Packing & Forwarding 2.5% + Insurance 2%".' },
+        commercial_adjustment_amount: { type: 'number', description: 'Optional commercial adjustment amount in the working PO currency. Positive numbers add to the total; negative numbers deduct.' },
+      },
+    },
+    summarize: (a) => {
+      const changes: string[] = []
+      if (a.po_number) changes.push(`PO number → ${a.po_number}`)
+      if (a.po_date) changes.push(`PO date → ${a.po_date}`)
+      if (a.expected_delivery_date) changes.push(`delivery → ${a.expected_delivery_date}`)
+      if (a.commercial_adjustment_label || a.commercial_adjustment_amount != null) {
+        changes.push(`commercial adjustment → ${a.commercial_adjustment_label || 'updated'} (${Number(a.commercial_adjustment_amount || 0).toFixed(2)})`)
+      }
+      if (a.notes) changes.push('notes updated')
+      return `Update Draft PO #${a.po_id}: ${changes.join(', ') || 'header fields'}`
+    },
+    handler: async (a: any) => {
+      assertInteger('po_id', a.po_id)
+      const { data: po, error: poError } = await (supabase as any)
+        .from('purchase_orders')
+        .select('id, po_number, status, commercial_adjustment_amount, original_commercial_adjustment_amount, currency')
+        .eq('id', a.po_id)
+        .single()
+      if (poError) throw poError
+      if (!po) throw new Error(`PO #${a.po_id} not found.`)
+      if ((po as any).status !== 'Draft') {
+        throw new Error(`Only Draft POs can be updated by this tool. Current status is ${(po as any).status}.`)
+      }
+
+      const patch: any = {
+        updated_date: new Date().toISOString(),
+      }
+
+      if (a.po_number != null) {
+        assertNonEmpty('po_number', a.po_number)
+        const nextNumber = String(a.po_number).trim()
+        const { data: existing } = await (supabase as any)
+          .from('purchase_orders')
+          .select('id, po_number')
+          .eq('po_number', nextNumber)
+          .neq('id', a.po_id)
+          .maybeSingle()
+        if (existing?.id) {
+          throw new Error(`PO number ${nextNumber} is already used by PO #${existing.id}.`)
+        }
+        patch.po_number = nextNumber
+      }
+      if (a.po_date != null) {
+        assertNonEmpty('po_date', a.po_date)
+        patch.po_date = a.po_date
+      }
+      if (a.expected_delivery_date != null) {
+        patch.expected_delivery_date = a.expected_delivery_date || null
+      }
+      if (a.notes != null) {
+        patch.notes = String(a.notes || '').trim() || null
+      }
+      if (a.commercial_adjustment_label != null) {
+        patch.commercial_adjustment_label = String(a.commercial_adjustment_label || '').trim() || null
+      }
+      if (a.commercial_adjustment_amount != null) {
+        assertNumberInRange('commercial_adjustment_amount', a.commercial_adjustment_amount, -MAX_PRICE, MAX_PRICE)
+        const nextAmount = roundMoney(Number(a.commercial_adjustment_amount || 0))
+        patch.commercial_adjustment_amount = nextAmount
+        patch.original_commercial_adjustment_amount =
+          (po as any).original_commercial_adjustment_amount != null
+            ? (po as any).original_commercial_adjustment_amount
+            : nextAmount
+      }
+
+      if (Object.keys(patch).length === 1) {
+        throw new Error('No draft PO header changes were provided.')
+      }
+
+      const updated = await purchaseOrdersApi.updatePurchaseOrder(a.po_id, patch)
+      const totals = await purchaseOrdersApi.recalcPOTotals(a.po_id)
+      return {
+        updated: true,
+        po_id: a.po_id,
+        po_number: (updated as any).po_number,
+        currency: (updated as any).currency || (po as any).currency || 'INR',
+        commercial_adjustment_label: (updated as any).commercial_adjustment_label || null,
+        commercial_adjustment_amount: Number((updated as any).commercial_adjustment_amount || 0),
+        totals,
+      }
+    },
+  },
+  {
     name: 'apply_existing_po_pdf_correction',
     kind: 'write',
     description:
