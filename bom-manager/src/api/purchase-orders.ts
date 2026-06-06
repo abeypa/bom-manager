@@ -27,28 +27,70 @@ export const purchaseOrdersApi = {
     if (!rows.length) return rows;
 
     const poIds = rows.map((po: any) => po.id).filter(Boolean);
-    const { data: itemProjects, error: itemProjectsError } = await supabase
+    const { data: poItems, error: poItemsError } = await supabase
       .from('purchase_order_items')
-      .select(`
-        purchase_order_id,
-        project_part:project_parts (
-          project_subsection:project_subsections (
-            section:project_sections (
-              project:projects (
-                id,
-                project_number
-              )
-            )
-          )
-        )
-      `)
+      .select('purchase_order_id, project_part_id')
       .in('purchase_order_id', poIds);
-    if (itemProjectsError) throw itemProjectsError;
+    if (poItemsError) throw poItemsError;
+
+    const projectPartIds = Array.from(
+      new Set((poItems || []).map((item: any) => item.project_part_id).filter(Boolean))
+    );
+
+    let projectPartRows: any[] = [];
+    if (projectPartIds.length) {
+      const { data: partsData, error: partsError } = await supabase
+        .from('project_parts')
+        .select('id, project_section_id')
+        .in('id', projectPartIds);
+      if (partsError) throw partsError;
+      projectPartRows = partsData || [];
+    }
+
+    const subsectionIds = Array.from(
+      new Set(projectPartRows.map((part: any) => part.project_section_id).filter(Boolean))
+    );
+
+    let subsectionRows: any[] = [];
+    if (subsectionIds.length) {
+      const { data: subsectionsData, error: subsectionsError } = await supabase
+        .from('project_subsections')
+        .select('id, project_id')
+        .in('id', subsectionIds);
+      if (subsectionsError) throw subsectionsError;
+      subsectionRows = subsectionsData || [];
+    }
+
+    const projectIds = Array.from(
+      new Set(subsectionRows.map((subsection: any) => subsection.project_id).filter(Boolean))
+    );
+
+    let projectRows: any[] = [];
+    if (projectIds.length) {
+      const { data: projectsData, error: projectsError } = await supabase
+        .from('projects')
+        .select('id, project_number')
+        .in('id', projectIds);
+      if (projectsError) throw projectsError;
+      projectRows = projectsData || [];
+    }
+
+    const projectPartToSubsection = new Map(
+      projectPartRows.map((part: any) => [part.id, part.project_section_id])
+    );
+    const subsectionToProject = new Map(
+      subsectionRows.map((subsection: any) => [subsection.id, subsection.project_id])
+    );
+    const projectIdToNumber = new Map(
+      projectRows.map((project: any) => [project.id, project.project_number])
+    );
 
     const projectNumbersByPo = new Map<number, string[]>();
-    for (const row of itemProjects || []) {
+    for (const row of poItems || []) {
       const poId = (row as any).purchase_order_id;
-      const projectNumber = (row as any)?.project_part?.project_subsection?.section?.project?.project_number;
+      const subsectionId = projectPartToSubsection.get((row as any).project_part_id);
+      const projectId = subsectionToProject.get(subsectionId);
+      const projectNumber = projectIdToNumber.get(projectId);
       if (!poId || !projectNumber) continue;
       const current = projectNumbersByPo.get(poId) || [];
       if (!current.includes(projectNumber)) current.push(projectNumber);
