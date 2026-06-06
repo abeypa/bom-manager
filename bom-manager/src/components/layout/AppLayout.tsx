@@ -24,7 +24,7 @@ const NAV_SECTIONS = [
       { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
       { to: '/projects', icon: FolderKanban, label: 'Projects' },
       { to: '/project-tracking', icon: BriefcaseBusiness, label: 'Project Tracking' },
-      { to: '/procurement', icon: Factory, label: 'Procurement' },
+      { to: '/manufactured-part-tracking', icon: Factory, label: 'Manufactured Tracking' },
       // PO ingestion is paused as a standalone tab. Use AI chat commands instead.
       // { to: '/po-ingestion', icon: PackageSearch, label: 'PO Ingestion' },
     ],

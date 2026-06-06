@@ -119,6 +119,7 @@ export type SupplierAssignmentUpdate = Database['public']['Tables']['supplier_as
 export type WorkItemUpdateInsert = Database['public']['Tables']['work_item_updates']['Insert']
 
 const MANUFACTURED_PART_TYPES = ['mechanical_manufacture', 'electrical_manufacture'] as const
+const TRACKED_PROJECT_STATUSES = new Set(['planning', 'design', 'build'])
 type ManufacturedPartType = (typeof MANUFACTURED_PART_TYPES)[number]
 
 type ProjectPartRow = Database['public']['Tables']['project_parts']['Row']
@@ -141,6 +142,9 @@ type ProjectPartContext = {
   projectNumber: string | null
   masterPart: ManufacturedMasterPart | null
 }
+
+const isTrackedProjectStatus = (status?: string | null) =>
+  TRACKED_PROJECT_STATUSES.has(String(status || '').toLowerCase())
 
 const enrichWorkItems = async (items: PendingPartRow[]): Promise<TrackingWorkItem[]> => {
   const projectIds = Array.from(new Set(items.map((item) => item.project_id).filter(Boolean))) as number[]
@@ -299,7 +303,7 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
   )
 
   const [projectsResult, sectionsResult, mechPartsResult, elecPartsResult, poItemsResult, existingTrackingResult] = await Promise.all([
-    supabase.from('projects').select('id, project_name, project_number').in('id', projectIds),
+    supabase.from('projects').select('id, project_name, project_number, status').in('id', projectIds),
     sectionIds.length
       ? supabase.from('project_sections').select('id, name').in('id', sectionIds)
       : Promise.resolve({ data: [] as any[], error: null }),
@@ -335,6 +339,11 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
 
   const subsectionMap = new Map<number, (typeof subsectionRows)[number]>(subsectionRows.map((row) => [row.id, row]))
   const projectMap = new Map<number, any>((projectsResult.data || []).map((row: any) => [row.id, row]))
+  const trackedProjectIds = new Set(
+    (projectsResult.data || [])
+      .filter((row: any) => isTrackedProjectStatus(row.status))
+      .map((row: any) => row.id),
+  )
   const sectionMap = new Map<number, any>((sectionsResult.data || []).map((row: any) => [row.id, row]))
   const masterPartsMap: Record<ManufacturedPartType, Map<number, ManufacturedMasterPart>> = {
     mechanical_manufacture: new Map((mechPartsResult.data || []).map((row: any) => [row.id, row])),
@@ -354,22 +363,24 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
     if (row.project_part_id) existingTrackingMap.set(row.project_part_id, row)
   }
 
-  const contexts: ProjectPartContext[] = manufacturedProjectParts.map((projectPart) => {
-    const subsection = subsectionMap.get(projectPart.project_section_id)
-    const project = subsection ? projectMap.get(subsection.project_id) : null
-    const section = subsection?.section_id ? sectionMap.get(subsection.section_id) : null
-    return {
-      projectPart,
-      projectId: subsection?.project_id || projectId || 0,
-      sectionId: subsection?.section_id || null,
-      sectionName: section?.name || null,
-      subsectionId: projectPart.project_section_id,
-      subsectionName: subsection?.section_name || null,
-      projectName: project?.project_name || null,
-      projectNumber: project?.project_number || null,
-      masterPart: masterPartsMap[projectPart.part_type as ManufacturedPartType]?.get(projectPart.part_id) || null,
-    }
-  })
+  const contexts: ProjectPartContext[] = manufacturedProjectParts
+    .map((projectPart) => {
+      const subsection = subsectionMap.get(projectPart.project_section_id)
+      const project = subsection ? projectMap.get(subsection.project_id) : null
+      const section = subsection?.section_id ? sectionMap.get(subsection.section_id) : null
+      return {
+        projectPart,
+        projectId: subsection?.project_id || projectId || 0,
+        sectionId: subsection?.section_id || null,
+        sectionName: section?.name || null,
+        subsectionId: projectPart.project_section_id,
+        subsectionName: subsection?.section_name || null,
+        projectName: project?.project_name || null,
+        projectNumber: project?.project_number || null,
+        masterPart: masterPartsMap[projectPart.part_type as ManufacturedPartType]?.get(projectPart.part_id) || null,
+      }
+    })
+    .filter((context) => trackedProjectIds.has(context.projectId))
 
   const inserts: Database['public']['Tables']['pending_parts']['Insert'][] = []
   const updates: Array<{ id: number; payload: Database['public']['Tables']['pending_parts']['Update'] }> = []
@@ -589,7 +600,6 @@ export const projectTrackingApi = {
       supabase
         .from('projects')
         .select('id, project_name, project_number, status')
-        .neq('status', 'completed')
         .order('updated_date', { ascending: false, nullsFirst: false }),
       supabase
         .from('pending_parts')
@@ -612,7 +622,7 @@ export const projectTrackingApi = {
     if (assignmentsResult.error) throw assignmentsResult.error
     if (updatesResult.error) throw updatesResult.error
 
-    const projects = projectsResult.data || []
+    const projects = (projectsResult.data || []).filter((project: any) => isTrackedProjectStatus(project.status))
     const workItems = (workItemsResult.data || []) as PendingPartRow[]
     const assignments = (assignmentsResult.data || []) as SupplierAssignmentRow[]
     const recentUpdates = (updatesResult.data || []) as WorkItemUpdateRow[]

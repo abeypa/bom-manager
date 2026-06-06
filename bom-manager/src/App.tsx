@@ -18,9 +18,9 @@ import Suppliers from './pages/Suppliers';
 import PartUsageLogs from './pages/PartUsageLogs';
 import Admin from './pages/Admin';
 import ChangeLog from './pages/ChangeLog';
-import ProcurementDashboard from './pages/ProcurementDashboard';
 import Reports from './pages/Reports';
 import ProjectTracking from './pages/ProjectTracking';
+import ManufacturedPartSupplierTracking from './pages/ManufacturedPartSupplierTracking';
 // PO ingestion is handled through AI chat for now.
 // import POIngestion from './pages/POIngestion';
 
@@ -123,9 +123,9 @@ function App() {
                   </RoleGuard>
                 } />
 
-                <Route path="/procurement" element={
+                <Route path="/manufactured-part-tracking" element={
                   <RoleGuard>
-                    <ProcurementDashboard />
+                    <ManufacturedPartSupplierTracking />
                   </RoleGuard>
                 } />
 
