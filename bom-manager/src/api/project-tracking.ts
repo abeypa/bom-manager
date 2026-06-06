@@ -386,6 +386,8 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
     })
     .filter((context) => trackedProjectIds.has(context.projectId))
 
+  const trackedProjectPartIds = contexts.map((context) => context.projectPart.id)
+
   const inserts: Database['public']['Tables']['pending_parts']['Insert'][] = []
   const updates: Array<{ id: number; payload: Database['public']['Tables']['pending_parts']['Update'] }> = []
   const now = new Date().toISOString()
@@ -453,11 +455,13 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
     )
   }
 
+  if (!trackedProjectPartIds.length) return []
+
   let finalQuery = supabase
     .from('pending_parts')
     .select('*')
     .eq('item_type', 'work_item')
-    .in('project_part_id', manufacturedProjectParts.map((part) => part.id))
+    .in('project_part_id', trackedProjectPartIds)
     .order('target_date', { ascending: true, nullsFirst: false })
     .order('updated_at', { ascending: false, nullsFirst: false })
 
