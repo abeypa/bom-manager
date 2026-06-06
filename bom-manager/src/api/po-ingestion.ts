@@ -289,7 +289,8 @@ export const poIngestionApi = {
             throw subsectionError || new Error(`Target project could not be resolved for subsection ${subsectionId}.`)
           }
           targetProjectId = subsection.project_id
-          subsectionProjectCache.set(subsectionId, targetProjectId)
+          const resolvedProjectId: number = subsection.project_id
+          subsectionProjectCache.set(subsectionId, resolvedProjectId)
         }
 
         const prefix = PREFIX_BY_PART_TYPE[category]
@@ -448,7 +449,7 @@ export const poIngestionApi = {
           if (!isProjectPartDuplicateExemptMaster(part)) {
             projectWideExisting = await findExistingProjectPartInProject(
               supabase as any,
-              targetProjectId,
+              targetProjectId as number,
               category,
               part.id,
             )

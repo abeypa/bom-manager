@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { X } from 'lucide-react'
+import { Camera, Loader2, Trash2, Upload, X } from 'lucide-react'
 import { projectTrackingApi } from '@/api/project-tracking'
 import { useToast } from '@/context/ToastContext'
+import { supabase } from '@/lib/supabase'
 
 type WorkItemLike = {
   id: number
   name: string
   project_id: number | null
+  category?: string | null
   tracking_status?: string | null
   progress_percent?: number
   blocker?: string | null
   next_action?: string | null
+  target_date?: string | null
 }
 
 interface Props {
@@ -30,6 +33,10 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
   const [progressPercent, setProgressPercent] = useState('0')
   const [blocker, setBlocker] = useState('')
   const [nextStep, setNextStep] = useState('')
+  const [updatedDeliveryDate, setUpdatedDeliveryDate] = useState('')
+  const [images, setImages] = useState<string[]>([])
+  const [isUploading, setIsUploading] = useState(false)
+  const isManufacturedItem = item?.category === 'mechanical_manufacture' || item?.category === 'electrical_manufacture'
 
   useEffect(() => {
     if (!item || !isOpen) return
@@ -37,8 +44,29 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
     setProgressPercent(String(item.progress_percent ?? 0))
     setBlocker(item.blocker || '')
     setNextStep(item.next_action || '')
+    setUpdatedDeliveryDate(item.target_date || '')
+    setImages([])
     setUpdateText('')
   }, [item, isOpen])
+
+  const handleImageUpload = async (file: File) => {
+    setIsUploading(true)
+    try {
+      const ext = file.name.split('.').pop() || 'jpg'
+      const name = `tracking-update-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await supabase.storage.from('bom_assets').upload(`tracking-updates/${name}`, file, {
+        cacheControl: '3600',
+        upsert: false,
+      })
+      if (error) throw error
+      const { data: urlData } = supabase.storage.from('bom_assets').getPublicUrl(`tracking-updates/${name}`)
+      setImages((prev) => [...prev, urlData.publicUrl])
+    } catch (error: any) {
+      showToast('error', error.message || 'Failed to upload image')
+    } finally {
+      setIsUploading(false)
+    }
+  }
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -49,9 +77,13 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
         progress_percent: Number(progressPercent),
         blocker: blocker || null,
         next_step: nextStep || null,
+        images,
+        updated_delivery_date: updatedDeliveryDate || null,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project-tracking-dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['project-tracking-work-items'] })
+      queryClient.invalidateQueries({ queryKey: ['project-tracking-manufactured-items'] })
       if (item?.project_id) {
         queryClient.invalidateQueries({ queryKey: ['pending-parts', item.project_id] })
       }
@@ -103,6 +135,83 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
             <div className="md:col-span-2">
               <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Next Step</label>
               <textarea rows={2} value={nextStep} onChange={(e) => setNextStep(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium shadow-sm" placeholder="What happens next and who should follow up." />
+            </div>
+
+            {isManufacturedItem && (
+              <div className="md:col-span-2">
+                <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Updated Delivery Date</label>
+                <input
+                  type="date"
+                  value={updatedDeliveryDate}
+                  onChange={(e) => setUpdatedDeliveryDate(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold shadow-sm"
+                />
+              </div>
+            )}
+
+            <div className="md:col-span-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
+              <label className="mb-3 block text-[10px] font-black uppercase tracking-wider text-slate-400">
+                {isManufacturedItem ? 'Manufacturing Photos' : 'Update Photos'}
+              </label>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="group flex h-24 w-24 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white transition-colors hover:border-primary-400 hover:bg-primary-50">
+                  {isUploading ? (
+                    <Loader2 size={20} className="animate-spin text-primary-500" />
+                  ) : (
+                    <>
+                      <Camera size={18} className="mb-1 text-slate-400 transition-colors group-hover:text-primary-500" />
+                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 group-hover:text-primary-600">Camera</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) void handleImageUpload(file)
+                    }}
+                    disabled={isUploading}
+                  />
+                </label>
+
+                <label className="group flex h-24 w-24 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white transition-colors hover:border-primary-400 hover:bg-primary-50">
+                  {isUploading ? (
+                    <Loader2 size={20} className="animate-spin text-primary-500" />
+                  ) : (
+                    <>
+                      <Upload size={18} className="mb-1 text-slate-400 transition-colors group-hover:text-primary-500" />
+                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 group-hover:text-primary-600">Upload</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) void handleImageUpload(file)
+                    }}
+                    disabled={isUploading}
+                  />
+                </label>
+
+                {images.map((image, index) => (
+                  <div key={index} className="group relative h-24 w-24 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+                    <img src={image} alt="Update evidence" className="h-full w-full object-cover" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-navy-900/40 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => setImages((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
+                        className="rounded-full bg-red-500 p-2 text-white shadow-lg hover:bg-red-600"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

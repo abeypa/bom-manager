@@ -37,6 +37,7 @@ export type TrackingWorkItem = PendingPartRow & {
 }
 
 export type TrackingRecentUpdate = WorkItemUpdateRow & {
+  images: string[]
   work_item_name: string
   project_id: number | null
   project_name: string | null
@@ -207,6 +208,7 @@ const enrichUpdates = async (updates: WorkItemUpdateRow[]): Promise<TrackingRece
       supplier_name: workItem?.supplier_id ? supplierMap.get(workItem.supplier_id)?.name || null : null,
       user_name: item.user_id ? profileMap.get(item.user_id)?.full_name || null : null,
       user_email: item.user_id ? profileMap.get(item.user_id)?.email || null : null,
+      images: Array.isArray(item.images) ? item.images.filter((value): value is string => typeof value === 'string') : [],
     }
   })
 }
@@ -225,6 +227,22 @@ export const projectTrackingApi = {
       const today = new Date().toISOString().slice(0, 10)
       query = query.lt('due_date', today).neq('status', 'Approved')
     }
+
+    const { data, error } = await query
+    if (error) throw error
+    return enrichWorkItems((data || []) as PendingPartRow[])
+  },
+
+  getManufacturedPartWorkItems: async (assignedTo?: string): Promise<TrackingWorkItem[]> => {
+    let query = supabase
+      .from('pending_parts')
+      .select('*')
+      .eq('item_type', 'work_item')
+      .in('category', ['mechanical_manufacture', 'electrical_manufacture'])
+      .order('target_date', { ascending: true, nullsFirst: false })
+      .order('updated_at', { ascending: false, nullsFirst: false })
+
+    if (assignedTo) query = query.eq('assigned_to', assignedTo)
 
     const { data, error } = await query
     if (error) throw error
@@ -392,6 +410,7 @@ export const projectTrackingApi = {
     if (payload.progress_percent !== undefined) workItemPatch.progress_percent = payload.progress_percent
     if (payload.blocker !== undefined) workItemPatch.blocker = payload.blocker
     if (payload.next_step !== undefined) workItemPatch.next_action = payload.next_step
+    if (payload.updated_delivery_date !== undefined) workItemPatch.target_date = payload.updated_delivery_date
 
     const { error: workItemError } = await supabase
       .from('pending_parts')

@@ -167,6 +167,8 @@ export interface Database {
           progress_percent: number | null
           blocker: string | null
           next_step: string | null
+          images: Json
+          updated_delivery_date: string | null
           created_at: string
         }
         Insert: {
@@ -178,6 +180,8 @@ export interface Database {
           progress_percent?: number | null
           blocker?: string | null
           next_step?: string | null
+          images?: Json
+          updated_delivery_date?: string | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['work_item_updates']['Insert']>

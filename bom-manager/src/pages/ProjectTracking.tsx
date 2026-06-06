@@ -90,6 +90,12 @@ export default function ProjectTracking() {
     enabled: !!user?.id,
   })
 
+  const { data: manufacturedItems = [] } = useQuery({
+    queryKey: ['project-tracking-manufactured-items', user?.id, isAdmin],
+    queryFn: () => projectTrackingApi.getManufacturedPartWorkItems(isAdmin ? undefined : user!.id),
+    enabled: !!user?.id,
+  })
+
   const summaries = data?.summaries || []
   const myAssignments = data?.my_assignments || []
   const overdueAssignments = data?.overdue_assignments || []
@@ -475,6 +481,18 @@ export default function ProjectTracking() {
                   <div className="text-xs font-semibold text-slate-500">{formatDateTime(update.created_at)}</div>
                 </div>
                 <div className="mt-3 text-sm text-slate-700">{update.update_text}</div>
+                {update.updated_delivery_date && (
+                  <div className="mt-2 text-xs font-semibold text-amber-700">Updated delivery date: {update.updated_delivery_date}</div>
+                )}
+                {!!(update.images && update.images.length) && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {update.images.map((image: string, index: number) => (
+                      <a key={index} href={image} target="_blank" rel="noreferrer" className="block h-16 w-16 overflow-hidden rounded-xl border border-slate-200">
+                        <img src={image} alt="Update evidence" className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-2 text-xs text-slate-500">
                   {update.user_name || update.user_email || 'Unknown user'}
                 </div>
@@ -483,6 +501,79 @@ export default function ProjectTracking() {
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">No updates posted yet.</div>
             )}
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-black text-navy-900">Manufactured Part Supplier Tracking</h2>
+            <p className="mt-1 text-sm font-medium text-slate-500">Daily manufacturing progress, part photos, and revised delivery dates for manufacture suppliers.</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-bold text-slate-500">
+            {manufacturedItems.length} tracked items
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {manufacturedItems.length ? manufacturedItems.map((item) => (
+            <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-black text-navy-900">{item.name}</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">{item.project_name || 'General'}{item.supplier_name ? ` • ${item.supplier_name}` : ''}</div>
+                  <div className="mt-1 text-xs text-slate-400">{item.category?.replace(/_/g, ' ')}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUpdateItem(item)}
+                  className="rounded-full border border-primary-200 bg-white px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-primary-600 hover:bg-primary-50"
+                >
+                  Daily Update
+                </button>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Progress</div>
+                  <div className="mt-1 text-lg font-black text-navy-900">{item.progress_percent ?? 0}%</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Status</div>
+                  <div className="mt-1 text-xs font-bold text-slate-700">{(item.tracking_status || 'not_started').replace(/_/g, ' ')}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Delivery</div>
+                  <div className="mt-1 text-xs font-bold text-slate-700">{item.target_date || 'Not set'}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Owner</div>
+                  <div className="mt-1 text-xs font-bold text-slate-700">{item.assigned_user_name || item.assigned_user_email || 'Unassigned'}</div>
+                </div>
+              </div>
+
+              {(item.next_action || item.blocker) && (
+                <div className="mt-4 space-y-2 rounded-2xl border border-slate-100 bg-white p-4">
+                  {item.next_action && (
+                    <div>
+                      <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Next Action</div>
+                      <div className="mt-1 text-sm text-slate-700">{item.next_action}</div>
+                    </div>
+                  )}
+                  {item.blocker && (
+                    <div>
+                      <div className="text-[9px] font-black uppercase tracking-[0.18em] text-red-500">Blocker</div>
+                      <div className="mt-1 text-sm text-red-700">{item.blocker}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )) : (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500 xl:col-span-2">
+              No manufacture-category tracking items found yet. Create work items with `Mechanical Manufacture` or `Electrical Manufacture` category to start daily supplier tracking.
+            </div>
+          )}
         </div>
       </section>
 
