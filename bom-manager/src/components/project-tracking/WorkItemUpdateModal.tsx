@@ -20,34 +20,43 @@ type WorkItemLike = {
 interface Props {
   isOpen: boolean
   onClose: () => void
-  item: WorkItemLike | null
+  item?: WorkItemLike | null
+  items?: WorkItemLike[]
+  onSuccess?: () => void
 }
 
 const STATUS_OPTIONS = ['not_started', 'in_progress', 'waiting_supplier', 'quoted', 'po_released', 'dispatched', 'received', 'blocked', 'closed']
 
-export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
+export default function WorkItemUpdateModal({ isOpen, onClose, item = null, items, onSuccess }: Props) {
   const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [updateText, setUpdateText] = useState('')
-  const [status, setStatus] = useState('in_progress')
-  const [progressPercent, setProgressPercent] = useState('0')
+  const [status, setStatus] = useState('')
+  const [progressPercent, setProgressPercent] = useState('')
   const [blocker, setBlocker] = useState('')
   const [nextStep, setNextStep] = useState('')
   const [updatedDeliveryDate, setUpdatedDeliveryDate] = useState('')
   const [images, setImages] = useState<string[]>([])
   const [isUploading, setIsUploading] = useState(false)
-  const isManufacturedItem = item?.category === 'mechanical_manufacture' || item?.category === 'electrical_manufacture'
+  const modalItems = items?.length ? items : item ? [item] : []
+  const primaryItem = modalItems[0] || null
+  const isBulkMode = modalItems.length > 1
+  const isManufacturedItem = modalItems.some((entry) => entry.category === 'mechanical_manufacture' || entry.category === 'electrical_manufacture')
+  const dialogTitle = isBulkMode ? 'Post Bulk Tracking Update' : 'Post Work Item Update'
+  const dialogSubtitle = isBulkMode
+    ? `${modalItems.length} selected manufactured parts`
+    : primaryItem?.name || ''
 
   useEffect(() => {
-    if (!item || !isOpen) return
-    setStatus(item.tracking_status || 'in_progress')
-    setProgressPercent(String(item.progress_percent ?? 0))
-    setBlocker(item.blocker || '')
-    setNextStep(item.next_action || '')
-    setUpdatedDeliveryDate(item.target_date || '')
+    if (!modalItems.length || !isOpen) return
+    setStatus(isBulkMode ? '' : primaryItem?.tracking_status || 'in_progress')
+    setProgressPercent(isBulkMode ? '' : String(primaryItem?.progress_percent ?? 0))
+    setBlocker(isBulkMode ? '' : primaryItem?.blocker || '')
+    setNextStep(isBulkMode ? '' : primaryItem?.next_action || '')
+    setUpdatedDeliveryDate(isBulkMode ? '' : primaryItem?.target_date || '')
     setImages([])
     setUpdateText('')
-  }, [item, isOpen])
+  }, [primaryItem, modalItems, isBulkMode, isOpen])
 
   const handleImageUpload = async (file: File) => {
     setIsUploading(true)
@@ -70,40 +79,46 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
 
   const mutation = useMutation({
     mutationFn: () =>
-      projectTrackingApi.createWorkItemUpdate({
-        work_item_id: item!.id,
-        update_text: updateText,
-        status,
-        progress_percent: Number(progressPercent),
-        blocker: blocker || null,
-        next_step: nextStep || null,
-        images,
-        updated_delivery_date: updatedDeliveryDate || null,
-      }),
+      projectTrackingApi.createBulkWorkItemUpdates(
+        modalItems.map((entry) => ({
+          work_item_id: entry.id,
+          update_text: updateText,
+          status: status || undefined,
+          progress_percent: progressPercent === '' ? undefined : Number(progressPercent),
+          blocker: isBulkMode ? (blocker.trim() ? blocker : undefined) : blocker || null,
+          next_step: isBulkMode ? (nextStep.trim() ? nextStep : undefined) : nextStep || null,
+          images,
+          updated_delivery_date: updatedDeliveryDate || undefined,
+        })),
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project-tracking-dashboard'] })
       queryClient.invalidateQueries({ queryKey: ['project-tracking-work-items'] })
       queryClient.invalidateQueries({ queryKey: ['project-tracking-manufactured-items'] })
       queryClient.invalidateQueries({ queryKey: ['project-manufactured-tracking'] })
-      if (item?.project_id) {
-        queryClient.invalidateQueries({ queryKey: ['pending-parts', item.project_id] })
-        queryClient.invalidateQueries({ queryKey: ['project', item.project_id] })
+      queryClient.invalidateQueries({ queryKey: ['work-item-updates'] })
+      for (const entry of modalItems) {
+        if (entry.project_id) {
+          queryClient.invalidateQueries({ queryKey: ['pending-parts', entry.project_id] })
+          queryClient.invalidateQueries({ queryKey: ['project', entry.project_id] })
+        }
       }
-      showToast('success', 'Progress update posted')
+      showToast('success', isBulkMode ? `Update posted for ${modalItems.length} parts` : 'Progress update posted')
+      onSuccess?.()
       onClose()
     },
     onError: (error: any) => showToast('error', error.message || 'Failed to post update'),
   })
 
-  if (!isOpen || !item) return null
+  if (!isOpen || !modalItems.length) return null
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto bg-navy-900/40 px-4 py-10 backdrop-blur-sm">
       <div className="relative my-auto mx-auto w-full max-w-2xl rounded-[2rem] bg-white shadow-2xl">
         <div className="flex items-center justify-between rounded-t-[2rem] border-b border-slate-100 bg-slate-50/50 p-6">
           <div>
-            <h2 className="text-xl font-black tracking-tight text-navy-900">Post Work Item Update</h2>
-            <p className="mt-1 text-xs font-bold text-slate-400">{item.name}</p>
+            <h2 className="text-xl font-black tracking-tight text-navy-900">{dialogTitle}</h2>
+            <p className="mt-1 text-xs font-bold text-slate-400">{dialogSubtitle}</p>
           </div>
           <button onClick={onClose} className="rounded-xl border border-transparent p-2 text-slate-400 hover:bg-white hover:text-red-500">
             <X size={20} />
@@ -115,13 +130,14 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
             <div>
               <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Status</label>
               <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold shadow-sm">
+                {isBulkMode && <option value="">Keep current status</option>}
                 {STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option.replace(/_/g, ' ')}</option>)}
               </select>
             </div>
 
             <div>
               <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Progress %</label>
-              <input type="number" min="0" max="100" value={progressPercent} onChange={(e) => setProgressPercent(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold shadow-sm" />
+              <input type="number" min="0" max="100" value={progressPercent} onChange={(e) => setProgressPercent(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold shadow-sm" placeholder={isBulkMode ? 'Keep current progress' : '0'} />
             </div>
 
             <div className="md:col-span-2">
@@ -129,14 +145,27 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
               <textarea rows={4} value={updateText} onChange={(e) => setUpdateText(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium shadow-sm" placeholder="Describe the latest movement, follow-up, quote, dispatch, receipt, or review outcome." />
             </div>
 
+            {isBulkMode && (
+              <div className="md:col-span-2 rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-sky-700">Selected Parts</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {modalItems.map((entry) => (
+                    <div key={entry.id} className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-bold text-sky-800">
+                      {entry.name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="md:col-span-2">
               <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Blocker</label>
-              <textarea rows={2} value={blocker} onChange={(e) => setBlocker(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium shadow-sm" placeholder="Optional blocker or dependency." />
+              <textarea rows={2} value={blocker} onChange={(e) => setBlocker(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium shadow-sm" placeholder={isBulkMode ? 'Optional. Leave blank to keep each part blocker unchanged.' : 'Optional blocker or dependency.'} />
             </div>
 
             <div className="md:col-span-2">
               <label className="mb-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Next Step</label>
-              <textarea rows={2} value={nextStep} onChange={(e) => setNextStep(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium shadow-sm" placeholder="What happens next and who should follow up." />
+              <textarea rows={2} value={nextStep} onChange={(e) => setNextStep(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium shadow-sm" placeholder={isBulkMode ? 'Optional. Leave blank to keep each part next step unchanged.' : 'What happens next and who should follow up.'} />
             </div>
 
             {isManufacturedItem && (
@@ -147,6 +176,7 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
                   value={updatedDeliveryDate}
                   onChange={(e) => setUpdatedDeliveryDate(e.target.value)}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold shadow-sm"
+                  placeholder={isBulkMode ? 'Keep current delivery date' : undefined}
                 />
               </div>
             )}
@@ -221,7 +251,7 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
         <div className="flex justify-end gap-3 rounded-b-[2rem] border-t border-slate-100 bg-slate-50 p-6">
           <button type="button" onClick={onClose} className="btn btn-secondary px-6 font-bold">Cancel</button>
           <button type="button" disabled={mutation.isPending || !updateText.trim()} onClick={() => mutation.mutate()} className="btn btn-primary px-8">
-            {mutation.isPending ? 'Posting...' : 'Post Update'}
+            {mutation.isPending ? 'Posting...' : isBulkMode ? `Post Update to ${modalItems.length} Parts` : 'Post Update'}
           </button>
         </div>
       </div>

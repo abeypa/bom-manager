@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Camera, CheckCircle2, Clock3, Factory, PackageSearch, Truck } from 'lucide-react'
-import { projectTrackingApi, type ManufacturedPartTrackingItem } from '@/api/project-tracking'
+import { Camera, CheckCircle2, Clock3, Factory, MessageSquareText, PackageSearch, Truck } from 'lucide-react'
+import { projectTrackingApi, type ManufacturedPartTrackingItem, type TrackingWorkItemUpdate } from '@/api/project-tracking'
 import WorkItemUpdateModal from '@/components/project-tracking/WorkItemUpdateModal'
 
 const formatDate = (value?: string | null) => {
@@ -10,6 +10,17 @@ const formatDate = (value?: string | null) => {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+  })
+}
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return 'Unknown time'
+  return new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }
 
@@ -27,6 +38,9 @@ type Props = {
 export default function ManufacturedPartsTrackingTab({ projectId }: Props) {
   const [view, setView] = useState<'all' | 'open' | 'received'>('all')
   const [updateItem, setUpdateItem] = useState<ManufacturedPartTrackingItem | null>(null)
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [showBulkUpdate, setShowBulkUpdate] = useState(false)
+  const [expandedHistory, setExpandedHistory] = useState<Record<number, boolean>>({})
 
   const { data: items = [], isLoading } = useQuery({
     queryKey: ['project-manufactured-tracking', projectId],
@@ -34,11 +48,42 @@ export default function ManufacturedPartsTrackingTab({ projectId }: Props) {
     enabled: !!projectId,
   })
 
+  const { data: updatesByItem = {} } = useQuery<Record<number, TrackingWorkItemUpdate[]>>({
+    queryKey: ['work-item-updates', projectId, items.map((item) => item.id).sort((a, b) => a - b).join(',')],
+    queryFn: () => projectTrackingApi.getWorkItemUpdates(items.map((item) => item.id)),
+    enabled: items.length > 0,
+  })
+
   const visibleItems = useMemo(() => {
     if (view === 'open') return items.filter((item) => !item.is_received)
     if (view === 'received') return items.filter((item) => item.is_received)
     return items
   }, [items, view])
+
+  const selectedItems = useMemo(
+    () => items.filter((item) => selectedIds.includes(item.id)),
+    [items, selectedIds],
+  )
+
+  useEffect(() => {
+    const validIds = new Set(items.filter((item) => !item.is_received).map((item) => item.id))
+    setSelectedIds((prev) => prev.filter((id) => validIds.has(id)))
+  }, [items])
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]))
+  }
+
+  const selectAllVisibleOpen = () => {
+    const openVisibleIds = visibleItems.filter((item) => !item.is_received).map((item) => item.id)
+    setSelectedIds((prev) => Array.from(new Set([...prev, ...openVisibleIds])))
+  }
+
+  const clearSelection = () => setSelectedIds([])
+
+  const toggleHistory = (id: number) => {
+    setExpandedHistory((prev) => ({ ...prev, [id]: !prev[id] }))
+  }
 
   const supplierGroups = useMemo(() => {
     const groups = new Map<string, { supplierName: string; items: ManufacturedPartTrackingItem[] }>()
@@ -118,12 +163,53 @@ export default function ManufacturedPartsTrackingTab({ projectId }: Props) {
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-black text-navy-900">Project View</h3>
-              <p className="mt-1 text-sm font-medium text-slate-500">Every manufactured BOM part in this project, including quantity received and linked supplier tracking.</p>
+              <p className="mt-1 text-sm font-medium text-slate-500">Every manufactured BOM part in this project, including quantity received, supplier tracking, and daily visit comments with user and timestamp.</p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
-              {visibleItems.length} visible parts
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+                {visibleItems.length} visible parts
+              </div>
+              <button
+                type="button"
+                onClick={selectAllVisibleOpen}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-600 hover:border-slate-300 hover:text-navy-900"
+              >
+                Select Open
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={!selectedIds.length}
+                className={`rounded-xl border px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] ${
+                  selectedIds.length
+                    ? 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-navy-900'
+                    : 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300'
+                }`}
+              >
+                Clear
+              </button>
             </div>
           </div>
+
+          {selectedItems.length > 0 && (
+            <div className="mb-5 rounded-[1.6rem] border border-sky-200 bg-[linear-gradient(135deg,#f0f9ff_0%,#ffffff_100%)] p-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-700">Bulk Daily Update</div>
+                  <div className="mt-1 text-sm font-bold text-navy-900">{selectedItems.length} part{selectedItems.length === 1 ? '' : 's'} selected for supplier follow-up notes</div>
+                  <div className="mt-1 text-xs font-medium text-slate-500">Use this when one supplier visit covers multiple parts and you want the same comment stamped against each selected part.</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBulkUpdate(true)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-white px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-sky-700 hover:bg-sky-50"
+                >
+                  <MessageSquareText className="h-3.5 w-3.5" />
+                  Update Selected Parts
+                </button>
+              </div>
+            </div>
+          )}
 
           {isLoading ? (
             <div className="space-y-3">
@@ -137,6 +223,16 @@ export default function ManufacturedPartsTrackingTab({ projectId }: Props) {
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
+                        <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(item.id)}
+                            onChange={() => toggleSelected(item.id)}
+                            disabled={item.is_received}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
+                          />
+                          Select
+                        </label>
                         <div className="text-sm font-black text-navy-900">{item.part_number}</div>
                         <div className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${statusPillClass(item)}`}>
                           {item.is_received ? 'closed' : (item.tracking_status || 'not_started').replace(/_/g, ' ')}
@@ -206,6 +302,88 @@ export default function ManufacturedPartsTrackingTab({ projectId }: Props) {
                       </div>
                     </div>
                   )}
+
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Daily Comment History</div>
+                        <div className="mt-1 text-xs font-semibold text-slate-500">
+                          {(updatesByItem[item.id] || []).length
+                            ? `${(updatesByItem[item.id] || []).length} update${(updatesByItem[item.id] || []).length === 1 ? '' : 's'} recorded`
+                            : 'No supplier visit comments posted yet.'}
+                        </div>
+                      </div>
+                      {(updatesByItem[item.id] || []).length > 3 && (
+                        <button
+                          type="button"
+                          onClick={() => toggleHistory(item.id)}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-600 hover:border-slate-300 hover:text-navy-900"
+                        >
+                          {expandedHistory[item.id] ? 'Show Less' : 'Show All'}
+                        </button>
+                      )}
+                    </div>
+
+                    {(updatesByItem[item.id] || []).length ? (
+                      <div className="mt-4 space-y-3">
+                        {(expandedHistory[item.id] ? updatesByItem[item.id] || [] : (updatesByItem[item.id] || []).slice(0, 3)).map((update) => (
+                          <div key={update.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <div className="text-sm font-black text-navy-900">{update.user_name || update.user_email || 'Unknown user'}</div>
+                                <div className="mt-1 text-[11px] font-semibold text-slate-500">{formatDateTime(update.created_at)}</div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {update.status && (
+                                  <div className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">
+                                    {update.status.replace(/_/g, ' ')}
+                                  </div>
+                                )}
+                                {typeof update.progress_percent === 'number' && (
+                                  <div className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700">
+                                    {update.progress_percent}% progress
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{update.update_text}</p>
+
+                            {(update.next_step || update.blocker || update.updated_delivery_date) && (
+                              <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Next Step</div>
+                                  <div className="mt-1 text-xs font-semibold text-slate-600">{update.next_step || 'No change'}</div>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Blocker</div>
+                                  <div className="mt-1 text-xs font-semibold text-slate-600">{update.blocker || 'No change'}</div>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Delivery Update</div>
+                                  <div className="mt-1 text-xs font-semibold text-slate-600">{formatDate(update.updated_delivery_date)}</div>
+                                </div>
+                              </div>
+                            )}
+
+                            {!!update.images.length && (
+                              <div className="mt-3 flex flex-wrap gap-3">
+                                {update.images.map((image, index) => (
+                                  <a key={`${update.id}-${index}`} href={image} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-slate-200">
+                                    <img src={image} alt="Update evidence" className="h-20 w-20 object-cover" />
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-xs font-medium text-slate-500">
+                        Start with a daily update so supplier visit notes become visible here with date, time, and user details.
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -318,6 +496,12 @@ export default function ManufacturedPartsTrackingTab({ projectId }: Props) {
         isOpen={!!updateItem}
         onClose={() => setUpdateItem(null)}
         item={updateItem}
+      />
+      <WorkItemUpdateModal
+        isOpen={showBulkUpdate}
+        onClose={() => setShowBulkUpdate(false)}
+        items={selectedItems}
+        onSuccess={clearSelection}
       />
     </>
   )

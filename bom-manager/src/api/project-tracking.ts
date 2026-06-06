@@ -48,6 +48,12 @@ export type TrackingRecentUpdate = WorkItemUpdateRow & {
   user_email: string | null
 }
 
+export type TrackingWorkItemUpdate = WorkItemUpdateRow & {
+  images: string[]
+  user_name: string | null
+  user_email: string | null
+}
+
 export type ManufacturedPartTrackingItem = TrackingWorkItem & {
   project_part_id: number
   part_id: number
@@ -681,6 +687,43 @@ export const projectTrackingApi = {
     }
   },
 
+  getWorkItemUpdates: async (workItemIds: number[]): Promise<Record<number, TrackingWorkItemUpdate[]>> => {
+    const ids = Array.from(new Set(workItemIds.filter(Boolean)))
+    if (!ids.length) return {}
+
+    const { data, error } = await supabase
+      .from('work_item_updates')
+      .select('*')
+      .in('work_item_id', ids)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+
+    const rows = (data || []) as WorkItemUpdateRow[]
+    const userIds = Array.from(new Set(rows.map((row) => row.user_id).filter(Boolean))) as string[]
+    const { data: profiles, error: profilesError } = userIds.length
+      ? await supabase.from('profiles').select('id, full_name, email').in('id', userIds)
+      : { data: [], error: null as any }
+
+    if (profilesError) throw profilesError
+
+    const profileMap = new Map<string, any>((profiles || []).map((profile: any) => [profile.id, profile]))
+    const grouped: Record<number, TrackingWorkItemUpdate[]> = {}
+
+    for (const row of rows) {
+      const enriched: TrackingWorkItemUpdate = {
+        ...row,
+        images: Array.isArray(row.images) ? row.images.filter((value): value is string => typeof value === 'string') : [],
+        user_name: row.user_id ? profileMap.get(row.user_id)?.full_name || null : null,
+        user_email: row.user_id ? profileMap.get(row.user_id)?.email || null : null,
+      }
+      if (!grouped[row.work_item_id]) grouped[row.work_item_id] = []
+      grouped[row.work_item_id].push(enriched)
+    }
+
+    return grouped
+  },
+
   createSupplierAssignment: async (payload: SupplierAssignmentInsert): Promise<SupplierAssignmentRow> => {
     const { data: auth } = await supabase.auth.getUser()
     const enrichedPayload = {
@@ -736,5 +779,12 @@ export const projectTrackingApi = {
     if (workItemError) throw workItemError
 
     return data as WorkItemUpdateRow
+  },
+
+  createBulkWorkItemUpdates: async (payloads: WorkItemUpdateInsert[]): Promise<WorkItemUpdateRow[]> => {
+    const sanitizedPayloads = payloads.filter((payload) => payload.work_item_id && String(payload.update_text || '').trim())
+    if (!sanitizedPayloads.length) return []
+
+    return Promise.all(sanitizedPayloads.map((payload) => projectTrackingApi.createWorkItemUpdate(payload)))
   },
 }
