@@ -625,9 +625,10 @@ async function runLoop() {
   // Replace any prior controller — only the latest run is abortable.
   runController = new AbortController()
   const signal = runController.signal
+  const maxSteps = 24
   try {
     // Hard cap to stop runaway loops
-    for (let step = 0; step < 8; step++) {
+    for (let step = 0; step < maxSteps; step++) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
       const wire = useAIStore.getState().asWireMessages() as ORMessage[]
       const resp = await chatCompletion({
@@ -744,6 +745,13 @@ async function runLoop() {
       }
       // else: read tools handled, continue loop so model can use the result
     }
+
+    useAIStore.getState().pushMessage({
+      id: uid(),
+      role: 'assistant',
+      content: 'I paused because the AI workflow hit the safety step limit. Send `continue` and I will resume from the current state.',
+      ts: Date.now(),
+    })
   } catch (err: any) {
     const isAbort = err?.name === 'AbortError' || /aborted/i.test(err?.message || '')
     useAIStore.getState().pushMessage({
