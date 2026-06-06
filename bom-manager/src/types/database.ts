@@ -35,6 +35,7 @@ export interface Database {
         Row: {
           id: number
           project_id: number | null
+          project_part_id: number | null
           section_id: number | null
           subsection_id: number | null
           supplier_id: number | null
@@ -67,6 +68,7 @@ export interface Database {
         Insert: {
           id?: number
           project_id?: number | null
+          project_part_id?: number | null
           section_id?: number | null
           subsection_id?: number | null
           supplier_id?: number | null

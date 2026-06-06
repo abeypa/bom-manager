@@ -270,21 +270,33 @@ export const projectsApi = {
       .in('project_part_id', parts.map(p => p.id))
 
     if (!poItemsErr && poItems) {
-      // Map PO info to parts - prioritize non-Draft statuses if multiple POs exist for the same item
-      parts = parts.map(p => {
-        const itemMatches = (poItems as any[]).filter(i => i.project_part_id === p.id)
+      parts = parts.map((p) => {
+        const itemMatches = (poItems as any[]).filter((i) => i.project_part_id === p.id)
         if (itemMatches.length === 0) return { ...p, po_info: null }
-        
-        // Prioritize released/sent/received over Draft
-        const bestMatch = itemMatches.find(i => i.purchase_orders?.status !== 'Draft') || itemMatches[0]
-        
+
+        const bestMatch = itemMatches.find((i) => i.purchase_orders?.status !== 'Draft') || itemMatches[0]
+        const totalReceivedQty = itemMatches.reduce((sum, item) => sum + Number(item.received_qty || 0), 0)
+        const poNumbers = itemMatches
+          .map((item) => item.purchase_orders?.po_number)
+          .filter(Boolean)
+        const statuses = itemMatches
+          .map((item) => item.purchase_orders?.status)
+          .filter(Boolean)
+        const effectiveStatus =
+          totalReceivedQty >= Number(p.quantity || 0) && Number(p.quantity || 0) > 0
+            ? 'Received'
+            : bestMatch.purchase_orders?.status
+
         return {
           ...p,
           po_info: {
             po_number: bestMatch.purchase_orders?.po_number,
-            status: bestMatch.purchase_orders?.status,
-            received_qty: bestMatch.received_qty || 0
-          }
+            status: effectiveStatus,
+            received_qty: totalReceivedQty,
+            po_count: itemMatches.length,
+            po_numbers: poNumbers,
+            statuses,
+          },
         }
       })
     }

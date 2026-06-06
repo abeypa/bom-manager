@@ -508,7 +508,7 @@ export default function ProjectTracking() {
         <div className="mb-5 flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-black text-navy-900">Manufactured Part Supplier Tracking</h2>
-            <p className="mt-1 text-sm font-medium text-slate-500">Daily manufacturing progress, part photos, and revised delivery dates for manufacture suppliers.</p>
+            <p className="mt-1 text-sm font-medium text-slate-500">Synced from project BOM manufactured parts with daily updates, photos, revised delivery dates, and automatic closure on full receipt.</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-bold text-slate-500">
             {manufacturedItems.length} tracked items
@@ -539,12 +539,16 @@ export default function ProjectTracking() {
                   <div className="mt-1 text-lg font-black text-navy-900">{item.progress_percent ?? 0}%</div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Status</div>
-                  <div className="mt-1 text-xs font-bold text-slate-700">{(item.tracking_status || 'not_started').replace(/_/g, ' ')}</div>
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Receipt</div>
+                  <div className="mt-1 text-xs font-bold text-slate-700">{item.received_quantity} / {item.required_quantity}</div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                   <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Delivery</div>
                   <div className="mt-1 text-xs font-bold text-slate-700">{item.target_date || 'Not set'}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Status</div>
+                  <div className="mt-1 text-xs font-bold text-slate-700">{item.is_received ? 'closed' : (item.tracking_status || 'not_started').replace(/_/g, ' ')}</div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                   <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Owner</div>
@@ -571,7 +575,7 @@ export default function ProjectTracking() {
             </div>
           )) : (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500 xl:col-span-2">
-              No manufacture-category tracking items found yet. Create work items with `Mechanical Manufacture` or `Electrical Manufacture` category to start daily supplier tracking.
+              No Mechanical Manufacture or Electrical Manufacture BOM parts are synced into tracking yet.
             </div>
           )}
         </div>

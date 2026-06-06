@@ -48,6 +48,7 @@ import BOMDraggableSection from '@/components/projects/BOMDraggableSection'
 import AdvancedFilterBar from '@/components/ui/AdvancedFilterBar'
 import FastScrollSlider from '@/components/ui/FastScrollSlider'
 import PendingPartsTab from '@/components/projects/pending-parts/PendingPartsTab.tsx'
+import ManufacturedPartsTrackingTab from '@/components/projects/ManufacturedPartsTrackingTab'
 import {
   DndContext,
   closestCenter,
@@ -78,11 +79,12 @@ import {
   useBOMBasketStore,
 } from '@/store/useBOMBasketStore'
 
-const resolveProjectTab = (tab: string | null): 'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts' => {
+const resolveProjectTab = (tab: string | null): 'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts' | 'manufactured_tracking' => {
   if (tab === 'documents') return 'documents'
   if (tab === 'jo') return 'jo'
   if (tab === 'pos') return 'pos'
   if (tab === 'pending_parts' || tab === 'work_items') return 'pending_parts'
+  if (tab === 'manufactured_tracking' || tab === 'manufactured') return 'manufactured_tracking'
   return 'bom'
 }
 
@@ -126,7 +128,7 @@ const ProjectDetails = () => {
   } | null>(null)
 
   const [selectedPartIds, setSelectedPartIds] = useState<Set<number>>(new Set())
-  const [activeTab, setActiveTab] = useState<'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts'>(
+  const [activeTab, setActiveTab] = useState<'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts' | 'manufactured_tracking'>(
     () => resolveProjectTab(searchParams.get('tab'))
   )
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set())
@@ -175,11 +177,11 @@ const ProjectDetails = () => {
     setActiveTab((prev) => (prev === nextTab ? prev : nextTab))
   }, [searchParams])
 
-  const changeTab = (tab: 'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts') => {
+  const changeTab = (tab: 'bom' | 'documents' | 'jo' | 'pos' | 'pending_parts' | 'manufactured_tracking') => {
     setActiveTab(tab)
     const next = new URLSearchParams(searchParams)
     if (tab === 'bom') next.delete('tab')
-    else next.set('tab', tab === 'pending_parts' ? 'work_items' : tab)
+    else next.set('tab', tab === 'pending_parts' ? 'work_items' : tab === 'manufactured_tracking' ? 'manufactured' : tab)
     setSearchParams(next, { replace: true })
   }
 
@@ -703,6 +705,13 @@ const ProjectDetails = () => {
             <Clock className="h-4 w-4 inline mr-1" />
             Work Items
           </button>
+          <button
+            onClick={() => changeTab('manufactured_tracking')}
+            className={`tab-item ${activeTab === 'manufactured_tracking' ? 'active' : ''}`}
+          >
+            <Package className="h-4 w-4 inline mr-1" />
+            Manufactured Tracking
+          </button>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-8 items-start px-6 flex-1 min-h-0 pb-6">
@@ -845,6 +854,17 @@ const ProjectDetails = () => {
                 </div>
                 <div className="hidden w-10 shrink-0 h-full py-1 xl:block">
                   <FastScrollSlider containerId="pending-parts-scroll-container" />
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'manufactured_tracking' && (
+              <div className="flex flex-1 gap-4 min-h-0">
+                <div id="manufactured-tracking-scroll-container" className="flex-1 overflow-y-auto hidden-scrollbar pb-20">
+                  <ManufacturedPartsTrackingTab projectId={projectId} />
+                </div>
+                <div className="hidden w-10 shrink-0 h-full py-1 xl:block">
+                  <FastScrollSlider containerId="manufactured-tracking-scroll-container" />
                 </div>
               </div>
             )}

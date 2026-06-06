@@ -46,6 +46,18 @@ export type TrackingRecentUpdate = WorkItemUpdateRow & {
   user_email: string | null
 }
 
+export type ManufacturedPartTrackingItem = TrackingWorkItem & {
+  project_part_id: number
+  part_id: number
+  part_type: 'mechanical_manufacture' | 'electrical_manufacture'
+  part_number: string
+  required_quantity: number
+  received_quantity: number
+  remaining_quantity: number
+  po_count: number
+  is_received: boolean
+}
+
 export type ProjectTrackingDashboard = {
   summaries: TrackingProjectSummary[]
   my_assignments: TrackingSupplierAssignment[]
@@ -105,6 +117,30 @@ export type TrackingLookupBundle = {
 export type SupplierAssignmentInsert = Database['public']['Tables']['supplier_assignments']['Insert']
 export type SupplierAssignmentUpdate = Database['public']['Tables']['supplier_assignments']['Update']
 export type WorkItemUpdateInsert = Database['public']['Tables']['work_item_updates']['Insert']
+
+const MANUFACTURED_PART_TYPES = ['mechanical_manufacture', 'electrical_manufacture'] as const
+type ManufacturedPartType = (typeof MANUFACTURED_PART_TYPES)[number]
+
+type ProjectPartRow = Database['public']['Tables']['project_parts']['Row']
+
+type ManufacturedMasterPart = {
+  id: number
+  part_number: string
+  description: string | null
+  supplier_id: number | null
+}
+
+type ProjectPartContext = {
+  projectPart: ProjectPartRow
+  projectId: number
+  sectionId: number | null
+  sectionName: string | null
+  subsectionId: number
+  subsectionName: string | null
+  projectName: string | null
+  projectNumber: string | null
+  masterPart: ManufacturedMasterPart | null
+}
 
 const enrichWorkItems = async (items: PendingPartRow[]): Promise<TrackingWorkItem[]> => {
   const projectIds = Array.from(new Set(items.map((item) => item.project_id).filter(Boolean))) as number[]
@@ -213,6 +249,211 @@ const enrichUpdates = async (updates: WorkItemUpdateRow[]): Promise<TrackingRece
   })
 }
 
+const syncManufacturedTrackingItems = async (projectId?: number): Promise<TrackingWorkItem[]> => {
+  let subsectionsQuery = supabase
+    .from('project_subsections')
+    .select('id, project_id, section_id, section_name')
+    .order('project_id', { ascending: true })
+    .order('sort_order', { ascending: true, nullsFirst: false })
+
+  if (projectId) subsectionsQuery = subsectionsQuery.eq('project_id', projectId)
+
+  const { data: subsections, error: subsectionsError } = await subsectionsQuery
+  if (subsectionsError) throw subsectionsError
+
+  const subsectionRows = (subsections || []) as Array<{
+    id: number
+    project_id: number
+    section_id: number | null
+    section_name: string | null
+  }>
+
+  if (!subsectionRows.length) return []
+
+  const subsectionIds = subsectionRows.map((row) => row.id)
+
+  const { data: projectParts, error: projectPartsError } = await supabase
+    .from('project_parts')
+    .select('*')
+    .in('project_section_id', subsectionIds)
+    .in('part_type', [...MANUFACTURED_PART_TYPES])
+
+  if (projectPartsError) throw projectPartsError
+
+  const manufacturedProjectParts = (projectParts || []) as ProjectPartRow[]
+  if (!manufacturedProjectParts.length) return []
+
+  const projectIds = Array.from(new Set(subsectionRows.map((row) => row.project_id)))
+  const sectionIds = Array.from(new Set(subsectionRows.map((row) => row.section_id).filter(Boolean))) as number[]
+  const partIdsByType = manufacturedProjectParts.reduce<Record<ManufacturedPartType, number[]>>(
+    (acc, part) => {
+      const partType = part.part_type as ManufacturedPartType
+      if (!acc[partType]) acc[partType] = []
+      acc[partType].push(part.part_id)
+      return acc
+    },
+    {
+      mechanical_manufacture: [],
+      electrical_manufacture: [],
+    },
+  )
+
+  const [projectsResult, sectionsResult, mechPartsResult, elecPartsResult, poItemsResult, existingTrackingResult] = await Promise.all([
+    supabase.from('projects').select('id, project_name, project_number').in('id', projectIds),
+    sectionIds.length
+      ? supabase.from('project_sections').select('id, name').in('id', sectionIds)
+      : Promise.resolve({ data: [] as any[], error: null }),
+    partIdsByType.mechanical_manufacture.length
+      ? supabase
+          .from('mechanical_manufacture')
+          .select('id, part_number, description, supplier_id')
+          .in('id', Array.from(new Set(partIdsByType.mechanical_manufacture)))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    partIdsByType.electrical_manufacture.length
+      ? supabase
+          .from('electrical_manufacture')
+          .select('id, part_number, description, supplier_id')
+          .in('id', Array.from(new Set(partIdsByType.electrical_manufacture)))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    supabase
+      .from('purchase_order_items')
+      .select('project_part_id, received_qty')
+      .in('project_part_id', manufacturedProjectParts.map((part) => part.id)),
+    supabase
+      .from('pending_parts')
+      .select('*')
+      .eq('item_type', 'work_item')
+      .in('project_part_id', manufacturedProjectParts.map((part) => part.id)),
+  ])
+
+  if (projectsResult.error) throw projectsResult.error
+  if (sectionsResult.error) throw sectionsResult.error
+  if (mechPartsResult.error) throw mechPartsResult.error
+  if (elecPartsResult.error) throw elecPartsResult.error
+  if (poItemsResult.error) throw poItemsResult.error
+  if (existingTrackingResult.error) throw existingTrackingResult.error
+
+  const subsectionMap = new Map<number, (typeof subsectionRows)[number]>(subsectionRows.map((row) => [row.id, row]))
+  const projectMap = new Map<number, any>((projectsResult.data || []).map((row: any) => [row.id, row]))
+  const sectionMap = new Map<number, any>((sectionsResult.data || []).map((row: any) => [row.id, row]))
+  const masterPartsMap: Record<ManufacturedPartType, Map<number, ManufacturedMasterPart>> = {
+    mechanical_manufacture: new Map((mechPartsResult.data || []).map((row: any) => [row.id, row])),
+    electrical_manufacture: new Map((elecPartsResult.data || []).map((row: any) => [row.id, row])),
+  }
+
+  const poReceivedMap = new Map<number, number>()
+  const poCountMap = new Map<number, number>()
+  for (const row of (poItemsResult.data || []) as Array<{ project_part_id: number | null; received_qty?: number | null }>) {
+    if (!row.project_part_id) continue
+    poReceivedMap.set(row.project_part_id, (poReceivedMap.get(row.project_part_id) || 0) + Number(row.received_qty || 0))
+    poCountMap.set(row.project_part_id, (poCountMap.get(row.project_part_id) || 0) + 1)
+  }
+
+  const existingTrackingMap = new Map<number, PendingPartRow>()
+  for (const row of (existingTrackingResult.data || []) as PendingPartRow[]) {
+    if (row.project_part_id) existingTrackingMap.set(row.project_part_id, row)
+  }
+
+  const contexts: ProjectPartContext[] = manufacturedProjectParts.map((projectPart) => {
+    const subsection = subsectionMap.get(projectPart.project_section_id)
+    const project = subsection ? projectMap.get(subsection.project_id) : null
+    const section = subsection?.section_id ? sectionMap.get(subsection.section_id) : null
+    return {
+      projectPart,
+      projectId: subsection?.project_id || projectId || 0,
+      sectionId: subsection?.section_id || null,
+      sectionName: section?.name || null,
+      subsectionId: projectPart.project_section_id,
+      subsectionName: subsection?.section_name || null,
+      projectName: project?.project_name || null,
+      projectNumber: project?.project_number || null,
+      masterPart: masterPartsMap[projectPart.part_type as ManufacturedPartType]?.get(projectPart.part_id) || null,
+    }
+  })
+
+  const inserts: Database['public']['Tables']['pending_parts']['Insert'][] = []
+  const updates: Array<{ id: number; payload: Database['public']['Tables']['pending_parts']['Update'] }> = []
+  const now = new Date().toISOString()
+
+  for (const context of contexts) {
+    const existing = existingTrackingMap.get(context.projectPart.id)
+    const master = context.masterPart
+    const requiredQty = Number(context.projectPart.quantity || 0)
+    const receivedQty = Number(poReceivedMap.get(context.projectPart.id) || 0)
+    const receiptProgress = requiredQty > 0 ? Math.min(100, Math.round((receivedQty / requiredQty) * 100)) : 0
+    const isReceived = requiredQty > 0 && receivedQty >= requiredQty
+    const trackingStatus = isReceived ? 'closed' : existing?.tracking_status || 'not_started'
+    const status = isReceived ? 'Approved' : existing?.status || 'Pending'
+    const progressPercent = isReceived ? 100 : Math.max(existing?.progress_percent || 0, receiptProgress)
+    const normalizedName = master?.part_number || existing?.name || `Manufactured Part #${context.projectPart.id}`
+    const normalizedDescription = master?.description || existing?.description || null
+
+    const payload: Database['public']['Tables']['pending_parts']['Update'] = {
+      project_id: context.projectId || null,
+      project_part_id: context.projectPart.id,
+      section_id: context.sectionId,
+      subsection_id: context.subsectionId,
+      supplier_id: master?.supplier_id || null,
+      name: normalizedName,
+      description: normalizedDescription,
+      category: context.projectPart.part_type,
+      status,
+      progress_percent: progressPercent,
+      tracking_status: trackingStatus,
+      updated_at: now,
+      closed_at: isReceived ? existing?.closed_at || now : null,
+      closed_by: isReceived ? existing?.closed_by || null : null,
+    }
+
+    if (!existing) {
+      inserts.push({
+        ...payload,
+        priority: 'Medium',
+        item_type: 'work_item',
+        discussion_status: 'open',
+        due_date: null,
+        target_date: null,
+        next_action: null,
+        blocker: null,
+        risk_level: 'normal',
+        images: [],
+        links: [],
+      } as Database['public']['Tables']['pending_parts']['Insert'])
+      continue
+    }
+
+    updates.push({ id: existing.id, payload })
+  }
+
+  if (inserts.length) {
+    const { error } = await supabase.from('pending_parts').insert(inserts)
+    if (error) throw error
+  }
+
+  if (updates.length) {
+    await Promise.all(
+      updates.map(({ id, payload }) =>
+        supabase.from('pending_parts').update(payload).eq('id', id).throwOnError()
+      ),
+    )
+  }
+
+  let finalQuery = supabase
+    .from('pending_parts')
+    .select('*')
+    .eq('item_type', 'work_item')
+    .in('project_part_id', manufacturedProjectParts.map((part) => part.id))
+    .order('target_date', { ascending: true, nullsFirst: false })
+    .order('updated_at', { ascending: false, nullsFirst: false })
+
+  if (projectId) finalQuery = finalQuery.eq('project_id', projectId)
+
+  const { data: syncedRows, error: syncedRowsError } = await finalQuery
+  if (syncedRowsError) throw syncedRowsError
+
+  return enrichWorkItems((syncedRows || []) as PendingPartRow[])
+}
+
 export const projectTrackingApi = {
   getWorkItems: async (filters?: TrackingWorkItemFilter): Promise<TrackingWorkItem[]> => {
     let query = supabase
@@ -233,20 +474,61 @@ export const projectTrackingApi = {
     return enrichWorkItems((data || []) as PendingPartRow[])
   },
 
-  getManufacturedPartWorkItems: async (assignedTo?: string): Promise<TrackingWorkItem[]> => {
-    let query = supabase
-      .from('pending_parts')
-      .select('*')
-      .eq('item_type', 'work_item')
-      .in('category', ['mechanical_manufacture', 'electrical_manufacture'])
-      .order('target_date', { ascending: true, nullsFirst: false })
-      .order('updated_at', { ascending: false, nullsFirst: false })
+  getManufacturedPartWorkItems: async (assignedTo?: string): Promise<ManufacturedPartTrackingItem[]> => {
+    let items = await syncManufacturedTrackingItems()
+    if (assignedTo) items = items.filter((item) => item.assigned_to === assignedTo)
+    const projectIds = Array.from(new Set(items.map((item) => item.project_id).filter(Boolean))) as number[]
+    if (!projectIds.length) return []
 
-    if (assignedTo) query = query.eq('assigned_to', assignedTo)
+    const projectScopedResults = await Promise.all(projectIds.map((currentProjectId) => projectTrackingApi.getProjectManufacturedPartTracking(currentProjectId)))
+    return projectScopedResults.flat().filter((item) => !assignedTo || item.assigned_to === assignedTo)
+  },
 
-    const { data, error } = await query
-    if (error) throw error
-    return enrichWorkItems((data || []) as PendingPartRow[])
+  getProjectManufacturedPartTracking: async (projectId: number): Promise<ManufacturedPartTrackingItem[]> => {
+    const items = await syncManufacturedTrackingItems(projectId)
+    const projectPartIds = items.map((item) => item.project_part_id).filter(Boolean) as number[]
+    if (!projectPartIds.length) return []
+
+    const [{ data: projectParts }, { data: poItems }] = await Promise.all([
+      supabase
+        .from('project_parts')
+        .select('id, part_type, part_id, quantity')
+        .in('id', projectPartIds),
+      supabase
+        .from('purchase_order_items')
+        .select('project_part_id, received_qty')
+        .in('project_part_id', projectPartIds),
+    ])
+
+    const projectPartMap = new Map<number, any>((projectParts || []).map((row: any) => [row.id, row]))
+    const receiptMap = new Map<number, { received: number; count: number }>()
+    for (const row of (poItems || []) as Array<{ project_part_id: number | null; received_qty?: number | null }>) {
+      if (!row.project_part_id) continue
+      const existing = receiptMap.get(row.project_part_id) || { received: 0, count: 0 }
+      existing.received += Number(row.received_qty || 0)
+      existing.count += 1
+      receiptMap.set(row.project_part_id, existing)
+    }
+
+    return items.map((item) => {
+      const linkedProjectPartId = item.project_part_id as number
+      const projectPart = projectPartMap.get(linkedProjectPartId)
+      const receipt = receiptMap.get(linkedProjectPartId) || { received: 0, count: 0 }
+      const requiredQuantity = Number(projectPart?.quantity || 0)
+      const receivedQuantity = receipt.received
+      return {
+        ...item,
+        project_part_id: linkedProjectPartId,
+        part_id: Number(projectPart?.part_id || 0),
+        part_type: (projectPart?.part_type || item.category || 'mechanical_manufacture') as ManufacturedPartType,
+        part_number: item.name,
+        required_quantity: requiredQuantity,
+        received_quantity: receivedQuantity,
+        remaining_quantity: Math.max(0, requiredQuantity - receivedQuantity),
+        po_count: receipt.count,
+        is_received: requiredQuantity > 0 && receivedQuantity >= requiredQuantity,
+      }
+    })
   },
 
   getSupplierAssignments: async (filters?: TrackingAssignmentFilter): Promise<TrackingSupplierAssignment[]> => {

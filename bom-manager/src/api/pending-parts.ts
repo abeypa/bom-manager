@@ -13,6 +13,7 @@ export type DiscussionStatus = 'open' | 'closed'
 export type PendingPart = {
   id: number
   project_id: number | null
+  project_part_id?: number | null
   section_id?: number | null
   subsection_id?: number | null
   supplier_id?: number | null

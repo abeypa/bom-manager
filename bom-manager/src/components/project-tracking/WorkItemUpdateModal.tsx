@@ -84,8 +84,10 @@ export default function WorkItemUpdateModal({ isOpen, onClose, item }: Props) {
       queryClient.invalidateQueries({ queryKey: ['project-tracking-dashboard'] })
       queryClient.invalidateQueries({ queryKey: ['project-tracking-work-items'] })
       queryClient.invalidateQueries({ queryKey: ['project-tracking-manufactured-items'] })
+      queryClient.invalidateQueries({ queryKey: ['project-manufactured-tracking'] })
       if (item?.project_id) {
         queryClient.invalidateQueries({ queryKey: ['pending-parts', item.project_id] })
+        queryClient.invalidateQueries({ queryKey: ['project', item.project_id] })
       }
       showToast('success', 'Progress update posted')
       onClose()
