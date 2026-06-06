@@ -230,7 +230,7 @@ export default function ProcurementDashboard() {
                       <p className="label-caps !text-[8px] !text-navy-400 mb-1">Total value</p>
                       <p className="text-2xl font-black text-navy-900 tabular-nums italic tracking-tighter">
                         <span className="text-xs font-black not-italic mr-1 text-tertiary">₹</span>
-                        {data.parts.reduce((sum: number, p: any) => sum + (p.quantity * p.unit_price), 0).toLocaleString('en-IN')}
+                        {data.parts.reduce((sum: number, p: any) => sum + ((p.pending_procurement_qty ?? p.quantity) * p.unit_price), 0).toLocaleString('en-IN')}
                       </p>
                    </div>
                 </div>

@@ -430,15 +430,37 @@ export const purchaseOrdersApi = {
       part_ref: partDetailsMap[p.part_type]?.[p.part_id] || null,
     }))
 
-    // 4. Filter out parts that already have a PO
-    const { data: orderedItems } = await supabase
+    // 4. Compute outstanding procurement quantity per project BOM line.
+    const { data: orderedItems, error: orderedItemsError } = await supabase
       .from('purchase_order_items')
-      .select('project_part_id')
+      .select('project_part_id, quantity, purchase_orders(status)')
       .not('project_part_id', 'is', null)
 
-    const orderedIds = new Set((orderedItems as any[])?.map(i => i.project_part_id))
+    if (orderedItemsError) throw orderedItemsError
 
-    return partsWithDetails.filter((p: any) => !orderedIds.has(p.id))
+    const orderedQtyMap = new Map<number, number>()
+    for (const item of (orderedItems as any[]) || []) {
+      const projectPartId = item.project_part_id
+      const poStatus = item.purchase_orders?.status
+      if (!projectPartId || poStatus === 'Cancelled') continue
+      orderedQtyMap.set(projectPartId, (orderedQtyMap.get(projectPartId) || 0) + Number(item.quantity || 0))
+    }
+
+    return partsWithDetails
+      .map((part: any) => {
+        const requiredQty = Number(part.quantity || 0)
+        const orderedQty = Number(orderedQtyMap.get(part.id) || 0)
+        const remainingQty = Math.max(0, requiredQty - orderedQty)
+
+        return {
+          ...part,
+          original_quantity: requiredQty,
+          ordered_quantity: orderedQty,
+          quantity: remainingQty,
+          pending_procurement_qty: remainingQty,
+        }
+      })
+      .filter((part: any) => part.pending_procurement_qty > 0)
   },
 
   // Delete single PO line item, then recalc parent PO totals
