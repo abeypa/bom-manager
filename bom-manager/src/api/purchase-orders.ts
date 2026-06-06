@@ -153,7 +153,7 @@ export const purchaseOrdersApi = {
           .from('project_parts')
           .select(`
             id,
-            project_subsection:project_subsections (
+            project_subsection:project_subsections!project_parts_project_section_id_fkey (
               section:project_sections (
                 project:projects (
                   id,
@@ -462,7 +462,7 @@ export const purchaseOrdersApi = {
       .from('project_parts')
       .select(`
         *,
-        subsection:project_subsections (
+        subsection:project_subsections!project_parts_project_section_id_fkey (
           id,
           project_id,
           section_name,
