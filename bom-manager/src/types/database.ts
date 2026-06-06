@@ -447,7 +447,7 @@ export interface Database {
         Row: {
           id: number
           po_number: string
-          project_id: number
+          project_id: number | null
           supplier_id: number
           po_date: string
           status: 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled'
@@ -474,7 +474,7 @@ export interface Database {
         Insert: {
           id?: number
           po_number: string
-          project_id: number
+          project_id?: number | null
           supplier_id: number
           po_date?: string
           status?: 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled'

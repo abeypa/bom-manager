@@ -388,7 +388,11 @@ F. DRAFT THE PO FROM THE SAME SOURCE PDF
      c) The status is locked to "Draft" by the tool. You cannot set it
         to anything else.
      d) Per-line interlocks (enforced in code, not just in this prompt):
-          - project_part_id must belong to the same project as the PO.
+          - If all lines belong to one project, you may pass that
+            project_id on the PO header.
+          - If lines belong to multiple projects, omit project_id and
+            draft one supplier PO with a null header project_id; each
+            line still keeps its own project_part_id linkage.
           - unit_price you pass MUST equal the price stored on the
             project_part (the BOM line). If they differ, fix the BOM
             with update_part_quantity first, or re-read the PDF.
@@ -418,6 +422,8 @@ F. DRAFT THE PO FROM THE SAME SOURCE PDF
         rows). For each row, pass project_part_id (the id returned by
         the earlier add_part_to_project), quantity, unit_price (= PDF),
         discount_percent (= PDF), expected_price_from_source (= PDF).
+        Pass project_id only when every line belongs to the same
+        project; otherwise omit it.
      4. Propose create_draft_po and wait for user approval.
 
    When the user approves, the new PO appears under

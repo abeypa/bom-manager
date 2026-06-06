@@ -2725,15 +2725,15 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       'GST / CGST / SGST is NEVER included as a line item or added to grand_total. ' +
       'Each item must reference an existing project_part_id; the tool runs interlocks per line: ' +
       '(a) the unit_price you pass equals expected_price_from_source (the price you read off the PDF); ' +
-      '(b) the line belongs to the selected project. ' +
+      '(b) if project_id is provided, single-project lines must belong to that project; multi-project drafts are allowed and store a null header project_id. ' +
       'Historical or future PO prices are allowed to differ from the current BOM snapshot; the PO stores its own source-price snapshot for audit. ' +
       'One PO carries one supplier (purchase_orders.supplier_id) but the SAME PART can be supplied by DIFFERENT suppliers across POs — the master\'s supplier_id is informational and is NOT cross-checked against the PO supplier. ' +
       'Mismatches in (a)-(c) throw — fix the BOM mapping or re-read the PDF instead of forcing the PO through.',
     parameters: {
       type: 'object',
-      required: ['project_id', 'supplier_id', 'po_date', 'expected_supplier_name', 'items'],
+      required: ['supplier_id', 'po_date', 'expected_supplier_name', 'items'],
       properties: {
-        project_id: { type: 'number' },
+        project_id: { type: 'number', description: 'Optional. Keep for single-project POs. Omit when one supplier PO spans multiple projects.' },
         supplier_id: { type: 'number' },
         expected_supplier_name: { type: 'string', description: 'Supplier name as printed on the source PDF — cross-checked against the DB row.' },
         po_number: { type: 'string', description: 'Optional. If omitted, auto-generated as CPO-<8digits>. You may pass the document number from the PDF (e.g. PO/P/25-26/100255).' },
@@ -2761,22 +2761,25 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     summarize: (a) => {
       const total = (a.items || []).reduce((s: number, it: any) =>
         s + (it.quantity || 0) * (it.unit_price || 0) * (1 - (it.discount_percent || 0) / 100), 0)
-      return `Draft PO for project #${a.project_id} → supplier ${a.expected_supplier_name} (#${a.supplier_id}), ` +
+      const projectLabel = a.project_id ? `project #${a.project_id}` : 'multiple linked projects'
+      return `Draft PO for ${projectLabel} → supplier ${a.expected_supplier_name} (#${a.supplier_id}), ` +
         `${a.items?.length || 0} line(s), grand total ${a.currency || 'INR'} ${total.toFixed(2)} (excl. GST)`
     },
     handler: async (a: any) => {
       // Field-level interlocks
-      assertInteger('project_id', a.project_id)
+      if (a.project_id != null) assertInteger('project_id', a.project_id)
       assertInteger('supplier_id', a.supplier_id)
       assertNonEmpty('po_date', a.po_date)
       assertNonEmpty('expected_supplier_name', a.expected_supplier_name)
       if (!Array.isArray(a.items) || a.items.length === 0)
         throw new Error('items must be a non-empty array.')
 
-      // Verify project + supplier
-      const { data: project } = await (supabase as any)
-        .from('projects').select('id, project_name, project_number').eq('id', a.project_id).maybeSingle()
-      if (!project) throw new Error(`project #${a.project_id} does not exist.`)
+      // Verify optional header project + supplier
+      if (a.project_id != null) {
+        const { data: project } = await (supabase as any)
+          .from('projects').select('id, project_name, project_number').eq('id', a.project_id).maybeSingle()
+        if (!project) throw new Error(`project #${a.project_id} does not exist.`)
+      }
 
       const { data: supplier } = await (supabase as any)
         .from('suppliers').select('id, name').eq('id', a.supplier_id).maybeSingle()
@@ -2815,6 +2818,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       const subProjectById = new Map<number, number>((subs || []).map((s: any) => [s.id, s.project_id]))
 
       const poItems: any[] = []
+      const lineProjectIds = new Set<number>()
       let grand = 0
       const driftNotes: string[] = []
       for (const it of a.items) {
@@ -2823,10 +2827,16 @@ export const TOOL_REGISTRY: ToolSpec[] = [
 
         // (1) project membership
         const ppProjectId = subProjectById.get(pp.project_section_id)
-        if (ppProjectId !== a.project_id) {
+        if (!ppProjectId) {
           throw new Error(
-            `project_part #${it.project_part_id} belongs to project #${ppProjectId ?? '?'}, not #${a.project_id}. ` +
-            `A draft PO can only contain lines from the project it is being raised against.`,
+            `project_part #${it.project_part_id} is missing a resolved project link. Re-check the BOM mapping before drafting the PO.`,
+          )
+        }
+        lineProjectIds.add(ppProjectId)
+        if (a.project_id != null && ppProjectId !== a.project_id) {
+          throw new Error(
+            `project_part #${it.project_part_id} belongs to project #${ppProjectId}, not #${a.project_id}. ` +
+            `Omit project_id for a multi-project draft PO, or keep all lines under one project.`,
           )
         }
 
@@ -2892,6 +2902,28 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         })
       }
 
+      const uniqueProjectIds = Array.from(lineProjectIds)
+      if (uniqueProjectIds.length === 0) {
+        throw new Error('Cannot draft a PO without at least one resolved project line.')
+      }
+      const resolvedHeaderProjectId =
+        a.project_id != null
+          ? a.project_id
+          : uniqueProjectIds.length === 1
+            ? uniqueProjectIds[0]
+            : null
+
+      let linkedProjectSummary = ''
+      if (uniqueProjectIds.length > 1) {
+        const { data: linkedProjects } = await (supabase as any)
+          .from('projects')
+          .select('id, project_name, project_number')
+          .in('id', uniqueProjectIds)
+        linkedProjectSummary = (linkedProjects || [])
+          .map((project: any) => `${project.project_number} ${project.project_name}`.trim())
+          .join(', ')
+      }
+
       const po_number = a.po_number || `CPO-${Date.now().toString().slice(-8)}`
       const { data: existingPO } = await (supabase as any)
         .from('purchase_orders')
@@ -2906,7 +2938,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       }
       const poData: any = {
         po_number,
-        project_id: a.project_id,
+        project_id: resolvedHeaderProjectId,
         supplier_id: a.supplier_id,
         po_date: a.po_date,
         expected_delivery_date: a.expected_delivery_date || null,
@@ -2919,6 +2951,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         notes:
           (a.notes ? a.notes + ' | ' : '') +
           'Drafted by AI from source PO. GST excluded.' +
+          (linkedProjectSummary ? ` Linked projects: ${linkedProjectSummary}.` : '') +
           (driftNotes.length ? ` Price drift kept as PO snapshot: ${driftNotes.join('; ')}.` : ''),
         created_date: new Date().toISOString(),
       }
