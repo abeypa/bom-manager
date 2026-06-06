@@ -976,6 +976,30 @@ async function getMasterPartForMerge(partType: string, partId: number) {
   return data
 }
 
+const TEMP_AI_DELETE_ENABLED = true
+
+async function assertTempAiDeleteAdmin() {
+  if (!TEMP_AI_DELETE_ENABLED) {
+    throw new Error('Temporary AI delete tools are disabled in this build.')
+  }
+  const { data: authData } = await supabase.auth.getUser()
+  const user = authData.user
+  if (!user) throw new Error('You must be signed in to use temporary AI delete tools.')
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, email')
+    .eq('id', user.id)
+    .single()
+
+  const role = (profile as any)?.role || 'user'
+  const email = String((profile as any)?.email || user.email || '').toLowerCase()
+  const isAdmin = role === 'admin' || email === 'abey.thomas@bepindia.com'
+  if (!isAdmin) {
+    throw new Error('Temporary AI delete tools are admin-only.')
+  }
+}
+
 export const TOOL_REGISTRY: ToolSpec[] = [
   // ── READ ────────────────────────────────────────────────────────────────
   {
@@ -2342,6 +2366,131 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         stock_movements_updated: stockRowsUpdated || 0,
         price_history_rows_updated: priceRowsUpdated || 0,
         reason: a.reason || 'duplicate master part merge',
+      }
+    },
+  },
+  {
+    name: 'admin_delete_project_bom_line',
+    kind: 'write',
+    description:
+      'TEMPORARY ADMIN TOOL. Delete a project BOM line from project_parts. Intended for cleanup of wrong or zero-qty BOM rows. Blocks deletion when linked PO items exist.',
+    parameters: {
+      type: 'object',
+      required: ['project_part_id', 'reason'],
+      properties: {
+        project_part_id: { type: 'number', description: 'project_parts.id to delete.' },
+        reason: { type: 'string', description: 'Why this BOM line is being deleted.' },
+      },
+    },
+    summarize: (a) => `Temporarily delete project BOM line #${a.project_part_id} (${a.reason})`,
+    preflight: async (a: any) => {
+      await assertTempAiDeleteAdmin()
+      assertInteger('project_part_id', a.project_part_id)
+      assertNonEmpty('reason', a.reason)
+
+      const { data: row, error } = await (supabase as any)
+        .from('project_parts')
+        .select('id, project_section_id, part_type, part_id, quantity')
+        .eq('id', a.project_part_id)
+        .single()
+      if (error || !row) throw new Error(`Project BOM line #${a.project_part_id} does not exist.`)
+
+      const { count: poLinks } = await (supabase as any)
+        .from('purchase_order_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('project_part_id', a.project_part_id)
+      if ((poLinks || 0) > 0) {
+        throw new Error(
+          `Project BOM line #${a.project_part_id} has linked PO items and cannot be AI-deleted safely. ` +
+          `Zero the quantity or remap the PO linkage first.`
+        )
+      }
+    },
+    handler: async (a: any) => {
+      await assertTempAiDeleteAdmin()
+      assertInteger('project_part_id', a.project_part_id)
+      assertNonEmpty('reason', a.reason)
+
+      const { data: row, error } = await (supabase as any)
+        .from('project_parts')
+        .select('id, project_section_id, part_type, part_id, quantity')
+        .eq('id', a.project_part_id)
+        .single()
+      if (error || !row) throw new Error(`Project BOM line #${a.project_part_id} does not exist.`)
+
+      const { count: trackingLinks } = await (supabase as any)
+        .from('pending_parts')
+        .select('id', { count: 'exact', head: true })
+        .eq('project_part_id', a.project_part_id)
+
+      if ((trackingLinks || 0) > 0) {
+        await (supabase as any).from('pending_parts').delete().eq('project_part_id', a.project_part_id)
+      }
+
+      await (supabase as any).from('project_parts').delete().eq('id', a.project_part_id).throwOnError()
+
+      return {
+        deleted_project_part_id: a.project_part_id,
+        deleted_tracking_rows: trackingLinks || 0,
+        reason: a.reason,
+      }
+    },
+  },
+  {
+    name: 'admin_delete_unlinked_master_part',
+    kind: 'write',
+    description:
+      'TEMPORARY ADMIN TOOL. Delete a master part only when it has no linked BOM rows, PO items, stock movements, or price history. Use for safe cleanup of unused master parts.',
+    parameters: {
+      type: 'object',
+      required: ['part_type', 'part_id', 'reason'],
+      properties: {
+        part_type: { type: 'string', enum: part_type_enum },
+        part_id: { type: 'number', description: 'Master part row id.' },
+        reason: { type: 'string', description: 'Why this master part is being deleted.' },
+      },
+    },
+    summarize: (a) => `Temporarily delete unlinked ${a.part_type} master part #${a.part_id} (${a.reason})`,
+    preflight: async (a: any) => {
+      await assertTempAiDeleteAdmin()
+      if (!part_type_enum.includes(a.part_type)) throw new Error(`Unknown part_type: ${a.part_type}`)
+      assertInteger('part_id', a.part_id)
+      assertNonEmpty('reason', a.reason)
+      await assertRowExists(a.part_type, a.part_id, `${a.part_type} master part`)
+
+      const [projectLinks, poLinks, stockLinks, historyLinks] = await Promise.all([
+        (supabase as any).from('project_parts').select('id', { count: 'exact', head: true }).eq('part_type', a.part_type).eq('part_id', a.part_id),
+        (supabase as any).from('purchase_order_items').select('id', { count: 'exact', head: true }).eq('part_type', a.part_type).eq('part_id', a.part_id),
+        (supabase as any).from('stock_movements').select('id', { count: 'exact', head: true }).eq('part_table_name', a.part_type).eq('part_id', a.part_id),
+        (supabase as any).from('part_price_history').select('id', { count: 'exact', head: true }).eq('part_table_name', a.part_type).eq('part_id', a.part_id),
+      ])
+
+      if ((projectLinks.count || 0) > 0 || (poLinks.count || 0) > 0 || (stockLinks.count || 0) > 0 || (historyLinks.count || 0) > 0) {
+        throw new Error(
+          `${a.part_type} #${a.part_id} still has linked BOM/PO/stock/history records and cannot be AI-deleted safely.`
+        )
+      }
+    },
+    handler: async (a: any) => {
+      await assertTempAiDeleteAdmin()
+      if (!part_type_enum.includes(a.part_type)) throw new Error(`Unknown part_type: ${a.part_type}`)
+      assertInteger('part_id', a.part_id)
+      assertNonEmpty('reason', a.reason)
+
+      const { data: row, error } = await (supabase as any)
+        .from(a.part_type)
+        .select('id, part_number')
+        .eq('id', a.part_id)
+        .single()
+      if (error || !row) throw new Error(`${a.part_type} #${a.part_id} does not exist.`)
+
+      await (supabase as any).from(a.part_type).delete().eq('id', a.part_id).throwOnError()
+
+      return {
+        deleted_part_type: a.part_type,
+        deleted_part_id: a.part_id,
+        part_number: row.part_number,
+        reason: a.reason,
       }
     },
   },
