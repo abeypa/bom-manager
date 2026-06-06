@@ -54,6 +54,7 @@ export type ManufacturedPartTrackingItem = TrackingWorkItem & {
   part_type: 'mechanical_manufacture' | 'electrical_manufacture'
   part_number: string
   required_quantity: number
+  ordered_quantity: number
   received_quantity: number
   remaining_quantity: number
   po_count: number
@@ -325,7 +326,7 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
       : Promise.resolve({ data: [] as any[], error: null }),
     supabase
       .from('purchase_order_items')
-      .select('project_part_id, received_qty')
+      .select('project_part_id, quantity, received_qty, purchase_orders(status)')
       .in('project_part_id', manufacturedProjectParts.map((part) => part.id)),
     supabase
       .from('pending_parts')
@@ -355,10 +356,13 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
   }
 
   const poReceivedMap = new Map<number, number>()
+  const poOrderedMap = new Map<number, number>()
   const poCountMap = new Map<number, number>()
-  for (const row of (poItemsResult.data || []) as Array<{ project_part_id: number | null; received_qty?: number | null }>) {
+  for (const row of (poItemsResult.data || []) as Array<{ project_part_id: number | null; quantity?: number | null; received_qty?: number | null; purchase_orders?: { status?: string | null } | null }>) {
     if (!row.project_part_id) continue
+    if (row.purchase_orders?.status === 'Cancelled') continue
     poReceivedMap.set(row.project_part_id, (poReceivedMap.get(row.project_part_id) || 0) + Number(row.received_qty || 0))
+    poOrderedMap.set(row.project_part_id, (poOrderedMap.get(row.project_part_id) || 0) + Number(row.quantity || 0))
     poCountMap.set(row.project_part_id, (poCountMap.get(row.project_part_id) || 0) + 1)
   }
 
@@ -396,9 +400,11 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
     const existing = existingTrackingMap.get(context.projectPart.id)
     const master = context.masterPart
     const requiredQty = Number(context.projectPart.quantity || 0)
+    const orderedQty = Number(poOrderedMap.get(context.projectPart.id) || 0)
     const receivedQty = Number(poReceivedMap.get(context.projectPart.id) || 0)
-    const receiptProgress = requiredQty > 0 ? Math.min(100, Math.round((receivedQty / requiredQty) * 100)) : 0
-    const isReceived = requiredQty > 0 && receivedQty >= requiredQty
+    const progressBaseQty = orderedQty > 0 ? orderedQty : requiredQty
+    const receiptProgress = progressBaseQty > 0 ? Math.min(100, Math.round((receivedQty / progressBaseQty) * 100)) : 0
+    const isReceived = orderedQty > 0 && receivedQty >= orderedQty
     const trackingStatus = isReceived ? 'closed' : existing?.tracking_status || 'not_started'
     const status = isReceived ? 'Approved' : existing?.status || 'Pending'
     const progressPercent = isReceived ? 100 : Math.max(existing?.progress_percent || 0, receiptProgress)
@@ -515,15 +521,17 @@ export const projectTrackingApi = {
         .in('id', projectPartIds),
       supabase
         .from('purchase_order_items')
-        .select('project_part_id, received_qty')
+        .select('project_part_id, quantity, received_qty, purchase_orders(status)')
         .in('project_part_id', projectPartIds),
     ])
 
     const projectPartMap = new Map<number, any>((projectParts || []).map((row: any) => [row.id, row]))
-    const receiptMap = new Map<number, { received: number; count: number }>()
-    for (const row of (poItems || []) as Array<{ project_part_id: number | null; received_qty?: number | null }>) {
+    const receiptMap = new Map<number, { ordered: number; received: number; count: number }>()
+    for (const row of (poItems || []) as Array<{ project_part_id: number | null; quantity?: number | null; received_qty?: number | null; purchase_orders?: { status?: string | null } | null }>) {
       if (!row.project_part_id) continue
-      const existing = receiptMap.get(row.project_part_id) || { received: 0, count: 0 }
+      if (row.purchase_orders?.status === 'Cancelled') continue
+      const existing = receiptMap.get(row.project_part_id) || { ordered: 0, received: 0, count: 0 }
+      existing.ordered += Number(row.quantity || 0)
       existing.received += Number(row.received_qty || 0)
       existing.count += 1
       receiptMap.set(row.project_part_id, existing)
@@ -532,8 +540,9 @@ export const projectTrackingApi = {
     return items.map((item) => {
       const linkedProjectPartId = item.project_part_id as number
       const projectPart = projectPartMap.get(linkedProjectPartId)
-      const receipt = receiptMap.get(linkedProjectPartId) || { received: 0, count: 0 }
+      const receipt = receiptMap.get(linkedProjectPartId) || { ordered: 0, received: 0, count: 0 }
       const requiredQuantity = Number(projectPart?.quantity || 0)
+      const orderedQuantity = receipt.ordered
       const receivedQuantity = receipt.received
       return {
         ...item,
@@ -542,10 +551,11 @@ export const projectTrackingApi = {
         part_type: (projectPart?.part_type || item.category || 'mechanical_manufacture') as ManufacturedPartType,
         part_number: item.name,
         required_quantity: requiredQuantity,
+        ordered_quantity: orderedQuantity,
         received_quantity: receivedQuantity,
-        remaining_quantity: Math.max(0, requiredQuantity - receivedQuantity),
+        remaining_quantity: Math.max(0, (orderedQuantity > 0 ? orderedQuantity : requiredQuantity) - receivedQuantity),
         po_count: receipt.count,
-        is_received: requiredQuantity > 0 && receivedQuantity >= requiredQuantity,
+        is_received: orderedQuantity > 0 && receivedQuantity >= orderedQuantity,
       }
     })
   },
