@@ -19,11 +19,52 @@ export const purchaseOrdersApi = {
       .select(`
         *,
         suppliers (name),
-        project:projects (project_name)
+        project:projects (project_name, project_number)
       `)
       .order('created_date', { ascending: false });
     if (error) throw error;
-    return data;
+    const rows = data || [];
+    if (!rows.length) return rows;
+
+    const poIds = rows.map((po: any) => po.id).filter(Boolean);
+    const { data: itemProjects, error: itemProjectsError } = await supabase
+      .from('purchase_order_items')
+      .select(`
+        purchase_order_id,
+        project_part:project_parts (
+          project_subsection:project_subsections (
+            section:project_sections (
+              project:projects (
+                id,
+                project_number
+              )
+            )
+          )
+        )
+      `)
+      .in('purchase_order_id', poIds);
+    if (itemProjectsError) throw itemProjectsError;
+
+    const projectNumbersByPo = new Map<number, string[]>();
+    for (const row of itemProjects || []) {
+      const poId = (row as any).purchase_order_id;
+      const projectNumber = (row as any)?.project_part?.project_subsection?.section?.project?.project_number;
+      if (!poId || !projectNumber) continue;
+      const current = projectNumbersByPo.get(poId) || [];
+      if (!current.includes(projectNumber)) current.push(projectNumber);
+      projectNumbersByPo.set(poId, current);
+    }
+
+    return rows.map((po: any) => {
+      const mappedProjectNumbers = projectNumbersByPo.get(po.id) || [];
+      const fallbackProjectNumber = po.project?.project_number ? [po.project.project_number] : [];
+      const associatedProjectNumbers = mappedProjectNumbers.length ? mappedProjectNumbers : fallbackProjectNumber;
+      return {
+        ...po,
+        associated_project_numbers: associatedProjectNumbers,
+        associated_project_label: associatedProjectNumbers.join(', '),
+      };
+    });
   },
 
   getPurchaseOrders: async () => {

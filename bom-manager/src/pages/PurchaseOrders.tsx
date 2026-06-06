@@ -166,7 +166,9 @@ export default function PurchaseOrders() {
                       <span className="font-bold text-secondary">{po.suppliers?.name || '—'}</span>
                     </td>
                     <td>
-                      <span className="text-sm font-medium text-tertiary">{po.project?.project_name || 'Global Pool'}</span>
+                      <span className="text-sm font-medium text-tertiary">
+                        {po.associated_project_label || po.project?.project_number || '—'}
+                      </span>
                     </td>
                     <td className="text-right">
                       <div className="font-black text-navy-900 tabular-nums italic">
