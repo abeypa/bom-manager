@@ -23,6 +23,7 @@ export interface ParsedPODocument {
   commercial_adjustment_percent?: number | null
   commercial_adjustment_amount?: number | null
   subtotal: number | null
+  tax_amount: number | null
   total_amount: number | null
   parse_status: 'parsed' | 'needs_review' | 'needs_ocr' | 'failed'
   parse_warnings: string[]
@@ -60,6 +61,10 @@ function parseDiscountPercent(value: string | undefined | null): number | null {
   const parsed = parseNumber(value)
   if (parsed == null || parsed < 0 || parsed > 100) return null
   return parsed
+}
+
+function roundMoney(value: number) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
 }
 
 function normalizeItemCode(value: string | undefined | null) {
@@ -483,6 +488,57 @@ function extractCommercialAdjustment(lines: ParsedPOLine[]) {
   }
 }
 
+function lastNumberInText(value: string) {
+  const matches = [...String(value || '').matchAll(/[-+]?\d[\d,]*(?:\.\d+)?/g)]
+  if (!matches.length) return null
+  return parseNumber(matches[matches.length - 1]?.[0] || null)
+}
+
+function extractExplicitTaxAmount(lines: string[]) {
+  let total = 0
+  let found = false
+
+  for (const raw of lines) {
+    const line = String(raw || '').trim()
+    if (!line) continue
+    if (/\btaxable\s+value\b/i.test(line) || /\btax description\b/i.test(line)) continue
+    if (!/^(?:cgst|sgst|igst|gst|tax(?:\s+amount)?)(?:\b|[\s:()@-])/i.test(line)) continue
+
+    const amount = lastNumberInText(line)
+    if (amount == null) continue
+
+    total += amount
+    found = true
+  }
+
+  return found ? roundMoney(total) : null
+}
+
+function resolveTaxAmount(args: {
+  lines: string[]
+  parsedLines: ParsedPOLine[]
+  basicAmount: number | null
+  subtotal: number | null
+  totalAmount: number | null
+  commercialAdjustmentAmount: number | null | undefined
+}) {
+  const explicit = extractExplicitTaxAmount(args.lines)
+  if (explicit != null) return explicit
+
+  const fallbackBasis =
+    args.subtotal ??
+    args.basicAmount ??
+    roundMoney(
+      args.parsedLines.reduce((sum, line) => sum + Number(line.total_amount || 0), 0) +
+      Number(args.commercialAdjustmentAmount || 0),
+    )
+
+  if (args.totalAmount == null || fallbackBasis == null) return null
+
+  const derived = roundMoney(args.totalAmount - fallbackBasis)
+  return derived > 0 ? derived : null
+}
+
 function parseBepColumnTable(lines: string[]): ParsedPOLine[] {
   const headerStart = lines.findIndex((line, index) =>
     /^sl$/i.test(line) &&
@@ -706,6 +762,7 @@ export function parsePurchaseOrderText(args: {
       currency: 'INR',
       basic_amount: null,
       subtotal: null,
+      tax_amount: null,
       total_amount: null,
       parse_status: 'needs_ocr',
       parse_warnings: ['No text could be extracted. This file may need OCR.'],
@@ -732,6 +789,8 @@ export function parsePurchaseOrderText(args: {
   ])
 
   const parsedBasicAmount = parseNumber(basicRaw)
+  const parsedSubtotal = parseNumber(subtotalRaw)
+  const parsedTotalAmount = parseNumber(totalRaw)
   const visualLines = parseBepVisualTable(lines)
   const columnLines = parseBepColumnTable(lines)
   const genericLines = lines
@@ -767,8 +826,16 @@ export function parsePurchaseOrderText(args: {
     commercial_adjustment_label: commercialAdjustment.label,
     commercial_adjustment_percent: commercialAdjustment.percent,
     commercial_adjustment_amount: commercialAdjustment.amount,
-    subtotal: parseNumber(subtotalRaw),
-    total_amount: parseNumber(totalRaw),
+    subtotal: parsedSubtotal,
+    tax_amount: resolveTaxAmount({
+      lines,
+      parsedLines,
+      basicAmount: parsedBasicAmount,
+      subtotal: parsedSubtotal,
+      totalAmount: parsedTotalAmount,
+      commercialAdjustmentAmount: commercialAdjustment.amount,
+    }),
+    total_amount: parsedTotalAmount,
     parse_status: warnings.length ? 'needs_review' : 'parsed',
     parse_warnings: warnings,
     raw_text: rawText,

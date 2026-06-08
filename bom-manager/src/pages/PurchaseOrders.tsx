@@ -138,6 +138,7 @@ export default function PurchaseOrders() {
                     <th>Supply Partner</th>
                     <th>Associated Project</th>
                     <th className="text-right">Net Valuation</th>
+                    <th className="text-right">PDF Tax</th>
                     <th className="text-center">Payment Done</th>
                     <th className="text-center">Status</th>
                     <th className="w-24" />
@@ -168,6 +169,12 @@ export default function PurchaseOrders() {
                         <div className="font-black text-navy-900 tabular-nums italic">
                           <span className="text-xs not-italic mr-1 text-tertiary">Rs.</span>
                           {(po.grand_total || po.total_amount || 0).toLocaleString('en-IN')}
+                        </div>
+                      </td>
+                      <td className="text-right">
+                        <div className="font-black text-navy-900 tabular-nums">
+                          <span className="text-xs mr-1 text-tertiary">Rs.</span>
+                          {po.tax_amount != null ? Number(po.tax_amount).toLocaleString('en-IN') : '—'}
                         </div>
                       </td>
                       <td className="text-center">

@@ -644,6 +644,8 @@ export default function PODetailModal({
   const totalPaid = payments.reduce((sum, p) => sum + (p.payment_type === 'Refund' ? -p.amount : p.amount), 0);
   const balanceDue = (po?.grand_total || 0) - totalPaid;
   const paymentPct = po?.grand_total ? Math.min(100, (totalPaid / po.grand_total) * 100) : 0;
+  const pdfTaxAmount = Number(po?.tax_amount || 0);
+  const pdfGrossAmount = Number(po?.grand_total || 0) + pdfTaxAmount;
 
   const daysUntilDelivery = po?.expected_delivery_date
     ? Math.ceil((new Date(po.expected_delivery_date).getTime() - Date.now()) / 86400000)
@@ -767,13 +769,20 @@ export default function PODetailModal({
               {activeTab === 'overview' && (
                 <div className="space-y-8">
                   {/* Key metrics */}
-                  <div className="grid grid-cols-3 gap-5">
+                  <div className="grid grid-cols-4 gap-5">
                     <div className="bg-gray-50 rounded-[2rem] p-6 flex flex-col gap-1">
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">PO Value</p>
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Net PO Value</p>
                       <p className="text-2xl font-black text-gray-900 tabular-nums">
                         ₹{po?.grand_total?.toLocaleString('en-IN')}
                       </p>
                       <p className="text-[10px] text-gray-400 font-bold uppercase">{po?.currency}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-[2rem] p-6 flex flex-col gap-1">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">PDF Tax Value</p>
+                      <p className="text-2xl font-black text-gray-900 tabular-nums">
+                        {po?.tax_amount != null ? `₹${pdfTaxAmount.toLocaleString('en-IN')}` : '—'}
+                      </p>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase">Captured from attached PDF</p>
                     </div>
                     <div className={`rounded-[2rem] p-6 flex flex-col gap-1 ${isOverdue ? 'bg-red-50' : 'bg-gray-50'}`}>
                       <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Expected Delivery</p>
@@ -792,12 +801,14 @@ export default function PODetailModal({
                       )}
                     </div>
                     <div className="bg-gray-50 rounded-[2rem] p-6 flex flex-col gap-1">
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Payment</p>
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Payment / PDF Gross</p>
                       <p className="text-2xl font-black text-gray-900 tabular-nums">
                         ₹{totalPaid.toLocaleString('en-IN')}
                       </p>
                       <p className="text-[10px] text-gray-400 font-bold uppercase">
-                        of ₹{po?.grand_total?.toLocaleString('en-IN')} paid
+                        {po?.tax_amount != null
+                          ? `PDF gross ₹${pdfGrossAmount.toLocaleString('en-IN')}`
+                          : `of ₹${po?.grand_total?.toLocaleString('en-IN')} paid`}
                       </p>
                     </div>
                   </div>
@@ -1035,7 +1046,12 @@ export default function PODetailModal({
                   </div>
                   <div className="bg-gray-50 rounded-2xl p-4 flex justify-between items-center">
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">{po?.purchase_order_items?.length || 0} line items</span>
-                    <span className="text-lg font-black text-gray-900">PO Total: ₹{po?.grand_total?.toLocaleString('en-IN')}</span>
+                    <div className="text-right">
+                      <div className="text-lg font-black text-gray-900">PO Total: ₹{po?.grand_total?.toLocaleString('en-IN')}</div>
+                      <div className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                        PDF Tax: {po?.tax_amount != null ? `₹${pdfTaxAmount.toLocaleString('en-IN')}` : '—'}
+                      </div>
+                    </div>
                   </div>
 
                   {/* ── Receipt History (Audit Trail) ── */}

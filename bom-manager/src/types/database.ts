@@ -459,6 +459,7 @@ export interface Database {
           status: 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled'
           currency: string
           grand_total: number
+          tax_amount: number | null
           original_currency: string | null
           original_grand_total: number | null
           exchange_rate: number | null
@@ -486,6 +487,7 @@ export interface Database {
           status?: 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled'
           currency?: string
           grand_total?: number
+          tax_amount?: number | null
           original_currency?: string | null
           original_grand_total?: number | null
           exchange_rate?: number | null

@@ -76,6 +76,9 @@ export const exportUtils = {
     csv += `Supplier,"${po.suppliers?.name || '-'}"\n`;
     csv += `Date,${new Date(po.created_date).toLocaleDateString('en-IN')}\n`;
     csv += `Status,${po.status}\n\n`;
+    csv += `Net Value,${Number(po.grand_total || 0).toFixed(2)}\n`;
+    csv += `PDF Tax Value,${po.tax_amount != null ? Number(po.tax_amount).toFixed(2) : ''}\n`;
+    csv += `PDF Gross Value,${po.tax_amount != null ? (Number(po.grand_total || 0) + Number(po.tax_amount || 0)).toFixed(2) : ''}\n\n`;
     
     // Header for items
     csv += 'Part Number,Manufacturer Part No,Description,Qty,Unit Price,Discount %,Total\n';

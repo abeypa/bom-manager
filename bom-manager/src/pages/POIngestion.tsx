@@ -151,6 +151,7 @@ export default function POIngestion() {
             currency: 'INR',
             basic_amount: null,
             subtotal: null,
+            tax_amount: null,
             total_amount: null,
             parse_status: 'needs_ocr',
             parse_warnings: ['Only text-based PDFs are parsed in this first version. Convert this file to PDF text or process it with OCR later.'],

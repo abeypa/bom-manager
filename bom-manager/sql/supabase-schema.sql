@@ -318,6 +318,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
                     CHECK (status IN ('Pending','Sent','Confirmed','Partial','Received','Cancelled')),
   currency        TEXT NOT NULL DEFAULT 'INR',
   grand_total     NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  tax_amount      NUMERIC(18, 2),
   original_currency TEXT,
   original_grand_total NUMERIC(18, 2),
   exchange_rate NUMERIC(18, 6),

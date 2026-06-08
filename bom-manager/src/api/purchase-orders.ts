@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import type { Database } from '@/types/database'
+import { extractPurchaseOrderPdfTaxAmount } from '@/lib/po-pdf-tax'
 
 export type PurchaseOrder = Database['public']['Tables']['purchase_orders']['Row']
 export type PurchaseOrderInsert = Database['public']['Tables']['purchase_orders']['Insert']
@@ -280,9 +281,27 @@ export const purchaseOrdersApi = {
   },
 
   updatePurchaseOrder: async (poId: number, updateData: any) => {
+    const payload = { ...updateData }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'bep_po_pdf_url')) {
+      const pdfRef = String(payload.bep_po_pdf_url || '').trim()
+      if (!pdfRef) {
+        payload.bep_po_pdf_url = null
+        payload.tax_amount = null
+      } else {
+        payload.bep_po_pdf_url = pdfRef
+        try {
+          payload.tax_amount = await extractPurchaseOrderPdfTaxAmount(pdfRef, `PO-${poId}`)
+        } catch (error) {
+          console.warn(`Failed to extract PDF tax amount for PO ${poId}:`, error)
+          payload.tax_amount = null
+        }
+      }
+    }
+
     const { data, error } = await (supabase as any)
       .from('purchase_orders')
-      .update(updateData)
+      .update(payload)
       .eq('id', poId)
       .select()
       .single();
@@ -291,8 +310,18 @@ export const purchaseOrdersApi = {
   },
 
   createPurchaseOrderWithItems: async (po: PurchaseOrderInsert, items: any[]) => {
+    const poPayload: any = { ...po }
+    if (poPayload.bep_po_pdf_url && poPayload.tax_amount == null) {
+      try {
+        poPayload.tax_amount = await extractPurchaseOrderPdfTaxAmount(poPayload.bep_po_pdf_url, poPayload.po_number)
+      } catch (error) {
+        console.warn(`Failed to extract PDF tax amount while creating PO ${poPayload.po_number}:`, error)
+        poPayload.tax_amount = null
+      }
+    }
+
     const { data: newPO, error: poError } = await (supabase as any).from('purchase_orders')
-      .insert([po])
+      .insert([poPayload])
       .select()
       .single();
 
