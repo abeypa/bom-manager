@@ -10,6 +10,10 @@ export type PurchaseOrderItem = Database['public']['Tables']['purchase_order_ite
 export type POStatus = 'Draft' | 'Released' | 'Pending' | 'Sent' | 'Confirmed' | 'Partial' | 'Received' | 'Cancelled';
 
 const roundMoney = (value: number) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
+const normalizePaymentAmount = (payment: any) => {
+  const amount = Number(payment?.amount || 0)
+  return payment?.payment_type === 'Refund' ? -amount : amount
+}
 
 export const purchaseOrdersApi = {
   // Get all POs
@@ -32,6 +36,12 @@ export const purchaseOrdersApi = {
       .select('purchase_order_id, project_part_id')
       .in('purchase_order_id', poIds);
     if (poItemsError) throw poItemsError;
+
+    const { data: paymentRows, error: paymentsError } = await supabase
+      .from('po_payments')
+      .select('purchase_order_id, amount, payment_type')
+      .in('purchase_order_id', poIds)
+    if (paymentsError) throw paymentsError;
 
     const projectPartIds = Array.from(
       new Set((poItems || []).map((item: any) => item.project_part_id).filter(Boolean))
@@ -84,6 +94,13 @@ export const purchaseOrdersApi = {
     const projectIdToNumber = new Map(
       projectRows.map((project: any) => [project.id, project.project_number])
     );
+    const paymentTotalsByPo = new Map<number, number>();
+
+    for (const payment of paymentRows || []) {
+      const poId = (payment as any).purchase_order_id
+      if (!poId) continue
+      paymentTotalsByPo.set(poId, roundMoney((paymentTotalsByPo.get(poId) || 0) + normalizePaymentAmount(payment)))
+    }
 
     const projectNumbersByPo = new Map<number, string[]>();
     for (const row of poItems || []) {
@@ -101,10 +118,16 @@ export const purchaseOrdersApi = {
       const mappedProjectNumbers = projectNumbersByPo.get(po.id) || [];
       const fallbackProjectNumber = po.project?.project_number ? [po.project.project_number] : [];
       const associatedProjectNumbers = mappedProjectNumbers.length ? mappedProjectNumbers : fallbackProjectNumber;
+      const totalValue = Number(po.grand_total || po.total_amount || 0)
+      const paidAmount = roundMoney(paymentTotalsByPo.get(po.id) || 0)
+      const paymentPercent = totalValue > 0 ? Math.min(100, Math.max(0, roundMoney((paidAmount / totalValue) * 100))) : 0
+
       return {
         ...po,
         associated_project_numbers: associatedProjectNumbers,
         associated_project_label: associatedProjectNumbers.join(', '),
+        paid_amount: paidAmount,
+        payment_percent: paymentPercent,
       };
     });
   },
