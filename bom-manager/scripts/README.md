@@ -83,6 +83,40 @@ npm run backfill:po-price-history
 - The script is idempotent for the same part / PO / date / price / currency / discount combination.
 - It resolves master parts from ingestion mappings first, then falls back to ERP item code lookup in master tables.
 
+### `backfill_po_tax_amounts.mjs` - Purchase Order PDF Tax Backfill
+Backfills `purchase_orders.tax_amount` for existing POs that already have an attached BEP PO PDF.
+
+#### What it uses
+- `purchase_orders.bep_po_pdf_url`
+- PDF text extracted via `scripts/extract_pdf_text.py`
+- Tax labels such as `CGST`, `SGST`, `IGST`, `GST`, or a derived value from `grand total - subtotal/basic`
+
+#### Requirements
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `python`
+- Python package `pypdf`
+
+#### Usage
+```bash
+# Preview only
+npm run backfill:po-tax-amounts -- --dry-run
+
+# Backfill one PO
+npm run backfill:po-tax-amounts -- --po-number "PO/P/25-26/100077"
+
+# Backfill the latest 200 missing-tax POs
+npm run backfill:po-tax-amounts -- --limit 200
+
+# Re-scan even rows that already have tax_amount
+npm run backfill:po-tax-amounts -- --include-filled
+```
+
+#### Notes
+- The script updates only `purchase_orders.tax_amount` and `updated_date`.
+- It does not change PO status, PO line items, or `grand_total`.
+- Rows that still cannot be parsed are skipped and reported for manual review.
+
 ## Best Practices for User Management
 
 ### 1. User Creation

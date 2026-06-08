@@ -25,6 +25,7 @@ import { auditPurchaseOrderPdf } from '@/lib/po-pdf-audit'
 import { getSignedUrl } from '@/api/storage'
 import { urlToPDFAttachment } from '@/lib/ai-attachments'
 import { parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
+import { backfillPurchaseOrderPdfTaxAmounts } from '@/lib/po-tax-backfill'
 import {
   findExistingProjectPartInProject,
   isProjectPartDuplicateExemptMaster,
@@ -1775,6 +1776,41 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       }
     },
   },
+  {
+    name: 'preview_purchase_order_pdf_tax_backfill',
+    kind: 'read',
+    description:
+      'Preview which purchase orders with attached BEP PO PDFs can have purchase_orders.tax_amount backfilled from the PDF. Does not write any data.',
+    parameters: {
+      type: 'object',
+      properties: {
+        po_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional specific PO ids to preview. If omitted, preview recent attached POs with missing tax_amount.',
+        },
+        limit: { type: 'number', description: 'Maximum POs to scan. Default 50, max 500.' },
+        only_missing: {
+          type: 'boolean',
+          default: true,
+          description: 'When true, preview only POs whose tax_amount is currently null.',
+        },
+      },
+    },
+    handler: async ({ po_ids, limit = 50, only_missing = true }: any) => {
+      const result = await backfillPurchaseOrderPdfTaxAmounts({
+        poIds: Array.isArray(po_ids) ? po_ids : undefined,
+        limit,
+        onlyMissing: Boolean(only_missing),
+        dryRun: true,
+      })
+      return {
+        ...result,
+        rows: result.rows.slice(0, 100),
+        has_more_rows: result.rows.length > 100,
+      }
+    },
+  },
 
   {
     name: 'preview_existing_po_pdf_correction',
@@ -1813,6 +1849,45 @@ export const TOOL_REGISTRY: ToolSpec[] = [
   },
 
   // ── WRITE (require user approval) ───────────────────────────────────────
+  {
+    name: 'apply_purchase_order_pdf_tax_backfill',
+    kind: 'write',
+    description:
+      'Backfill purchase_orders.tax_amount for existing POs by parsing each attached BEP PO PDF. Updates only the tax field and updated_date; does not change PO status, lines, or totals. Requires approval.',
+    parameters: {
+      type: 'object',
+      properties: {
+        po_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional specific PO ids to backfill. If omitted, processes recent attached POs that are missing tax_amount.',
+        },
+        limit: { type: 'number', description: 'Maximum POs to process. Default 50, max 500.' },
+        only_missing: {
+          type: 'boolean',
+          default: true,
+          description: 'When true, update only POs whose tax_amount is currently null.',
+        },
+      },
+    },
+    summarize: (a) => {
+      const scoped = Array.isArray(a.po_ids) && a.po_ids.length ? `${a.po_ids.length} selected POs` : `${a.limit || 50} attached POs`
+      return `Backfill PDF tax amounts for ${scoped}${a.only_missing === false ? ' (including already-filled rows)' : ' (missing tax only)'}`
+    },
+    handler: async ({ po_ids, limit = 50, only_missing = true }: any) => {
+      const result = await backfillPurchaseOrderPdfTaxAmounts({
+        poIds: Array.isArray(po_ids) ? po_ids : undefined,
+        limit,
+        onlyMissing: Boolean(only_missing),
+        dryRun: false,
+      })
+      return {
+        ...result,
+        rows: result.rows.slice(0, 100),
+        has_more_rows: result.rows.length > 100,
+      }
+    },
+  },
   {
     name: 'preview_released_po_pdf_repairs',
     kind: 'read',
