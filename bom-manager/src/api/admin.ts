@@ -189,14 +189,22 @@ export const adminApi = {
     if (updates.fullName !== undefined) patch.full_name = updates.fullName;
     if (updates.email !== undefined) patch.email = updates.email;
 
-    const { data, error } = await (supabase as any)
+    const { error } = await (supabase as any)
       .from('profiles')
       .update(patch)
       .eq('id', userId)
-      .select()
-      .single();
+      .throwOnError();
 
     if (error) throw error;
+
+    const { data, error: fetchError } = await (supabase as any)
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+    if (!data) throw new Error('Profile updated, but the refreshed record could not be loaded.');
 
     logActivityAsync({
       action: 'UPDATE',
@@ -231,7 +239,13 @@ export const adminApi = {
       target_user_id: userId,
       new_password: newPassword,
     });
-    if (error) throw error;
+    if (error) {
+      const message = String(error.message || '')
+      if (message.includes('gen_salt') || message.includes('crypt(') || message.includes('pgcrypto')) {
+        throw new Error('Database password reset function is missing pgcrypto support. Run the latest admin password reset SQL migration and try again.')
+      }
+      throw error;
+    }
 
     logActivityAsync({
       action: 'PASSWORD_RESET',

@@ -1,17 +1,6 @@
--- ================================================================
--- ADMIN PASSWORD RESET — SUPABASE RPC FUNCTION
--- ================================================================
--- Deploy this in: Supabase Dashboard → SQL Editor → New Query → Paste → Run
---
--- This function allows admin users to change another user's password
--- using SECURITY DEFINER to access the Supabase Auth admin API
--- from within a PL/pgSQL function.
--- ================================================================
-
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
--- Step 1: Create the admin_reset_user_password function
-CREATE OR REPLACE FUNCTION admin_reset_user_password(
+CREATE OR REPLACE FUNCTION public.admin_reset_user_password(
   target_user_id UUID,
   new_password TEXT
 )
@@ -24,14 +13,12 @@ DECLARE
   caller_id UUID;
   caller_role TEXT;
 BEGIN
-  -- Get the calling user's ID from the JWT
   caller_id := auth.uid();
-  
+
   IF caller_id IS NULL THEN
     RAISE EXCEPTION 'Authentication required';
   END IF;
 
-  -- Verify the caller is an admin
   SELECT role INTO caller_role
   FROM public.profiles
   WHERE id = caller_id;
@@ -40,18 +27,14 @@ BEGIN
     RAISE EXCEPTION 'Insufficient privileges: admin role required';
   END IF;
 
-  -- Prevent self-password-reset through this function
   IF caller_id = target_user_id THEN
     RAISE EXCEPTION 'Cannot reset your own password through admin function. Use the standard password change flow.';
   END IF;
 
-  -- Validate password
   IF length(new_password) < 6 THEN
     RAISE EXCEPTION 'Password must be at least 6 characters';
   END IF;
 
-  -- Update the user's password in auth.users
-  -- This uses the internal Supabase auth schema, accessible via SECURITY DEFINER
   UPDATE auth.users
   SET
     encrypted_password = extensions.crypt(new_password, extensions.gen_salt('bf')),
@@ -62,12 +45,10 @@ BEGIN
     RAISE EXCEPTION 'Target user not found in auth system';
   END IF;
 
-  -- Update the profiles table timestamp
   UPDATE public.profiles
   SET updated_date = now()
   WHERE id = target_user_id;
 
-  -- Log this action (if activity_logs table exists)
   BEGIN
     INSERT INTO public.activity_logs (
       performed_by,
@@ -85,17 +66,9 @@ BEGIN
       jsonb_build_object('password_changed', true, 'changed_by_admin', true)
     );
   EXCEPTION WHEN undefined_table THEN
-    -- activity_logs table doesn't exist yet, skip logging
     NULL;
   END;
 END;
 $$;
 
--- Grant execute permission to authenticated users (admin check is inside)
-GRANT EXECUTE ON FUNCTION admin_reset_user_password(UUID, TEXT) TO authenticated;
-
--- ================================================================
--- DONE ✓
--- Test by calling:
---   SELECT admin_reset_user_password('target-uuid', 'new-password');
--- ================================================================
+GRANT EXECUTE ON FUNCTION public.admin_reset_user_password(UUID, TEXT) TO authenticated;
