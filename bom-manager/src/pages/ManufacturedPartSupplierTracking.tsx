@@ -67,7 +67,7 @@ export default function ManufacturedPartSupplierTracking() {
   const { user } = useAuth()
   const { isAdmin } = useRole()
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('open')
   const [updateItem, setUpdateItem] = useState<ManufacturedPartTrackingItem | null>(null)
 
   useEffect(() => {
