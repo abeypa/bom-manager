@@ -826,12 +826,36 @@ export const purchaseOrdersApi = {
       items
         .filter((item) => item.receivingQty > 0)
         .map(async (item) => {
+          const { data: poItem, error: poItemError } = await (supabase as any)
+            .from('purchase_order_items')
+            .select('id, quantity, received_qty, part_id, part_type, part_number')
+            .eq('id', item.itemId)
+            .eq('purchase_order_id', poId)
+            .single()
+
+          if (poItemError) throw poItemError
+          if (!poItem) throw new Error(`PO line ${item.itemId} was not found.`)
+
+          const orderedQty = Number((poItem as any).quantity || 0)
+          const currentReceivedQty = Number((poItem as any).received_qty || 0)
+          const nextReceivedQty = currentReceivedQty + item.receivingQty
+
+          if (nextReceivedQty > orderedQty) {
+            const remainingQty = Math.max(0, orderedQty - currentReceivedQty)
+            throw new Error(
+              `Cannot receive ${item.receivingQty} for "${(poItem as any).part_number || item.partNumber}": only ${remainingQty} remaining on PO ${poNumber}.`,
+            )
+          }
+
           // 1. Get current master stock
-          const { data: part } = await (supabase as any)
+          const { data: part, error: partError } = await (supabase as any)
             .from(item.partType)
             .select('stock_quantity')
             .eq('id', item.partId)
             .single();
+
+          if (partError) throw partError
+          if (!part) throw new Error(`Part ${item.partNumber} was not found in ${item.partType}.`)
 
           const stockBefore = (part as any)?.stock_quantity ?? 0;
           const stockAfter = stockBefore + item.receivingQty;
@@ -844,28 +868,36 @@ export const purchaseOrdersApi = {
                 stock_quantity: stockAfter,
                 updated_date: new Date().toISOString(),
               })
-              .eq('id', item.partId),
+              .eq('id', item.partId)
+              .throwOnError(),
 
             (supabase as any)
               .from('purchase_order_items')
               .update({
-                received_qty: item.currentReceivedQty + item.receivingQty,
+                received_qty: nextReceivedQty,
               })
-              .eq('id', item.itemId),
+              .eq('id', item.itemId)
+              .eq('received_qty', currentReceivedQty)
+              .select('id')
+              .single()
+              .throwOnError(),
 
-            (supabase as any).from('stock_movements').insert({
-              movement_type: 'IN',
-              part_table_name: item.partType,
-              part_id: item.partId,
-              part_number: item.partNumber,
-              quantity: item.receivingQty,
-              stock_before: stockBefore,
-              stock_after: stockAfter,
-              po_number: poNumber,
-              supplier_name: supplierName,
-              moved_by: userEmail,
-              reference_notes: `Received against PO #${poNumber}`,
-            }),
+            (supabase as any)
+              .from('stock_movements')
+              .insert({
+                movement_type: 'IN',
+                part_table_name: item.partType,
+                part_id: item.partId,
+                part_number: item.partNumber,
+                quantity: item.receivingQty,
+                stock_before: stockBefore,
+                stock_after: stockAfter,
+                po_number: poNumber,
+                supplier_name: supplierName,
+                moved_by: userEmail,
+                reference_notes: `Received against PO #${poNumber}`,
+              })
+              .throwOnError(),
           ]);
         })
     );
@@ -874,6 +906,10 @@ export const purchaseOrdersApi = {
     const failed = results.filter((r) => r.status === 'rejected');
     if (failed.length > 0) {
       console.error('Some items failed to receive:', failed);
+      const firstFailure = failed[0] as PromiseRejectedResult;
+      throw firstFailure.reason instanceof Error
+        ? firstFailure.reason
+        : new Error('One or more PO receipt updates failed.');
     }
 
     // Re-fetch all items for this PO to determine new overall status

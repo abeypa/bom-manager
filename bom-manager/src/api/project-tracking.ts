@@ -264,6 +264,85 @@ const enrichUpdates = async (updates: WorkItemUpdateRow[]): Promise<TrackingRece
   })
 }
 
+const hasTrackingSyncChanges = (
+  existing: PendingPartRow,
+  payload: Database['public']['Tables']['pending_parts']['Update'],
+) => {
+  const fields: Array<keyof Database['public']['Tables']['pending_parts']['Update']> = [
+    'project_id',
+    'project_part_id',
+    'section_id',
+    'subsection_id',
+    'supplier_id',
+    'name',
+    'description',
+    'category',
+    'status',
+    'progress_percent',
+    'tracking_status',
+    'closed_at',
+    'closed_by',
+  ]
+
+  return fields.some((field) => existing[field] !== payload[field])
+}
+
+const buildManufacturedPartTrackingItems = async (items: TrackingWorkItem[]): Promise<ManufacturedPartTrackingItem[]> => {
+  const projectPartIds = items.map((item) => item.project_part_id).filter(Boolean) as number[]
+  if (!projectPartIds.length) return []
+
+  const [{ data: projectParts, error: projectPartsError }, { data: poItems, error: poItemsError }] = await Promise.all([
+    supabase
+      .from('project_parts')
+      .select('id, part_type, part_id, quantity')
+      .in('id', projectPartIds),
+    supabase
+      .from('purchase_order_items')
+      .select('project_part_id, quantity, received_qty, purchase_orders(status)')
+      .in('project_part_id', projectPartIds),
+  ])
+
+  if (projectPartsError) throw projectPartsError
+  if (poItemsError) throw poItemsError
+
+  const projectPartMap = new Map<number, any>((projectParts || []).map((row: any) => [row.id, row]))
+  const receiptMap = new Map<number, { ordered: number; received: number; count: number }>()
+
+  for (const row of (poItems || []) as Array<{ project_part_id: number | null; quantity?: number | null; received_qty?: number | null; purchase_orders?: { status?: string | null } | null }>) {
+    if (!row.project_part_id) continue
+    if (row.purchase_orders?.status === 'Cancelled') continue
+
+    const existing = receiptMap.get(row.project_part_id) || { ordered: 0, received: 0, count: 0 }
+    existing.ordered += Number(row.quantity || 0)
+    existing.received += Number(row.received_qty || 0)
+    existing.count += 1
+    receiptMap.set(row.project_part_id, existing)
+  }
+
+  return items.map((item) => {
+    const linkedProjectPartId = item.project_part_id as number
+    const projectPart = projectPartMap.get(linkedProjectPartId)
+    const receipt = receiptMap.get(linkedProjectPartId) || { ordered: 0, received: 0, count: 0 }
+    const requiredQuantity = Number(projectPart?.quantity || 0)
+    const orderedQuantity = receipt.ordered
+    const receivedQuantity = receipt.received
+
+    return {
+      ...item,
+      project_part_id: linkedProjectPartId,
+      part_id: Number(projectPart?.part_id || 0),
+      part_type: (projectPart?.part_type || item.category || 'mechanical_manufacture') as ManufacturedPartType,
+      part_number: item.name,
+      required_quantity: requiredQuantity,
+      ordered_quantity: orderedQuantity,
+      received_quantity: receivedQuantity,
+      remaining_quantity: Math.max(0, (orderedQuantity > 0 ? orderedQuantity : requiredQuantity) - receivedQuantity),
+      po_count: receipt.count,
+      is_received: orderedQuantity > 0 && receivedQuantity >= orderedQuantity,
+    }
+  })
+}
+
 const syncManufacturedTrackingItems = async (projectId?: number): Promise<TrackingWorkItem[]> => {
   let subsectionsQuery = supabase
     .from('project_subsections')
@@ -429,7 +508,6 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
       status,
       progress_percent: progressPercent,
       tracking_status: trackingStatus,
-      updated_at: now,
       closed_at: isReceived ? existing?.closed_at || now : null,
       closed_by: isReceived ? existing?.closed_by || null : null,
     }
@@ -437,6 +515,7 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
     if (!existing) {
       inserts.push({
         ...payload,
+        updated_at: now,
         priority: 'Medium',
         item_type: 'work_item',
         discussion_status: 'open',
@@ -451,7 +530,15 @@ const syncManufacturedTrackingItems = async (projectId?: number): Promise<Tracki
       continue
     }
 
-    updates.push({ id: existing.id, payload })
+    if (!hasTrackingSyncChanges(existing, payload)) continue
+
+    updates.push({
+      id: existing.id,
+      payload: {
+        ...payload,
+        updated_at: now,
+      },
+    })
   }
 
   if (inserts.length) {
@@ -508,62 +595,12 @@ export const projectTrackingApi = {
   getManufacturedPartWorkItems: async (assignedTo?: string): Promise<ManufacturedPartTrackingItem[]> => {
     let items = await syncManufacturedTrackingItems()
     if (assignedTo) items = items.filter((item) => item.assigned_to === assignedTo)
-    const projectIds = Array.from(new Set(items.map((item) => item.project_id).filter(Boolean))) as number[]
-    if (!projectIds.length) return []
-
-    const projectScopedResults = await Promise.all(projectIds.map((currentProjectId) => projectTrackingApi.getProjectManufacturedPartTracking(currentProjectId)))
-    return projectScopedResults.flat().filter((item) => !assignedTo || item.assigned_to === assignedTo)
+    return buildManufacturedPartTrackingItems(items)
   },
 
   getProjectManufacturedPartTracking: async (projectId: number): Promise<ManufacturedPartTrackingItem[]> => {
     const items = await syncManufacturedTrackingItems(projectId)
-    const projectPartIds = items.map((item) => item.project_part_id).filter(Boolean) as number[]
-    if (!projectPartIds.length) return []
-
-    const [{ data: projectParts }, { data: poItems }] = await Promise.all([
-      supabase
-        .from('project_parts')
-        .select('id, part_type, part_id, quantity')
-        .in('id', projectPartIds),
-      supabase
-        .from('purchase_order_items')
-        .select('project_part_id, quantity, received_qty, purchase_orders(status)')
-        .in('project_part_id', projectPartIds),
-    ])
-
-    const projectPartMap = new Map<number, any>((projectParts || []).map((row: any) => [row.id, row]))
-    const receiptMap = new Map<number, { ordered: number; received: number; count: number }>()
-    for (const row of (poItems || []) as Array<{ project_part_id: number | null; quantity?: number | null; received_qty?: number | null; purchase_orders?: { status?: string | null } | null }>) {
-      if (!row.project_part_id) continue
-      if (row.purchase_orders?.status === 'Cancelled') continue
-      const existing = receiptMap.get(row.project_part_id) || { ordered: 0, received: 0, count: 0 }
-      existing.ordered += Number(row.quantity || 0)
-      existing.received += Number(row.received_qty || 0)
-      existing.count += 1
-      receiptMap.set(row.project_part_id, existing)
-    }
-
-    return items.map((item) => {
-      const linkedProjectPartId = item.project_part_id as number
-      const projectPart = projectPartMap.get(linkedProjectPartId)
-      const receipt = receiptMap.get(linkedProjectPartId) || { ordered: 0, received: 0, count: 0 }
-      const requiredQuantity = Number(projectPart?.quantity || 0)
-      const orderedQuantity = receipt.ordered
-      const receivedQuantity = receipt.received
-      return {
-        ...item,
-        project_part_id: linkedProjectPartId,
-        part_id: Number(projectPart?.part_id || 0),
-        part_type: (projectPart?.part_type || item.category || 'mechanical_manufacture') as ManufacturedPartType,
-        part_number: item.name,
-        required_quantity: requiredQuantity,
-        ordered_quantity: orderedQuantity,
-        received_quantity: receivedQuantity,
-        remaining_quantity: Math.max(0, (orderedQuantity > 0 ? orderedQuantity : requiredQuantity) - receivedQuantity),
-        po_count: receipt.count,
-        is_received: orderedQuantity > 0 && receivedQuantity >= orderedQuantity,
-      }
-    })
+    return buildManufacturedPartTrackingItems(items)
   },
 
   getSupplierAssignments: async (filters?: TrackingAssignmentFilter): Promise<TrackingSupplierAssignment[]> => {

@@ -3,16 +3,33 @@ import { useNavigate } from 'react-router-dom'
 import { Search, X } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { projectsApi } from '@/api/projects'
-import { partsApi } from '@/api/parts'
+import { partsApi, type PartCategory } from '@/api/parts'
+
+const SEARCHABLE_PART_CATEGORIES: PartCategory[] = [
+  'mechanical_manufacture',
+  'mechanical_bought_out',
+  'electrical_manufacture',
+  'electrical_bought_out',
+  'pneumatic_bought_out',
+]
 
 const SearchOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
 
   const { data: projects = [] as any[] } = useQuery<any[]>({ queryKey: ['projects'], queryFn: projectsApi.getProjects as any, enabled: isOpen })
-  const { data: parts = [] as any[] } = useQuery<any[]>({ queryKey: ['parts'], queryFn: partsApi.getParts as any, enabled: isOpen })
+  const { data: parts = [] as any[] } = useQuery<any[]>({
+    queryKey: ['parts', 'search-overlay'],
+    queryFn: async () => {
+      const groupedParts = await Promise.all(
+        SEARCHABLE_PART_CATEGORIES.map((category) => partsApi.getParts(category)),
+      )
+      return groupedParts.flat()
+    },
+    enabled: isOpen,
+  })
 
-  const filteredProjects = projects.filter((p: any) => p.name?.toLowerCase().includes(query.toLowerCase()) || p.project_number?.toLowerCase().includes(query.toLowerCase()))
+  const filteredProjects = projects.filter((p: any) => p.project_name?.toLowerCase().includes(query.toLowerCase()) || p.project_number?.toLowerCase().includes(query.toLowerCase()))
   const filteredParts = parts.filter((p: any) => p.part_number?.toLowerCase().includes(query.toLowerCase()) || p.description?.toLowerCase().includes(query.toLowerCase()))
 
   useEffect(() => {
