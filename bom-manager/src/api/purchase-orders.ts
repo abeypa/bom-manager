@@ -119,7 +119,7 @@ export const purchaseOrdersApi = {
       const mappedProjectNumbers = projectNumbersByPo.get(po.id) || [];
       const fallbackProjectNumber = po.project?.project_number ? [po.project.project_number] : [];
       const associatedProjectNumbers = mappedProjectNumbers.length ? mappedProjectNumbers : fallbackProjectNumber;
-      const totalValue = Number(po.grand_total || po.total_amount || 0)
+      const totalValue = Number(po.grand_total || po.total_amount || 0) + Number(po.tax_amount || 0)
       const paidAmount = roundMoney(paymentTotalsByPo.get(po.id) || 0)
       const paymentPercent = totalValue > 0 ? Math.min(100, Math.max(0, roundMoney((paidAmount / totalValue) * 100))) : 0
 

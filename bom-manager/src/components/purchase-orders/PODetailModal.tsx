@@ -642,10 +642,11 @@ export default function PODetailModal({
   if (!isOpen) return null;
 
   const totalPaid = payments.reduce((sum, p) => sum + (p.payment_type === 'Refund' ? -p.amount : p.amount), 0);
-  const balanceDue = (po?.grand_total || 0) - totalPaid;
-  const paymentPct = po?.grand_total ? Math.min(100, (totalPaid / po.grand_total) * 100) : 0;
   const pdfTaxAmount = Number(po?.tax_amount || 0);
   const pdfGrossAmount = Number(po?.grand_total || 0) + pdfTaxAmount;
+  const payableTotal = po?.tax_amount != null ? pdfGrossAmount : Number(po?.grand_total || 0);
+  const balanceDue = payableTotal - totalPaid;
+  const paymentPct = payableTotal > 0 ? Math.min(100, (totalPaid / payableTotal) * 100) : 0;
 
   const daysUntilDelivery = po?.expected_delivery_date
     ? Math.ceil((new Date(po.expected_delivery_date).getTime() - Date.now()) / 86400000)
@@ -1238,8 +1239,15 @@ export default function PODetailModal({
                   {/* Summary cards */}
                   <div className="grid grid-cols-3 gap-5">
                     <div className="bg-gray-50 rounded-[2rem] p-6">
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">PO Total</p>
-                      <p className="text-2xl font-black text-gray-900 tabular-nums">₹{po?.grand_total?.toLocaleString('en-IN')}</p>
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                        {po?.tax_amount != null ? 'PO Gross Total' : 'PO Total'}
+                      </p>
+                      <p className="text-2xl font-black text-gray-900 tabular-nums">₹{payableTotal.toLocaleString('en-IN')}</p>
+                      {po?.tax_amount != null && (
+                        <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">
+                          Net ₹{Number(po?.grand_total || 0).toLocaleString('en-IN')} + Tax ₹{pdfTaxAmount.toLocaleString('en-IN')}
+                        </p>
+                      )}
                     </div>
                     <div className="bg-emerald-50 rounded-[2rem] p-6">
                       <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-2">Total Paid</p>
