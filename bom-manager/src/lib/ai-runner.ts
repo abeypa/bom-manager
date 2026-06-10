@@ -427,8 +427,10 @@ F. DRAFT THE PO FROM THE SAME SOURCE PDF
      4. Propose create_draft_po and wait for user approval.
 
    When the user approves, the new PO appears under
-   /purchase-orders in Draft state. They can attach the source PDF as
-   the BEP PO PDF and release it manually — the AI never does that.
+   /purchase-orders in Draft state. If the source PDF was attached in
+   chat, save and link that PDF to the draft PO automatically. The
+   user still reviews the draft and releases it manually — the AI
+   never changes PO status beyond Draft.
 
 ═══════════════════════════════════════════════════════════════════════
 WORKFLOW G: STOCK MOVEMENT FROM AN ALREADY-RELEASED PO

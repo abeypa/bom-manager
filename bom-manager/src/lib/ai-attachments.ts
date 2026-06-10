@@ -29,6 +29,7 @@ export interface ImageAttachment {
   name: string
   size: number
   dataUrl: string  // base64 data URL e.g. "data:image/png;base64,..."
+  sourceFile?: File
 }
 
 export interface PDFAttachment {
@@ -38,6 +39,7 @@ export interface PDFAttachment {
   pageCount: number
   text: string
   truncated: boolean
+  sourceFile?: File
 }
 
 export type Attachment = ImageAttachment | PDFAttachment
@@ -59,7 +61,7 @@ export async function fileToImageAttachment(f: File): Promise<ImageAttachment> {
     r.onerror = () => reject(r.error)
     r.readAsDataURL(f)
   })
-  return { kind: 'image', name: f.name, size: f.size, dataUrl }
+  return { kind: 'image', name: f.name, size: f.size, dataUrl, sourceFile: f }
 }
 
 let pdfjsLoadingPromise: Promise<any> | null = null
@@ -150,7 +152,7 @@ export async function fileToPDFAttachment(f: File): Promise<PDFAttachment> {
     text = text.slice(0, MAX_PDF_TEXT_CHARS)
     truncated = true
   }
-  return { kind: 'pdf', name: f.name, size: f.size, pageCount, text, truncated }
+  return { kind: 'pdf', name: f.name, size: f.size, pageCount, text, truncated, sourceFile: f }
 }
 
 export async function urlToPDFAttachment(url: string, name = 'purchase-order.pdf'): Promise<PDFAttachment> {

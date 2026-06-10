@@ -20,12 +20,14 @@ import { suppliersApi } from '@/api/suppliers'
 import { purchaseOrdersApi } from '@/api/purchase-orders'
 import { stockMovementsApi } from '@/api/stock-movements'
 import { getPoRemainingForPart } from '@/api/po-payments'
+import { uploadFile } from '@/api/storage'
 import { supabase } from '@/lib/supabase'
 import { auditPurchaseOrderPdf } from '@/lib/po-pdf-audit'
 import { getSignedUrl } from '@/api/storage'
 import { urlToPDFAttachment } from '@/lib/ai-attachments'
 import { parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
 import { backfillPurchaseOrderPdfTaxAmounts } from '@/lib/po-tax-backfill'
+import { useAIStore } from '@/store/useAIStore'
 import {
   findExistingProjectPartInProject,
   isProjectPartDuplicateExemptMaster,
@@ -178,6 +180,40 @@ function isUsefulImageUrl(url: string) {
 
 function normalizePartKey(value: any) {
   return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function findSourcePdfAttachmentForDraftPO(args: any) {
+  const messages = useAIStore.getState().messages
+  const targetPoNumber = String(args?.po_number || '').trim().toUpperCase()
+  const targetSupplierName = String(args?.expected_supplier_name || '').trim().toUpperCase()
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role !== 'user' || !message.attachments?.length) continue
+
+    const pdfAttachments = message.attachments.filter(
+      (attachment: any) => attachment.kind === 'pdf' && attachment.sourceFile,
+    ) as any[]
+
+    if (pdfAttachments.length === 1) return pdfAttachments[0]
+
+    for (const attachment of pdfAttachments) {
+      try {
+        const parsed = parsePurchaseOrderText(attachment.text || '')
+        const parsedPoNumber = String(parsed?.po_number || '').trim().toUpperCase()
+        const parsedSupplierName = String(parsed?.supplier_name || '').trim().toUpperCase()
+
+        if (targetPoNumber && parsedPoNumber && parsedPoNumber === targetPoNumber) return attachment
+        if (!targetPoNumber && targetSupplierName && parsedSupplierName && parsedSupplierName === targetSupplierName) {
+          return attachment
+        }
+      } catch {
+        // Ignore parse failures and continue trying other candidate attachments.
+      }
+    }
+  }
+
+  return null
 }
 
 function normalizeManufacturerPartKey(value: any) {
@@ -3179,7 +3215,28 @@ export const TOOL_REGISTRY: ToolSpec[] = [
           (driftNotes.length ? ` Price drift kept as PO snapshot: ${driftNotes.join('; ')}.` : ''),
         created_date: new Date().toISOString(),
       }
-      return purchaseOrdersApi.createPurchaseOrderWithItems(poData, poItems)
+      const newPO = await purchaseOrdersApi.createPurchaseOrderWithItems(poData, poItems)
+
+      const sourcePdf = findSourcePdfAttachmentForDraftPO(a)
+      if (sourcePdf?.sourceFile) {
+        const upload = await uploadFile(sourcePdf.sourceFile, 'purchase_orders', newPO.id, 'pdf', {
+          overwrite: true,
+        })
+        if (!upload.success || !upload.filePath) {
+          throw new Error(upload.error || `Draft PO ${newPO.po_number} was created, but the source PDF upload failed.`)
+        }
+        await purchaseOrdersApi.updatePurchaseOrder(newPO.id, { bep_po_pdf_url: upload.filePath })
+        return {
+          ...newPO,
+          bep_po_pdf_url: upload.filePath,
+          source_pdf_attached: true,
+        }
+      }
+
+      return {
+        ...newPO,
+        source_pdf_attached: false,
+      }
     },
   },
   {
