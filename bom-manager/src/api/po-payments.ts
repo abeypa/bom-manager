@@ -42,6 +42,18 @@ interface StoredReceiptAttachment {
   mimeType: string;
 }
 
+interface PurchaseOrderAttachmentRow {
+  id: string
+  purchase_order_id: number
+  po_receipt_id: string | null
+  po_line_item_id: number | null
+  file_path: string
+  file_name: string
+  mime_type: string | null
+  created_by: string | null
+  created_at: string
+}
+
 const sanitizeReceiptFileName = (name: string) =>
   String(name || 'attachment')
     .replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -72,6 +84,30 @@ async function persistReceiptAttachment(
     fileName: attachment.name,
     mimeType: attachment.type || (category === 'pdf' ? 'application/pdf' : 'image/*'),
   }
+}
+
+async function createPurchaseOrderAttachmentRow(input: {
+  purchaseOrderId: number
+  poReceiptId?: string | null
+  poLineItemId?: number | null
+  attachment: StoredReceiptAttachment
+}) {
+  const { data: auth } = await supabase.auth.getUser()
+  const { data, error } = await (supabase as any)
+    .from('purchase_order_attachments')
+    .insert({
+      purchase_order_id: input.purchaseOrderId,
+      po_receipt_id: input.poReceiptId || null,
+      po_line_item_id: input.poLineItemId || null,
+      file_path: input.attachment.filePath,
+      file_name: input.attachment.fileName,
+      mime_type: input.attachment.mimeType,
+      created_by: auth.user?.id || null,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data as PurchaseOrderAttachmentRow
 }
 
 export const poPaymentsApi = {
@@ -229,6 +265,24 @@ export const poPaymentsApi = {
         })
       ]);
 
+      if (sharedAttachment) {
+        const { data: latestReceipt } = await (supabase as any)
+          .from('po_receipts')
+          .select('id')
+          .eq('po_line_item_id', item.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+        if (latestReceipt?.id) {
+          await createPurchaseOrderAttachmentRow({
+            purchaseOrderId: poId,
+            poReceiptId: latestReceipt.id,
+            poLineItemId: item.id,
+            attachment: sharedAttachment,
+          })
+        }
+      }
+
       logActivityAsync({
         action: 'CREATE',
         entity_type: 'purchase_orders',
@@ -290,6 +344,7 @@ export const poPaymentsApi = {
         return [];
       }
       const rows = data || []
+      const receiptIds = rows.map((row: any) => row.id).filter(Boolean)
       const createdByIds = Array.from(new Set(rows.map((row: any) => row.created_by).filter(Boolean)))
       let profileMap = new Map<string, string>()
       if (createdByIds.length > 0) {
@@ -301,9 +356,24 @@ export const poPaymentsApi = {
           profileMap.set(profile.id, profile.full_name || profile.email || 'System')
         }
       }
+      let attachmentsByReceipt = new Map<string, PurchaseOrderAttachmentRow[]>()
+      if (receiptIds.length > 0) {
+        const { data: attachmentRows } = await (supabase as any)
+          .from('purchase_order_attachments')
+          .select('*')
+          .in('po_receipt_id', receiptIds)
+          .order('created_at', { ascending: false })
+        for (const attachment of attachmentRows || []) {
+          const key = String(attachment.po_receipt_id || '')
+          const current = attachmentsByReceipt.get(key) || []
+          current.push(attachment as PurchaseOrderAttachmentRow)
+          attachmentsByReceipt.set(key, current)
+        }
+      }
       return rows.map((row: any) => ({
         ...row,
         created_by_email: profileMap.get(row.created_by) || 'System',
+        attachments: attachmentsByReceipt.get(String(row.id)) || [],
       }));
     } catch (e) {
       console.error('Receipts fetch crash:', e);
@@ -311,7 +381,7 @@ export const poPaymentsApi = {
     }
   },
 
-  updateReceiptAttachment: async (
+  addReceiptAttachment: async (
     receiptId: string,
     opts: {
       poLineItemId: number
@@ -324,21 +394,22 @@ export const poPaymentsApi = {
       throw new Error('Failed to save receipt attachment.')
     }
 
-    const { data, error } = await (supabase as any)
+    const { data: receipt, error } = await (supabase as any)
       .from('po_receipts')
-      .update({
-        invoice_file_path: storedAttachment.filePath,
-        invoice_file_name: storedAttachment.fileName,
-        invoice_file_mime_type: storedAttachment.mimeType,
-      })
+      .select('id')
       .eq('id', receiptId)
-      .select()
       .single()
+    if (error || !receipt) throw error || new Error('Receipt not found')
 
-    if (error) throw error
+    const data = await createPurchaseOrderAttachmentRow({
+      purchaseOrderId: opts.purchaseOrderId,
+      poReceiptId: receiptId,
+      poLineItemId: opts.poLineItemId,
+      attachment: storedAttachment,
+    })
 
     logActivityAsync({
-      action: 'UPDATE',
+      action: 'CREATE',
       entity_type: 'purchase_orders',
       entity_id: String(opts.purchaseOrderId),
       new_values: {
@@ -511,6 +582,26 @@ export const receivePoItem = async (
       .update({ received_qty: ((poItem as any).received_qty || 0) + quantity })
       .eq('id', poLineItemId),
   ]);
+
+  let createdReceiptId: string | null = null
+  if (storedAttachment) {
+    const { data: latestReceipt } = await (supabase as any)
+      .from('po_receipts')
+      .select('id')
+      .eq('po_line_item_id', poLineItemId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    createdReceiptId = latestReceipt?.id || null
+    if (createdReceiptId && purchaseOrderId) {
+      await createPurchaseOrderAttachmentRow({
+        purchaseOrderId,
+        poReceiptId: createdReceiptId,
+        poLineItemId: Number(poLineItemId),
+        attachment: storedAttachment,
+      })
+    }
+  }
 
   // Check if entire PO is now fully received
   const { data: allItems } = await supabase

@@ -676,12 +676,12 @@ export default function PODetailModal({
     if (!file) return;
     try {
       setReceiptAttachmentUploadingId(String(receipt.id));
-      await poPaymentsApi.updateReceiptAttachment(String(receipt.id), {
+      await poPaymentsApi.addReceiptAttachment(String(receipt.id), {
         poLineItemId: receipt.po_line_item_id,
         purchaseOrderId: poId,
         file,
       });
-      showToast('success', 'Receipt attachment saved');
+      showToast('success', 'Receipt attachment added');
       await loadData();
     } catch (error: any) {
       showToast('error', error?.message || 'Failed to save receipt attachment');
@@ -1201,24 +1201,37 @@ export default function PODetailModal({
                                 </td>
                                 <td className="px-6 py-4">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    {r.invoice_file_path ? (
-                                      <button
-                                        onClick={() => openStoredFile(r.invoice_file_path)}
-                                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                                      >
-                                        <ExternalLink className="w-3 h-3" />
-                                        {r.invoice_file_name || 'Open'}
-                                      </button>
-                                    ) : (
-                                      <span className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">No file</span>
-                                    )}
+                                    {(() => {
+                                      const attachments = Array.isArray(r.attachments) ? r.attachments : [];
+                                      const legacyAttachment =
+                                        r.invoice_file_path &&
+                                        !attachments.some((a: any) => a.file_path === r.invoice_file_path)
+                                          ? [{
+                                              id: `legacy-${r.id}`,
+                                              file_path: r.invoice_file_path,
+                                              file_name: r.invoice_file_name || 'Open',
+                                            }]
+                                          : [];
+                                      const allAttachments = [...attachments, ...legacyAttachment];
+                                      if (allAttachments.length === 0) {
+                                        return <span className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">No file</span>;
+                                      }
+                                      return allAttachments.map((attachment: any) => (
+                                        <button
+                                          key={attachment.id}
+                                          onClick={() => openStoredFile(attachment.file_path)}
+                                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                                        >
+                                          <ExternalLink className="w-3 h-3" />
+                                          {attachment.file_name || 'Open'}
+                                        </button>
+                                      ));
+                                    })()}
                                     <label className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-50 text-gray-700 rounded-xl text-[10px] font-black uppercase tracking-widest cursor-pointer border border-gray-200">
                                       <Upload className="w-3 h-3" />
                                       {receiptAttachmentUploadingId === String(r.id)
                                         ? 'Saving...'
-                                        : r.invoice_file_path
-                                          ? 'Replace'
-                                          : 'Attach'}
+                                        : 'Add'}
                                       <input
                                         type="file"
                                         accept="application/pdf,image/*"
