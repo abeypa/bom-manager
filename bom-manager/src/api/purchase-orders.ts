@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import type { Database } from '@/types/database'
 import { extractPurchaseOrderPdfTaxAmount } from '@/lib/po-pdf-tax'
+import { logActivityAsync } from './activity-logs'
 
 export type PurchaseOrder = Database['public']['Tables']['purchase_orders']['Row']
 export type PurchaseOrderInsert = Database['public']['Tables']['purchase_orders']['Insert']
@@ -277,10 +278,22 @@ export const purchaseOrdersApi = {
       .select()
       .single();
     if (error) throw error;
+    logActivityAsync({
+      action: 'CREATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(data.id),
+      new_values: data,
+    })
     return data;
   },
 
   updatePurchaseOrder: async (poId: number, updateData: any) => {
+    const { data: current } = await (supabase as any)
+      .from('purchase_orders')
+      .select('*')
+      .eq('id', poId)
+      .maybeSingle()
+
     const payload = { ...updateData }
 
     if (Object.prototype.hasOwnProperty.call(payload, 'bep_po_pdf_url')) {
@@ -301,11 +314,18 @@ export const purchaseOrdersApi = {
 
     const { data, error } = await (supabase as any)
       .from('purchase_orders')
-      .update(payload)
+      .update({ ...payload, updated_date: new Date().toISOString() })
       .eq('id', poId)
       .select()
       .single();
     if (error) throw error;
+    logActivityAsync({
+      action: 'UPDATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(poId),
+      old_values: current || null,
+      new_values: data,
+    })
     return data;
   },
 
@@ -340,6 +360,16 @@ export const purchaseOrdersApi = {
       throw itemsError;
     }
 
+    logActivityAsync({
+      action: 'CREATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(newPO.id),
+      new_values: {
+        ...newPO,
+        purchase_order_items: itemsWithPOId,
+      },
+    })
+
     return newPO;
   },
 
@@ -373,6 +403,13 @@ export const purchaseOrdersApi = {
       .single();
 
     if (error) throw error;
+    logActivityAsync({
+      action: 'UPDATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(poId),
+      old_values: po,
+      new_values: data,
+    })
     return data;
   },
 
@@ -417,6 +454,13 @@ export const purchaseOrdersApi = {
       .single();
 
     if (error) throw error;
+    logActivityAsync({
+      action: 'UPDATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(poId),
+      old_values: current,
+      new_values: data,
+    })
     return data;
   },
 
@@ -502,6 +546,12 @@ export const purchaseOrdersApi = {
 
     const { error } = await (supabase as any).from('purchase_orders').delete().eq('id', poId);
     if (error) throw error;
+    logActivityAsync({
+      action: 'DELETE',
+      entity_type: 'purchase_orders',
+      entity_id: String(poId),
+      old_values: po || null,
+    })
   },
 
   deletePurchaseOrder: async (id: number) => {

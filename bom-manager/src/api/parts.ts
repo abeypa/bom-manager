@@ -137,7 +137,7 @@ export const partsApi = {
         action: 'CREATE',
         entity_type: 'part',
         entity_id: String(data.id),
-        new_values: { part_number: data.part_number, category, base_price: data.base_price },
+        new_values: { ...data, category },
       });
     }
     
@@ -149,7 +149,7 @@ export const partsApi = {
     // 1. Fetch current values for comparison
     const { data: current } = await (supabase as any)
       .from(category)
-      .select('base_price, currency, discount_percent, part_number')
+      .select('*')
       .eq('id', id)
       .single();
 
@@ -175,8 +175,8 @@ export const partsApi = {
       action: 'UPDATE',
       entity_type: 'part',
       entity_id: String(id),
-      old_values: current ? { base_price: current.base_price, part_number: current.part_number } : null,
-      new_values: { base_price: updated?.base_price, category },
+      old_values: current ? { ...current, category } : null,
+      new_values: updated ? { ...updated, category } : { category },
     });
 
     return updated;
@@ -312,7 +312,7 @@ export const partsApi = {
   deletePart: async (category: PartCategory, id: number) => {
     // Fetch part info before deletion for audit
     const { data: partInfo } = await (supabase as any)
-      .from(category).select('part_number, description, base_price').eq('id', id).single();
+      .from(category).select('*').eq('id', id).single();
 
     const { error } = await (supabase as any).from(category).delete().eq('id', id);
     if (error) throw error;
@@ -321,7 +321,7 @@ export const partsApi = {
       action: 'DELETE',
       entity_type: 'part',
       entity_id: String(id),
-      old_values: partInfo ? { part_number: partInfo.part_number, category, description: partInfo.description } : null,
+      old_values: partInfo ? { ...partInfo, category } : null,
     });
   },
 

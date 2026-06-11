@@ -4,7 +4,7 @@ import {
   X, Truck, IndianRupee, Calendar, Upload, FileText,
   ExternalLink, Package, CheckCircle2, PlusCircle,
   Trash2, CreditCard, AlertTriangle, ChevronDown, Edit2,
-  Hash,
+  Hash, History, User,
 } from 'lucide-react';
 import { purchaseOrdersApi } from '../../api/purchase-orders';
 import { poPaymentsApi, POPayment, PaymentType, PaymentMode, receivePoItem, issueOutPoItem, getPoRemainingForPart } from '../../api/po-payments';
@@ -13,6 +13,7 @@ import { useToast } from '../../context/ToastContext';
 import { partsApi } from '../../api/parts';
 import PartDetailModal from '../parts/PartDetailModal';
 import PartQuickView from './PartQuickView';
+import { auditApi, computeAuditFieldChanges } from '@/api/audit';
 
 interface PODetailModalProps {
   isOpen: boolean;
@@ -21,7 +22,7 @@ interface PODetailModalProps {
   onStatusUpdated?: () => void;
 }
 
-type Tab = 'overview' | 'items' | 'delivery' | 'payments';
+type Tab = 'overview' | 'items' | 'delivery' | 'payments' | 'audit';
 
 const STATUS_COLORS: Record<string, string> = {
   Draft:     'bg-gray-100 text-gray-700 border-gray-200',
@@ -51,6 +52,8 @@ export default function PODetailModal({
   const [po, setPo] = useState<any>(null);
   const [payments, setPayments] = useState<POPayment[]>([]);
   const [receipts, setReceipts] = useState<any[]>([]);
+  const [poAuditLogs, setPoAuditLogs] = useState<any[]>([]);
+  const [poStockMovements, setPoStockMovements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [isUpdating, setIsUpdating] = useState(false);
@@ -244,6 +247,7 @@ export default function PODetailModal({
 
   const handleOpenReceiveModal = (item: any) => {
     setReceiveModalItem(item);
+    setReceiveAttachment(null);
     setIsReceiveModalOpen(true);
   };
 
@@ -318,11 +322,14 @@ export default function PODetailModal({
         receiveModalItem.id.toString(),
         formData.quantity,
         formData.receiptDate,
-        formData.notes
+        formData.notes,
+        receiveAttachment
       );
   
       setIsReceiveModalOpen(false);
       setReceiveModalItem(null);
+      setReceiveAttachment(null);
+      if (receiveAttachmentInputRef.current) receiveAttachmentInputRef.current.value = '';
       showToast('success', 'Receipt recorded successfully');
       
       // Refresh the PO data so RECEIVED / PENDING update instantly
@@ -341,6 +348,10 @@ export default function PODetailModal({
   const [isEditingPoNumber, setIsEditingPoNumber] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [deliveryReceiptAttachment, setDeliveryReceiptAttachment] = useState<File | null>(null);
+  const [receiveAttachment, setReceiveAttachment] = useState<File | null>(null);
+  const deliveryReceiptInputRef = React.useRef<HTMLInputElement>(null);
+  const receiveAttachmentInputRef = React.useRef<HTMLInputElement>(null);
 
   // Delivery state
   const [actualDeliveryDate, setActualDeliveryDate] = useState('');
@@ -388,9 +399,28 @@ export default function PODetailModal({
         poPaymentsApi.getByPO(poId),
         poPaymentsApi.getReceiptsByPO(poId),
       ]);
+      const [auditLogs, stockMovements] = await Promise.all([
+        auditApi.getActivityLogs({
+          entityTypes: ['purchase_orders', 'purchase_order'],
+          entityId: String(poId),
+          limit: 200,
+        }),
+        (async () => {
+          if (!poData?.po_number) return [];
+          const { supabase } = await import('../../lib/supabase');
+          const { data } = await (supabase as any)
+            .from('stock_movements')
+            .select('*')
+            .eq('po_number', poData.po_number)
+            .order('moved_at', { ascending: false });
+          return data || [];
+        })(),
+      ]);
       setPo(poData);
       setPayments(paymentsData);
       setReceipts(receiptsData);
+      setPoAuditLogs(auditLogs);
+      setPoStockMovements(stockMovements);
       setPoNumberInput(poData.po_number || '');
 
       // Aggregate OUT stock_movements for this PO so we can show
@@ -580,9 +610,11 @@ export default function PODetailModal({
     }
     try {
       setIsReceiving(true);
-      await poPaymentsApi.receiveItems(poId, items);
+      await poPaymentsApi.receiveItems(poId, items, deliveryReceiptAttachment);
       showToast('success', 'Stock updated successfully');
       setReceiveQtys({});
+      setDeliveryReceiptAttachment(null);
+      if (deliveryReceiptInputRef.current) deliveryReceiptInputRef.current.value = '';
       await loadData();
       onStatusUpdated?.();
     } catch (err: any) {
@@ -639,6 +671,20 @@ export default function PODetailModal({
     }
   };
 
+  const openStoredFile = async (stored: string) => {
+    if (!stored) return;
+    if (stored.startsWith('http')) {
+      window.open(stored, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const url = await getSignedUrl(stored, 3600);
+    if (!url) {
+      showToast('error', 'Could not open attachment');
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   if (!isOpen) return null;
 
   const totalPaid = payments.reduce((sum, p) => sum + (p.payment_type === 'Refund' ? -p.amount : p.amount), 0);
@@ -652,12 +698,55 @@ export default function PODetailModal({
     ? Math.ceil((new Date(po.expected_delivery_date).getTime() - Date.now()) / 86400000)
     : null;
   const isOverdue = daysUntilDelivery !== null && daysUntilDelivery < 0 && po?.status !== 'Received';
+  const poTimelineEntries = [...poAuditLogs.filter((log: any) => {
+    const auditType = log.new_values?._audit_type || log.old_values?._audit_type || '';
+    return auditType !== 'po_payment' && auditType !== 'po_receipt';
+  }).map((log: any) => {
+    const changes = computeAuditFieldChanges(log);
+    const statusChange = changes.find((change) => change.field === 'status');
+    return {
+      id: `audit-${log.id}`,
+      ts: log.created_at,
+      actor: log.actor_name || 'System',
+      title: statusChange ? `PO status changed to ${statusChange.to}` : log.action === 'CREATE' ? 'PO created' : 'PO updated',
+      detail: changes.length
+        ? changes.slice(0, 4).map((change) => `${change.field.replace(/_/g, ' ')}: ${String(change.from ?? '—')} → ${String(change.to ?? '—')}`).join(' | ')
+        : 'No field-level diff recorded',
+      kind: 'audit',
+      attachment: null,
+    };
+  }), ...receipts.map((receipt: any) => ({
+    id: `receipt-${receipt.id}`,
+    ts: receipt.receipt_date,
+    actor: receipt.created_by_email || 'System',
+    title: `Material IN: +${receipt.quantity} ${receipt.purchase_order_items?.part_number || ''}`.trim(),
+    detail: receipt.notes || receipt.invoice_file_name || 'Receipt recorded',
+    kind: 'receipt',
+    attachment: receipt.invoice_file_path || null,
+  })), ...poStockMovements.map((movement: any) => ({
+    id: `movement-${movement.id}`,
+    ts: movement.moved_at,
+    actor: movement.moved_by || 'System',
+    title: `Stock ${movement.movement_type}: ${movement.part_number}`,
+    detail: `${movement.quantity} units${movement.reference_notes ? ` | ${movement.reference_notes}` : ''}`,
+    kind: 'movement',
+    attachment: null,
+  })), ...payments.map((payment: any) => ({
+    id: `payment-${payment.id}`,
+    ts: payment.created_at || payment.payment_date,
+    actor: payment.created_by || 'System',
+    title: `Payment ${payment.payment_type}: ₹${Number(payment.amount || 0).toLocaleString('en-IN')}`,
+    detail: `${payment.payment_mode}${payment.reference_number ? ` | Ref ${payment.reference_number}` : ''}${payment.notes ? ` | ${payment.notes}` : ''}`,
+    kind: 'payment',
+    attachment: null,
+  }))].sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'overview', label: 'Overview', icon: <FileText className="w-4 h-4" /> },
     { id: 'items',    label: 'Items', icon: <Package className="w-4 h-4" /> },
     { id: 'delivery', label: 'Delivery', icon: <Truck className="w-4 h-4" /> },
     { id: 'payments', label: 'Payments', icon: <CreditCard className="w-4 h-4" /> },
+    { id: 'audit',    label: 'Audit', icon: <History className="w-4 h-4" /> },
   ];
 
   return (
@@ -1069,7 +1158,7 @@ export default function PODetailModal({
                         <table className="w-full text-left">
                           <thead className="bg-gray-50/50">
                             <tr>
-                              {['Date', 'Part', 'Quantity', 'Notes', 'RecordedBy'].map(h => (
+                              {['Date', 'Part', 'Quantity', 'Notes', 'Attachment', 'RecordedBy'].map(h => (
                                 <th key={h} className="px-6 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
                               ))}
                             </tr>
@@ -1090,6 +1179,19 @@ export default function PODetailModal({
                                 </td>
                                 <td className="px-6 py-4 text-xs text-gray-500 italic max-w-[200px] truncate">
                                   {r.notes || '—'}
+                                </td>
+                                <td className="px-6 py-4">
+                                  {r.invoice_file_path ? (
+                                    <button
+                                      onClick={() => openStoredFile(r.invoice_file_path)}
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                      {r.invoice_file_name || 'Open'}
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">—</span>
+                                  )}
                                 </td>
                                 <td className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
                                   {r.created_by_email || 'System'}
@@ -1163,6 +1265,23 @@ export default function PODetailModal({
                     <div className="space-y-4">
                       <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest">Receive Items</h3>
                       <p className="text-xs text-gray-500 font-medium">Enter quantities received. Stock will be updated automatically.</p>
+                      <div className="bg-white border border-gray-200 rounded-2xl p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Supplier Invoice / Screenshot</p>
+                          <p className="text-xs text-gray-500 font-medium mt-1">Attach one PDF, image, or screenshot for this receipt batch.</p>
+                        </div>
+                        <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-[10px] font-black uppercase tracking-widest cursor-pointer">
+                          <Upload className="w-4 h-4" />
+                          {deliveryReceiptAttachment?.name || 'Attach File'}
+                          <input
+                            ref={deliveryReceiptInputRef}
+                            type="file"
+                            accept="application/pdf,image/*"
+                            className="hidden"
+                            onChange={(e) => setDeliveryReceiptAttachment(e.target.files?.[0] || null)}
+                          />
+                        </label>
+                      </div>
                       <div className="border border-gray-100 rounded-3xl overflow-hidden">
                         <table className="w-full text-left">
                           <thead className="bg-gray-50">
@@ -1392,6 +1511,10 @@ export default function PODetailModal({
                                 {new Date(payment.payment_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                                 {payment.notes && <span className="ml-2 italic">· {payment.notes}</span>}
                               </p>
+                              <p className="text-[10px] text-gray-300 font-bold mt-1 uppercase tracking-widest">
+                                By {payment.created_by || 'System'}
+                                {payment.created_at ? ` | ${new Date(payment.created_at).toLocaleString('en-IN')}` : ''}
+                              </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
@@ -1414,6 +1537,62 @@ export default function PODetailModal({
                     <div className="text-center py-12 border-2 border-dashed border-gray-100 rounded-[2rem]">
                       <CreditCard className="w-10 h-10 text-gray-200 mx-auto mb-3" />
                       <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No payments recorded</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'audit' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest">PO Audit Timeline</h3>
+                      <p className="text-xs text-gray-500 font-medium mt-1">Header updates, release actions, receipts, stock movement, and payments.</p>
+                    </div>
+                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{poTimelineEntries.length} entries</span>
+                  </div>
+
+                  {poTimelineEntries.length > 0 ? (
+                    <div className="space-y-3">
+                      {poTimelineEntries.map((entry) => (
+                        <div key={entry.id} className="bg-white border border-gray-100 rounded-3xl p-5 flex items-start justify-between gap-4">
+                          <div className="flex items-start gap-4 min-w-0">
+                            <div className="w-11 h-11 bg-gray-50 rounded-2xl flex items-center justify-center border border-gray-100">
+                              {entry.kind === 'payment' ? <CreditCard className="w-4 h-4 text-emerald-600" /> : entry.kind === 'movement' ? <Truck className="w-4 h-4 text-amber-600" /> : entry.kind === 'receipt' ? <Package className="w-4 h-4 text-blue-600" /> : <History className="w-4 h-4 text-gray-600" />}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-sm font-black text-gray-900">{entry.title}</div>
+                              <div className="text-xs text-gray-500 font-medium mt-1 break-words">{entry.detail}</div>
+                              <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-400 font-black uppercase tracking-widest">
+                                <User className="w-3 h-3" />
+                                {entry.actor}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                              {new Date(entry.ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </div>
+                            <div className="text-[10px] text-gray-300 font-bold mt-1">
+                              {new Date(entry.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                            {entry.attachment && (
+                              <button
+                                onClick={() => openStoredFile(entry.attachment)}
+                                className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                Open File
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 border-2 border-dashed border-gray-100 rounded-[2rem]">
+                      <History className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No audit activity recorded</p>
                     </div>
                   )}
                 </div>
@@ -1573,7 +1752,7 @@ export default function PODetailModal({
             <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-white">
               <h3 className="font-black text-gray-900 tracking-tight text-lg">Record Receipt</h3>
               <button
-                onClick={() => { setIsReceiveModalOpen(false); setReceiveModalItem(null); }}
+                onClick={() => { setIsReceiveModalOpen(false); setReceiveModalItem(null); setReceiveAttachment(null); }}
                 className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
               >
                 <X className="w-5 h-5 text-gray-400" />
@@ -1625,11 +1804,26 @@ export default function PODetailModal({
                   placeholder="Invoice references, GRN info..."
                 />
               </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Supplier Invoice / Screenshot</label>
+                <label className="flex items-center justify-between gap-3 px-5 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-bold cursor-pointer">
+                  <span className="truncate">{receiveAttachment?.name || 'Attach PDF, image, or screenshot'}</span>
+                  <Upload className="w-4 h-4 text-gray-400 shrink-0" />
+                  <input
+                    ref={receiveAttachmentInputRef}
+                    type="file"
+                    accept="application/pdf,image/*"
+                    className="hidden"
+                    onChange={(e) => setReceiveAttachment(e.target.files?.[0] || null)}
+                  />
+                </label>
+              </div>
             </div>
 
             <div className="px-6 py-5 bg-gray-50/80 border-t border-gray-100 flex gap-3">
               <button
-                onClick={() => { setIsReceiveModalOpen(false); setReceiveModalItem(null); }}
+                onClick={() => { setIsReceiveModalOpen(false); setReceiveModalItem(null); setReceiveAttachment(null); }}
                 className="flex-1 py-3.5 px-4 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700 text-xs font-black rounded-2xl uppercase tracking-widest transition-all"
               >
                 Cancel

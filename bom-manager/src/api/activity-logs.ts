@@ -10,7 +10,7 @@ import { supabase } from '../lib/supabase';
 
 export interface ActivityLogEntry {
   action: 'CREATE' | 'UPDATE' | 'DELETE' | 'PASSWORD_RESET' | 'ROLE_CHANGE' | 'LOGIN' | 'LOGOUT' | 'IMPORT' | 'EXPORT';
-  entity_type: 'user' | 'part' | 'project' | 'bom_item' | 'supplier' | 'purchase_order' | 'section' | 'job_order';
+  entity_type: string;
   entity_id: string;
   old_values?: Record<string, any> | null;
   new_values?: Record<string, any> | null;

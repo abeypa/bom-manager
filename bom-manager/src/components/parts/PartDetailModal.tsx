@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { X, Edit, History, ArrowUpDown, FileText, Package, TrendingUp, TrendingDown, Clock, ShieldCheck, Box, Trash2, Plus } from 'lucide-react';
+import { X, Edit, History, ArrowUpDown, FileText, Package, TrendingUp, TrendingDown, Clock, ShieldCheck, Box, Trash2, Plus, User } from 'lucide-react';
 import { priceHistoryApi } from '../../api/price-history';
 import { stockMovementsApi } from '../../api/stock-movements';
 import { useRole } from '../../hooks/useRole';
 import { partsApi } from '../../api/parts';
 import { useToast } from '../../context/ToastContext';
 import { useQueryClient } from '@tanstack/react-query';
+import { auditApi, computeAuditFieldChanges } from '@/api/audit';
 
 interface PartDetailModalProps {
   isOpen: boolean;
@@ -19,9 +20,10 @@ export default function PartDetailModal({ isOpen, onClose, onEdit, part, categor
   const { isAdmin } = useRole();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'details' | 'history' | 'stock' | 'files'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'history' | 'stock' | 'files' | 'audit'>('details');
   const [priceHistory, setPriceHistory] = useState<any[]>([]);
   const [stockHistory, setStockHistory] = useState<any[]>([]);
+  const [partAuditLogs, setPartAuditLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [isAddingPrice, setIsAddingPrice] = useState(false);
   const [newPriceData, setNewPriceData] = useState({
@@ -53,8 +55,21 @@ export default function PartDetailModal({ isOpen, onClose, onEdit, part, categor
           priceHistoryApi.getHistory(category, part.id),
           stockMovementsApi.getByPart(category, part.id),
         ]);
+        const auditLogs = await auditApi.getActivityLogs({
+          entityTypes: ['part', category],
+          entityId: String(part.id),
+          limit: 100,
+        });
         setPriceHistory(historyData);
         setStockHistory(stockData);
+        setPartAuditLogs(
+          auditLogs.filter((log: any) => {
+            if (log.entity_type === category) return true
+            if (log.entity_type !== 'part') return false
+            const loggedCategory = log.new_values?.category || log.old_values?.category || null
+            return loggedCategory === category
+          })
+        );
       } catch (err) {
         console.error(err);
       } finally {
@@ -159,7 +174,8 @@ export default function PartDetailModal({ isOpen, onClose, onEdit, part, categor
             { id: 'details', label: 'Overview', icon: <Package className="w-4 h-4" /> },
             { id: 'history', label: 'Price Audit', icon: <History className="w-4 h-4" /> },
             { id: 'stock', label: 'Transaction Log', icon: <ArrowUpDown className="w-4 h-4" /> },
-            { id: 'files', label: 'Digital Assets', icon: <FileText className="w-4 h-4" /> }
+            { id: 'files', label: 'Digital Assets', icon: <FileText className="w-4 h-4" /> },
+            { id: 'audit', label: 'Update Trail', icon: <Clock className="w-4 h-4" /> }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -470,6 +486,59 @@ export default function PartDetailModal({ isOpen, onClose, onEdit, part, categor
                         )}
                     </div>
                    ))}
+                </div>
+              )}
+
+              {activeTab === 'audit' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-1.5 h-6 bg-violet-500 rounded-full" />
+                      <h4 className="text-xs font-black text-gray-900 uppercase tracking-widest">Master Data Update Trail</h4>
+                    </div>
+                    <span className="text-[8px] font-black text-gray-300 uppercase tracking-widest">{partAuditLogs.length} audit records</span>
+                  </div>
+
+                  {partAuditLogs.length > 0 ? (
+                    <div className="space-y-3">
+                      {partAuditLogs.map((log: any) => {
+                        const changes = computeAuditFieldChanges(log)
+                        return (
+                          <div key={log.id} className="p-6 bg-white border border-gray-100 rounded-3xl hover:border-gray-200 transition-all">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <div className="text-sm font-black text-gray-900 uppercase tracking-widest">
+                                  {log.action === 'CREATE' ? 'Master record created' : log.action === 'DELETE' ? 'Master record deleted' : 'Part data updated'}
+                                </div>
+                                <div className="mt-2 text-xs text-gray-500 font-medium break-words">
+                                  {changes.length > 0
+                                    ? changes.slice(0, 6).map((change) => `${change.field.replace(/_/g, ' ')}: ${String(change.from ?? '—')} → ${String(change.to ?? '—')}`).join(' | ')
+                                    : 'No field-level diff recorded'}
+                                </div>
+                                <div className="mt-3 flex items-center gap-2 text-[10px] text-gray-400 font-black uppercase tracking-widest">
+                                  <User className="w-3 h-3" />
+                                  {log.actor_name || 'System'}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                                  {new Date(log.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </div>
+                                <div className="text-[10px] text-gray-300 font-bold mt-1">
+                                  {new Date(log.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 border-2 border-dashed border-gray-100 rounded-[2rem]">
+                      <Clock className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No part updates recorded</p>
+                    </div>
+                  )}
                 </div>
               )}
             </>

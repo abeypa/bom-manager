@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/supabase';
+import { uploadFile } from './storage';
+import { logActivityAsync } from './activity-logs';
 
 export type PaymentType = 'Advance' | 'Partial' | 'Final' | 'Refund';
 export type PaymentMode = 'Bank Transfer' | 'Cheque' | 'Cash' | 'UPI' | 'Credit Card' | 'Other';
@@ -26,6 +28,52 @@ export interface POPaymentInsert {
   notes?: string | null;
 }
 
+type ReceiptAttachmentInput =
+  | File
+  | {
+      filePath: string;
+      fileName: string;
+      mimeType: string;
+    };
+
+interface StoredReceiptAttachment {
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+}
+
+const sanitizeReceiptFileName = (name: string) =>
+  String(name || 'attachment')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .slice(0, 120)
+
+async function persistReceiptAttachment(
+  purchaseOrderId: number | null | undefined,
+  poLineItemId: number | string,
+  attachment?: ReceiptAttachmentInput | null,
+): Promise<StoredReceiptAttachment | null> {
+  if (!attachment) return null
+  if (!(attachment instanceof File)) {
+    return attachment
+  }
+
+  const category = attachment.type === 'application/pdf' ? 'pdf' : 'image'
+  const customPath = `purchase_orders/${purchaseOrderId || 'unknown'}/receipt_attachments/${poLineItemId}-${Date.now()}-${sanitizeReceiptFileName(attachment.name)}`
+  const result = await uploadFile(attachment, 'purchase_orders', Number(purchaseOrderId || 0), category as 'pdf' | 'image', {
+    overwrite: true,
+    customPath,
+  })
+  if (!result.success || !result.filePath) {
+    throw new Error(result.error || 'Failed to upload supplier invoice attachment.')
+  }
+
+  return {
+    filePath: result.filePath,
+    fileName: attachment.name,
+    mimeType: attachment.type || (category === 'pdf' ? 'application/pdf' : 'image/*'),
+  }
+}
+
 export const poPaymentsApi = {
   getByPO: async (poId: number): Promise<POPayment[]> => {
     const { data, error } = await supabase
@@ -45,12 +93,37 @@ export const poPaymentsApi = {
       .select()
       .single();
     if (error) throw error;
+    logActivityAsync({
+      action: 'CREATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(payment.purchase_order_id),
+      new_values: {
+        _audit_type: 'po_payment',
+        ...data,
+      },
+    })
     return data;
   },
 
   delete: async (id: number): Promise<void> => {
+    const { data: payment } = await (supabase as any)
+      .from('po_payments')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle()
     const { error } = await supabase.from('po_payments').delete().eq('id', id);
     if (error) throw error;
+    if (payment?.purchase_order_id) {
+      logActivityAsync({
+        action: 'DELETE',
+        entity_type: 'purchase_orders',
+        entity_id: String(payment.purchase_order_id),
+        old_values: {
+          _audit_type: 'po_payment',
+          ...payment,
+        },
+      })
+    }
   },
 
   updateDelivery: async (
@@ -64,14 +137,25 @@ export const poPaymentsApi = {
       .select()
       .single();
     if (error) throw error;
+    logActivityAsync({
+      action: 'UPDATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(poId),
+      new_values: {
+        _audit_type: 'delivery_update',
+        ...data,
+      },
+    })
     return data;
   },
 
   receiveItems: async (
     poId: number,
-    items: Array<{ id: number; received_qty: number }>
+    items: Array<{ id: number; received_qty: number }>,
+    attachment?: ReceiptAttachmentInput | null,
   ) => {
     const userEmail = (await supabase.auth.getUser()).data.user?.email || 'system';
+    let sharedAttachment: StoredReceiptAttachment | null = null
     for (const item of items) {
       if (item.received_qty <= 0) continue;
 
@@ -109,6 +193,9 @@ export const poPaymentsApi = {
       if (!part) continue;
 
       const newStock = (part.stock_quantity || 0) + item.received_qty;
+      if (!sharedAttachment && attachment) {
+        sharedAttachment = await persistReceiptAttachment(poId, item.id, attachment)
+      }
 
       await Promise.all([
         (supabase as any)
@@ -135,9 +222,27 @@ export const poPaymentsApi = {
           quantity: item.received_qty,
           receipt_date: new Date().toISOString(),
           notes: 'Batch receipt from Delivery tab',
-          created_by: (await supabase.auth.getUser()).data.user?.id || null
+          created_by: (await supabase.auth.getUser()).data.user?.id || null,
+          invoice_file_path: sharedAttachment?.filePath || null,
+          invoice_file_name: sharedAttachment?.fileName || null,
+          invoice_file_mime_type: sharedAttachment?.mimeType || null,
         })
       ]);
+
+      logActivityAsync({
+        action: 'CREATE',
+        entity_type: 'purchase_orders',
+        entity_id: String(poId),
+        new_values: {
+          _audit_type: 'po_receipt',
+          po_line_item_id: item.id,
+          quantity: item.received_qty,
+          receipt_date: new Date().toISOString(),
+          notes: 'Batch receipt from Delivery tab',
+          invoice_file_name: sharedAttachment?.fileName || null,
+          part_number: (poItem as any).part_number || part.part_number,
+        },
+      })
     }
 
     // Check if all items fully received → update PO status to Received
@@ -184,7 +289,22 @@ export const poPaymentsApi = {
         console.error('Error fetching receipts:', error);
         return [];
       }
-      return data || [];
+      const rows = data || []
+      const createdByIds = Array.from(new Set(rows.map((row: any) => row.created_by).filter(Boolean)))
+      let profileMap = new Map<string, string>()
+      if (createdByIds.length > 0) {
+        const { data: profiles } = await (supabase as any)
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', createdByIds)
+        for (const profile of profiles || []) {
+          profileMap.set(profile.id, profile.full_name || profile.email || 'System')
+        }
+      }
+      return rows.map((row: any) => ({
+        ...row,
+        created_by_email: profileMap.get(row.created_by) || 'System',
+      }));
     } catch (e) {
       console.error('Receipts fetch crash:', e);
       return [];
@@ -259,7 +379,8 @@ export const receivePoItem = async (
   poLineItemId: number | string,
   quantity: number,
   receiptDate?: string,
-  notes?: string
+  notes?: string,
+  attachment?: ReceiptAttachmentInput | null,
 ): Promise<void> => {
   if (quantity <= 0) throw new Error('Quantity must be greater than 0');
 
@@ -308,6 +429,7 @@ export const receivePoItem = async (
   if (partErr || !part) throw new Error('Master part not found');
 
   const newStock = (part.stock_quantity || 0) + quantity;
+  const storedAttachment = await persistReceiptAttachment(purchaseOrderId, poLineItemId, attachment)
 
   // 3. Execute queries atomically
   await Promise.all([
@@ -336,7 +458,10 @@ export const receivePoItem = async (
       quantity,
       receipt_date: receiptDate ? new Date(receiptDate).toISOString() : new Date().toISOString(),
       notes: notes || null,
-      created_by: userId || null
+      created_by: userId || null,
+      invoice_file_path: storedAttachment?.filePath || null,
+      invoice_file_name: storedAttachment?.fileName || null,
+      invoice_file_mime_type: storedAttachment?.mimeType || null,
     }),
     
     // Maintain legacy received_qty increment
@@ -371,6 +496,23 @@ export const receivePoItem = async (
         })
         .eq('id', purchaseOrderId);
     }
+  }
+
+  if (purchaseOrderId) {
+    logActivityAsync({
+      action: 'CREATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(purchaseOrderId),
+      new_values: {
+        _audit_type: 'po_receipt',
+        po_line_item_id: Number(poLineItemId),
+        quantity,
+        receipt_date: receiptDate ? new Date(receiptDate).toISOString() : new Date().toISOString(),
+        notes: notes || null,
+        invoice_file_name: storedAttachment?.fileName || null,
+        part_number: (poItem as any).part_number || part.part_number,
+      },
+    })
   }
 };
 
