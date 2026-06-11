@@ -348,6 +348,7 @@ export default function PODetailModal({
   const [isEditingPoNumber, setIsEditingPoNumber] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [receiptAttachmentUploadingId, setReceiptAttachmentUploadingId] = useState<string | null>(null);
   const [deliveryReceiptAttachment, setDeliveryReceiptAttachment] = useState<File | null>(null);
   const [receiveAttachment, setReceiveAttachment] = useState<File | null>(null);
   const deliveryReceiptInputRef = React.useRef<HTMLInputElement>(null);
@@ -668,6 +669,24 @@ export default function PODetailModal({
       await loadData();
     } catch {
       showToast('error', 'Failed to delete payment');
+    }
+  };
+
+  const handleReceiptAttachmentUpload = async (receipt: any, file: File | null) => {
+    if (!file) return;
+    try {
+      setReceiptAttachmentUploadingId(String(receipt.id));
+      await poPaymentsApi.updateReceiptAttachment(String(receipt.id), {
+        poLineItemId: receipt.po_line_item_id,
+        purchaseOrderId: poId,
+        file,
+      });
+      showToast('success', 'Receipt attachment saved');
+      await loadData();
+    } catch (error: any) {
+      showToast('error', error?.message || 'Failed to save receipt attachment');
+    } finally {
+      setReceiptAttachmentUploadingId(null);
     }
   };
 
@@ -1181,17 +1200,38 @@ export default function PODetailModal({
                                   {r.notes || '—'}
                                 </td>
                                 <td className="px-6 py-4">
-                                  {r.invoice_file_path ? (
-                                    <button
-                                      onClick={() => openStoredFile(r.invoice_file_path)}
-                                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                                    >
-                                      <ExternalLink className="w-3 h-3" />
-                                      {r.invoice_file_name || 'Open'}
-                                    </button>
-                                  ) : (
-                                    <span className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">—</span>
-                                  )}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {r.invoice_file_path ? (
+                                      <button
+                                        onClick={() => openStoredFile(r.invoice_file_path)}
+                                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                                      >
+                                        <ExternalLink className="w-3 h-3" />
+                                        {r.invoice_file_name || 'Open'}
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">No file</span>
+                                    )}
+                                    <label className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-50 text-gray-700 rounded-xl text-[10px] font-black uppercase tracking-widest cursor-pointer border border-gray-200">
+                                      <Upload className="w-3 h-3" />
+                                      {receiptAttachmentUploadingId === String(r.id)
+                                        ? 'Saving...'
+                                        : r.invoice_file_path
+                                          ? 'Replace'
+                                          : 'Attach'}
+                                      <input
+                                        type="file"
+                                        accept="application/pdf,image/*"
+                                        className="hidden"
+                                        disabled={receiptAttachmentUploadingId === String(r.id)}
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0] || null;
+                                          handleReceiptAttachmentUpload(r, file);
+                                          e.currentTarget.value = '';
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
                                 </td>
                                 <td className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
                                   {r.created_by_email || 'System'}

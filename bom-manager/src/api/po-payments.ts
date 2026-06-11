@@ -310,6 +310,47 @@ export const poPaymentsApi = {
       return [];
     }
   },
+
+  updateReceiptAttachment: async (
+    receiptId: string,
+    opts: {
+      poLineItemId: number
+      purchaseOrderId: number
+      file: File
+    },
+  ) => {
+    const storedAttachment = await persistReceiptAttachment(opts.purchaseOrderId, opts.poLineItemId, opts.file)
+    if (!storedAttachment) {
+      throw new Error('Failed to save receipt attachment.')
+    }
+
+    const { data, error } = await (supabase as any)
+      .from('po_receipts')
+      .update({
+        invoice_file_path: storedAttachment.filePath,
+        invoice_file_name: storedAttachment.fileName,
+        invoice_file_mime_type: storedAttachment.mimeType,
+      })
+      .eq('id', receiptId)
+      .select()
+      .single()
+
+    if (error) throw error
+
+    logActivityAsync({
+      action: 'UPDATE',
+      entity_type: 'purchase_orders',
+      entity_id: String(opts.purchaseOrderId),
+      new_values: {
+        _audit_type: 'po_receipt_attachment',
+        receipt_id: receiptId,
+        po_line_item_id: opts.poLineItemId,
+        invoice_file_name: storedAttachment.fileName,
+      },
+    })
+
+    return data
+  },
 };
 
 /**
