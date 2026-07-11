@@ -893,6 +893,174 @@ export const purchaseOrdersApi = {
   },
 
   /**
+   * Delivery tracking rollup: one row per PO with ordered vs received quantities,
+   * expected/actual dates and overdue flags. Excludes Draft and Cancelled POs by
+   * default. Multi-project POs get project names derived from item-level links
+   * (project_part → subsection → project), same chain as getAll().
+   */
+  getDeliveryTracking: async (filter?: {
+    projectId?: number
+    supplierId?: number
+    overdueOnly?: boolean
+    status?: string
+  }) => {
+    let query = supabase
+      .from('purchase_orders')
+      .select(`
+        id,
+        po_number,
+        po_date,
+        status,
+        payment_status,
+        currency,
+        grand_total,
+        expected_delivery_date,
+        actual_delivery_date,
+        delivery_notes,
+        supplier_id,
+        project_id,
+        suppliers ( id, name ),
+        project:projects ( id, project_name, project_number ),
+        purchase_order_items ( id, quantity, received_qty, project_part_id, part_number )
+      `)
+      .order('po_date', { ascending: false });
+
+    if (filter?.status) {
+      query = query.eq('status', filter.status);
+    } else {
+      query = query.not('status', 'in', '("Draft","Cancelled")');
+    }
+    if (filter?.supplierId) query = query.eq('supplier_id', filter.supplierId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const rows = (data || []) as any[];
+    if (!rows.length) return [];
+
+    // Item-level project derivation for multi-project POs
+    const projectPartIds = Array.from(new Set(
+      rows.flatMap((po: any) => (po.purchase_order_items || []).map((item: any) => item.project_part_id)).filter(Boolean)
+    ));
+
+    const projectPartToProject = new Map<number, { id: number; project_name: string; project_number: string }>();
+    if (projectPartIds.length) {
+      const { data: partsData } = await supabase
+        .from('project_parts')
+        .select('id, project_section_id')
+        .in('id', projectPartIds);
+      const subsectionIds = Array.from(new Set((partsData || []).map((part: any) => part.project_section_id).filter(Boolean)));
+      const { data: subsectionsData } = subsectionIds.length
+        ? await supabase.from('project_subsections').select('id, project_id').in('id', subsectionIds)
+        : { data: [] as any[] };
+      const projectIds = Array.from(new Set((subsectionsData || []).map((row: any) => row.project_id).filter(Boolean)));
+      const { data: projectsData } = projectIds.length
+        ? await supabase.from('projects').select('id, project_name, project_number').in('id', projectIds)
+        : { data: [] as any[] };
+
+      const subsectionToProject = new Map<number, number>((subsectionsData || []).map((row: any) => [row.id, row.project_id]));
+      const projectMap = new Map<number, { id: number; project_name: string; project_number: string }>(
+        (projectsData || []).map((row: any) => [row.id, row])
+      );
+      for (const part of partsData || []) {
+        const projectId = subsectionToProject.get((part as any).project_section_id);
+        const project = projectId ? projectMap.get(projectId) : null;
+        if (project) projectPartToProject.set((part as any).id, project);
+      }
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const tracked = rows.map((po: any) => {
+      const items = po.purchase_order_items || [];
+      const orderedQty = items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0);
+      const receivedQty = items.reduce((sum: number, item: any) => sum + Number(item.received_qty || 0), 0);
+      const outstandingLines = items.filter((item: any) => Number(item.quantity || 0) > Number(item.received_qty || 0)).length;
+
+      const projectsById = new Map<number, { id: number; project_name: string; project_number: string }>();
+      if (po.project?.id) projectsById.set(po.project.id, po.project);
+      for (const item of items) {
+        const project = item.project_part_id ? projectPartToProject.get(item.project_part_id) : null;
+        if (project) projectsById.set(project.id, project);
+      }
+      const projects = Array.from(projectsById.values());
+
+      const expectedDate = po.expected_delivery_date ? String(po.expected_delivery_date).slice(0, 10) : null;
+      const isDelivered = po.status === 'Received';
+      const isOverdue = !!expectedDate && expectedDate < today && !isDelivered;
+      const daysOverdue = isOverdue
+        ? Math.floor((new Date(today).getTime() - new Date(expectedDate!).getTime()) / 86400000)
+        : 0;
+
+      return {
+        ...po,
+        supplier_name: po.suppliers?.name || null,
+        projects,
+        project_label: projects.map((project) => project.project_number).join(', '),
+        line_count: items.length,
+        outstanding_lines: outstandingLines,
+        ordered_qty: orderedQty,
+        received_qty: receivedQty,
+        received_pct: orderedQty > 0 ? Math.min(100, Math.round((receivedQty / orderedQty) * 100)) : 0,
+        is_overdue: isOverdue,
+        days_overdue: daysOverdue,
+      };
+    });
+
+    let result = tracked;
+    if (filter?.projectId) {
+      result = result.filter((po: any) => po.projects.some((project: any) => project.id === filter.projectId));
+    }
+    if (filter?.overdueOnly) result = result.filter((po: any) => po.is_overdue);
+    return result;
+  },
+
+  /**
+   * Per-project delivery rollup derived from getDeliveryTracking:
+   * po_count, overdue_count, received/ordered quantities and received %.
+   * A multi-project PO counts toward every project it touches.
+   */
+  getDeliverySummaryByProject: async () => {
+    const pos = await purchaseOrdersApi.getDeliveryTracking();
+    const summary = new Map<number, {
+      project_id: number
+      project_name: string
+      project_number: string
+      po_count: number
+      overdue_count: number
+      ordered_qty: number
+      received_qty: number
+      received_pct: number
+    }>();
+
+    for (const po of pos as any[]) {
+      for (const project of po.projects) {
+        const entry = summary.get(project.id) || {
+          project_id: project.id,
+          project_name: project.project_name,
+          project_number: project.project_number,
+          po_count: 0,
+          overdue_count: 0,
+          ordered_qty: 0,
+          received_qty: 0,
+          received_pct: 0,
+        };
+        entry.po_count += 1;
+        if (po.is_overdue) entry.overdue_count += 1;
+        entry.ordered_qty += po.ordered_qty;
+        entry.received_qty += po.received_qty;
+        summary.set(project.id, entry);
+      }
+    }
+
+    for (const entry of summary.values()) {
+      entry.received_pct = entry.ordered_qty > 0 ? Math.min(100, Math.round((entry.received_qty / entry.ordered_qty) * 100)) : 0;
+    }
+
+    return summary;
+  },
+
+  /**
    * Receive items from a PO — called from the Part InOut / POReceiveModal.
    * For each item with qty > 0:
    *   1. Updates purchase_order_items.received_qty

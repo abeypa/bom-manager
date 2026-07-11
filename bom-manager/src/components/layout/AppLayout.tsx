@@ -56,55 +56,46 @@ interface SidebarProps {
 }
 
 function Sidebar({ isAdmin, initials, displayName, onClose, onLogout }: SidebarProps) {
+  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors duration-150 group ${
+      isActive
+        ? 'bg-sky-50 text-sky-800'
+        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+    }`;
+
   return (
-    <aside
-      className="flex h-full flex-col"
-      style={{
-        background:
-          'radial-gradient(circle at 20% 0%, rgba(14, 165, 233, 0.18), transparent 34%), linear-gradient(180deg, #061428 0%, #07172d 50%, #06111f 100%)',
-      }}
-    >
-      <div className="px-6 py-6 flex items-center justify-between mb-2">
+    <aside className="flex h-full flex-col bg-[var(--bg-surface)] border-r border-[var(--border-subtle)]">
+      <div className="px-5 py-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <img
             src="/bep-logo.svg"
             alt="BEP"
-            className="h-10 w-10 shrink-0 rounded-xl border border-white/15 bg-white object-contain p-1 shadow-lg shadow-sky-950/30"
+            className="h-9 w-9 shrink-0 rounded-lg border border-[var(--border-subtle)] bg-white object-contain p-1"
           />
           <div>
-            <div className="font-semibold text-sm text-white leading-none tracking-tight">
+            <div className="font-semibold text-sm text-slate-900 leading-none tracking-tight">
               BOM Manager
             </div>
           </div>
         </div>
-        <button onClick={onClose} className="lg:hidden p-2 text-white/40 hover:text-white rounded-lg">
+        <button onClick={onClose} className="lg:hidden p-2 text-slate-400 hover:text-slate-700 rounded-lg">
           <X size={18} />
         </button>
       </div>
 
-      <nav className="flex-1 px-4 py-4 overflow-y-auto space-y-8 custom-scrollbar">
+      <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-6 custom-scrollbar">
         {NAV_SECTIONS.map(section => (
           <div key={section.label}>
-            <div className="text-[9px] font-medium text-white/25 tracking-[0.2em] uppercase mb-3 px-3">
+            <div className="text-[10px] font-medium text-slate-400 tracking-wider uppercase mb-2 px-3">
               {section.label}
             </div>
             <div className="space-y-0.5">
               {section.items.map(({ to, icon: Icon, label }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${
-                      isActive
-                        ? 'bg-sky-400/15 text-white ring-1 ring-sky-300/15 shadow-lg shadow-sky-950/20'
-                        : 'text-slate-300/70 hover:text-white hover:bg-white/7'
-                    }`
-                  }
-                >
+                <NavLink key={to} to={to} className={navLinkClass}>
                   {({ isActive }) => (
                     <>
-                      <Icon size={16} className={`shrink-0 transition-all ${isActive ? 'text-sky-300' : ''}`} />
-                      <span className="text-xs font-medium tracking-wide">{label}</span>
+                      <Icon size={16} className={`shrink-0 ${isActive ? 'text-sky-600' : 'text-slate-400 group-hover:text-slate-600'}`} />
+                      <span className="text-[13px] font-medium">{label}</span>
                     </>
                   )}
                 </NavLink>
@@ -115,50 +106,34 @@ function Sidebar({ isAdmin, initials, displayName, onClose, onLogout }: SidebarP
 
         {isAdmin && (
           <div>
-            <div className="text-[9px] font-medium text-white/25 tracking-[0.2em] uppercase mb-3 px-3">ADMINISTRATION</div>
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${
-                  isActive
-                    ? 'bg-sky-400/15 text-white ring-1 ring-sky-300/15 shadow-lg shadow-sky-950/20'
-                    : 'text-slate-300/70 hover:text-white hover:bg-white/7'
-                }`
-              }
-            >
-              <ShieldCheck size={16} className="shrink-0" />
-              <span className="text-xs font-medium tracking-wide">System Control</span>
-            </NavLink>
-            <NavLink
-              to="/change-log"
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${
-                  isActive
-                    ? 'bg-sky-400/15 text-white ring-1 ring-sky-300/15 shadow-lg shadow-sky-950/20'
-                    : 'text-slate-300/70 hover:text-white hover:bg-white/7'
-                }`
-              }
-            >
-              <Activity size={16} className="shrink-0" />
-              <span className="text-xs font-medium tracking-wide">Change Log</span>
-            </NavLink>
+            <div className="text-[10px] font-medium text-slate-400 tracking-wider uppercase mb-2 px-3">ADMINISTRATION</div>
+            <div className="space-y-0.5">
+              <NavLink to="/admin" className={navLinkClass}>
+                <ShieldCheck size={16} className="shrink-0 text-slate-400" />
+                <span className="text-[13px] font-medium">System Control</span>
+              </NavLink>
+              <NavLink to="/change-log" className={navLinkClass}>
+                <Activity size={16} className="shrink-0 text-slate-400" />
+                <span className="text-[13px] font-medium">Change Log</span>
+              </NavLink>
+            </div>
           </div>
         )}
       </nav>
 
-      <div className="px-4 py-5 border-t border-white/10">
-        <div className="flex items-center gap-3 p-3 rounded-xl bg-white/7 ring-1 ring-white/10 group transition-all">
-          <div className="w-9 h-9 rounded-lg bg-sky-400/15 border border-sky-200/15 flex items-center justify-center text-xs font-semibold text-white/90">
+      <div className="px-3 py-4 border-t border-[var(--border-subtle)]">
+        <div className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 group transition-colors">
+          <div className="w-8 h-8 rounded-lg bg-sky-50 border border-sky-100 flex items-center justify-center text-xs font-semibold text-sky-700">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold text-white/80 truncate">{displayName}</div>
-            <div className="text-[9px] font-medium text-white/30 uppercase tracking-wider">{isAdmin ? 'ROOT ADMIN' : 'FIELD ENGINEER'}</div>
+            <div className="text-xs font-semibold text-slate-800 truncate">{displayName}</div>
+            <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">{isAdmin ? 'Admin' : 'Engineer'}</div>
           </div>
           <button
             onClick={onLogout}
-            className="p-2 text-white/20 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
-            title="Terminate Session"
+            className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            title="Sign out"
           >
             <LogOut size={16} />
           </button>
@@ -217,7 +192,7 @@ export default function AppLayout() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-navy-950">
+      <div className="flex h-screen items-center justify-center bg-[var(--bg-app)]">
         <div className="spinner" />
       </div>
     );
@@ -251,15 +226,15 @@ export default function AppLayout() {
       )}
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-14 bg-white/90 flex items-center justify-between px-6 shrink-0 z-40 backdrop-blur-xl" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+        <header className="h-14 bg-[var(--bg-surface)] flex items-center justify-between px-6 shrink-0 z-40 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-4">
-            <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 text-slate-400 hover:text-navy-900 rounded-lg">
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 text-slate-400 hover:text-slate-900 rounded-lg">
               <Menu size={20} />
             </button>
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-400 tracking-wide">
-              <span className="opacity-50">BEP-CORE</span>
+            <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+              <span>BEP</span>
               <ChevronRight size={12} />
-              <span className="text-navy-900 font-semibold">
+              <span className="text-slate-900 font-semibold">
                 {NAV_SECTIONS.flatMap(s => s.items).find(i => location.pathname.startsWith(i.to))?.label || (location.pathname === '/admin' ? 'Admin Panel' : 'System Node')}
               </span>
             </div>
@@ -268,14 +243,13 @@ export default function AppLayout() {
           <div className="flex items-center gap-3">
             <div
               onClick={() => setSearchOpen(true)}
-              className="hidden md:flex items-center gap-3 bg-slate-50 rounded-full px-4 py-2 hover:bg-navy-50 transition-all cursor-pointer group border border-slate-100"
+              className="hidden md:flex items-center gap-3 bg-white rounded-lg px-3 py-1.5 hover:border-slate-300 transition-colors cursor-pointer group border border-[var(--border-default)]"
             >
               <Search size={14} className="text-slate-400 group-hover:text-sky-600 transition-colors" />
-              <span className="text-[11px] font-medium text-slate-500 group-hover:text-navy-700 transition-colors">Global Search</span>
-              <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-md" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
-                <span className="text-[9px] font-medium text-slate-400">Ctrl/Cmd</span>
-                <span className="text-[9px] font-medium text-slate-400">K</span>
-              </div>
+              <span className="text-xs font-medium text-slate-500">Search</span>
+              <kbd className="flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded border border-[var(--border-subtle)] text-[10px] font-medium text-slate-400">
+                Ctrl K
+              </kbd>
             </div>
           </div>
         </header>
@@ -308,7 +282,7 @@ function AILauncher() {
   return (
     <button
       onClick={() => setOpen(true)}
-      className="fixed bottom-4 right-4 z-40 w-14 h-14 rounded-full shadow-2xl shadow-sky-950/25 bg-gradient-to-br from-sky-500 via-navy-700 to-navy-950 text-white flex items-center justify-center hover:scale-105 transition-transform"
+      className="fixed bottom-4 right-4 z-40 w-13 h-13 p-3.5 rounded-full shadow-lg bg-sky-700 hover:bg-sky-800 text-white flex items-center justify-center transition-colors"
       title="AI assistant"
       aria-label="Open AI assistant"
     >

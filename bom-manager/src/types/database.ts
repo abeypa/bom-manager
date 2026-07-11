@@ -101,6 +101,68 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['pending_parts']['Insert']>
       }
 
+      issues: {
+        Row: {
+          id: number
+          project_id: number | null
+          purchase_order_id: number | null
+          project_part_id: number | null
+          title: string
+          description: string | null
+          category: 'delivery' | 'quality' | 'design' | 'supplier' | 'commercial' | 'other'
+          severity: 'low' | 'medium' | 'high' | 'critical'
+          status: 'open' | 'in_progress' | 'resolved' | 'closed'
+          assigned_to: string | null
+          created_by: string | null
+          due_date: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          links: Json
+          created_at: string
+          updated_at: string | null
+        }
+        Insert: {
+          id?: number
+          project_id?: number | null
+          purchase_order_id?: number | null
+          project_part_id?: number | null
+          title: string
+          description?: string | null
+          category?: 'delivery' | 'quality' | 'design' | 'supplier' | 'commercial' | 'other'
+          severity?: 'low' | 'medium' | 'high' | 'critical'
+          status?: 'open' | 'in_progress' | 'resolved' | 'closed'
+          assigned_to?: string | null
+          created_by?: string | null
+          due_date?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          links?: Json
+          created_at?: string
+          updated_at?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['issues']['Insert']>
+      }
+
+      issue_comments: {
+        Row: {
+          id: number
+          issue_id: number
+          user_id: string | null
+          comment_text: string
+          images: Json
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          issue_id: number
+          user_id?: string | null
+          comment_text: string
+          images?: Json
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['issue_comments']['Insert']>
+      }
+
       pending_part_comments: {
         Row: {
           id: number
