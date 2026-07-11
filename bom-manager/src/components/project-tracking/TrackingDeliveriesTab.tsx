@@ -55,7 +55,7 @@ export default function TrackingDeliveriesTab() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
         <span><span className="font-semibold text-slate-900">{inTransitCount}</span> POs awaiting delivery</span>
-        <span className="text-slate-300">·</span>
+        <span className="text-slate-300">-</span>
         <span className={overdueCount ? 'text-red-600 font-medium' : ''}>
           {overdueCount} overdue
         </span>
@@ -74,7 +74,7 @@ export default function TrackingDeliveriesTab() {
         <select className="input input-sm !w-auto" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
           <option value="all">All projects</option>
           {(lookups?.projects || []).map((project) => (
-            <option key={project.id} value={String(project.id)}>{project.project_number} · {project.project_name}</option>
+            <option key={project.id} value={String(project.id)}>{project.project_number} - {project.project_name}</option>
           ))}
         </select>
         <select className="input input-sm !w-auto" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -118,10 +118,10 @@ export default function TrackingDeliveriesTab() {
                     >
                       <td>
                         <div className="text-sm font-medium text-slate-900">{po.po_number}</div>
-                        <div className="mt-0.5 text-xs text-slate-400">{formatDate(po.po_date)} · {po.line_count} lines</div>
+                        <div className="mt-0.5 text-xs text-slate-400">{formatDate(po.po_date)} - {po.line_count} lines</div>
                       </td>
-                      <td className="text-sm text-slate-700">{po.supplier_name || '—'}</td>
-                      <td className="text-xs text-slate-600">{po.project_label || '—'}</td>
+                      <td className="text-sm text-slate-700">{po.supplier_name || '-'}</td>
+                      <td className="text-xs text-slate-600">{po.project_label || '-'}</td>
                       <td><span className={chipClass(poStatusTone, po.status)}>{po.status}</span></td>
                       <td>
                         <div className="text-xs text-slate-600">{po.expected_delivery_date ? formatDate(po.expected_delivery_date) : 'Not set'}</div>
@@ -151,7 +151,7 @@ export default function TrackingDeliveriesTab() {
                         {issueCount ? (
                           <span className="badge badge-danger">{issueCount} open</span>
                         ) : (
-                          <span className="text-xs text-slate-300">—</span>
+                          <span className="text-xs text-slate-300">-</span>
                         )}
                       </td>
                       <td className="text-right">

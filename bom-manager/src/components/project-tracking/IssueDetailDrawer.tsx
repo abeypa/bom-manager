@@ -76,7 +76,7 @@ export default function IssueDetailDrawer({ issue, onClose, onEdit }: IssueDetai
             </div>
             <h2 className="mt-2 truncate text-base font-semibold text-slate-900">{issue.title}</h2>
             <div className="mt-1 text-xs text-slate-500">
-              #{issue.id} · opened {formatDateTime(issue.created_at)}{issue.creator_name ? ` by ${issue.creator_name}` : ''}
+              #{issue.id} - opened {formatDateTime(issue.created_at)}{issue.creator_name ? ` by ${issue.creator_name}` : ''}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -110,14 +110,14 @@ export default function IssueDetailDrawer({ issue, onClose, onEdit }: IssueDetai
             <div className="flex flex-wrap gap-2 text-xs">
               {issue.project_id ? (
                 <Link to={`/projects/${issue.project_id}`} className="badge badge-navy hover:underline">
-                  {issue.project_number || `Project #${issue.project_id}`} · {issue.project_name}
+                  {issue.project_number || `Project #${issue.project_id}`} - {issue.project_name}
                 </Link>
               ) : (
                 <span className="text-slate-400">No project</span>
               )}
               {issue.po_number && (
                 <span className="badge badge-slate">
-                  {issue.po_number}{issue.po_supplier_name ? ` · ${issue.po_supplier_name}` : ''}
+                  {issue.po_number}{issue.po_supplier_name ? ` - ${issue.po_supplier_name}` : ''}
                 </span>
               )}
               {issue.part_number && <span className="badge badge-teal-soft">{issue.part_number}</span>}

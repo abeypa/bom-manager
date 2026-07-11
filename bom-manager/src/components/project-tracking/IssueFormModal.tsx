@@ -141,7 +141,7 @@ export default function IssueFormModal({ isOpen, onClose, issue, defaults }: Iss
       .map((po: any) => ({
         value: String(po.id),
         label: po.po_number,
-        subLabel: [po.supplier_name, po.status].filter(Boolean).join(' • '),
+        subLabel: [po.supplier_name, po.status].filter(Boolean).join(' - '),
       })),
   ]
 

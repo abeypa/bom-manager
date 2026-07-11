@@ -116,7 +116,7 @@ export default function TrackingOverviewTab() {
                       <div className="text-xs font-medium text-slate-400">{summary.project_number}</div>
                       <h3 className="mt-0.5 truncate text-sm font-semibold text-slate-900">{summary.project_name}</h3>
                       <p className="mt-0.5 text-xs text-slate-500">
-                        {summary.total_work_items} work items · {summary.open_supplier_assignments} supplier assignments
+                        {summary.total_work_items} work items - {summary.open_supplier_assignments} supplier assignments
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-4 text-xs">
@@ -150,7 +150,7 @@ export default function TrackingOverviewTab() {
               {overdueAssignments.length ? overdueAssignments.map((assignment) => (
                 <div key={assignment.id} className="rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2.5">
                   <div className="text-sm font-medium text-amber-900">{assignment.supplier_name}</div>
-                  <div className="mt-0.5 text-xs text-amber-700">{assignment.project_name} · Target {formatDate(assignment.target_date)}</div>
+                  <div className="mt-0.5 text-xs text-amber-700">{assignment.project_name} - Target {formatDate(assignment.target_date)}</div>
                 </div>
               )) : (
                 <div className="text-sm text-slate-400">No overdue supplier follow-ups.</div>
@@ -176,7 +176,7 @@ export default function TrackingOverviewTab() {
                     </div>
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
-                    {item.project_name || 'General'}{item.supplier_name ? ` · ${item.supplier_name}` : ''}
+                    {item.project_name || 'General'}{item.supplier_name ? ` - ${item.supplier_name}` : ''}
                   </div>
                   <div className="mt-1 text-xs text-slate-600">{item.blocker || 'Needs review from the project team.'}</div>
                 </div>
@@ -206,7 +206,7 @@ export default function TrackingOverviewTab() {
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-slate-900">{update.work_item_name}</div>
                   <div className="mt-0.5 text-xs text-slate-500">
-                    {update.project_name || 'General'}{update.supplier_name ? ` · ${update.supplier_name}` : ''}
+                    {update.project_name || 'General'}{update.supplier_name ? ` - ${update.supplier_name}` : ''}
                   </div>
                 </div>
                 <div className="shrink-0 text-xs text-slate-400">{formatDateTime(update.created_at)}</div>

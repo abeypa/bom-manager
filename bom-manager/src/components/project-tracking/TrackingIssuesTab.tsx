@@ -117,18 +117,18 @@ export default function TrackingIssuesTab() {
                   >
                     <td>
                       <div className="text-sm font-medium text-slate-900">{issue.title}</div>
-                      <div className="mt-0.5 text-xs text-slate-400">#{issue.id} · {issue.category}</div>
+                      <div className="mt-0.5 text-xs text-slate-400">#{issue.id} - {issue.category}</div>
                     </td>
                     <td>
                       <div className="text-xs text-slate-600">
-                        {issue.project_number ? `${issue.project_number} · ${issue.project_name}` : '—'}
+                        {issue.project_number ? `${issue.project_number} - ${issue.project_name}` : '-'}
                       </div>
                       {issue.po_number && <div className="mt-0.5 text-xs text-slate-400">{issue.po_number}</div>}
                     </td>
                     <td><span className={chipClass(severityTone, issue.severity)}>{issue.severity}</span></td>
                     <td><span className={chipClass(issueStatusTone, issue.status)}>{issue.status.replace(/_/g, ' ')}</span></td>
                     <td className="text-xs text-slate-600">{issue.assignee_name || issue.assignee_email || 'Unassigned'}</td>
-                    <td className="text-xs text-slate-600">{issue.due_date ? formatDate(issue.due_date) : '—'}</td>
+                    <td className="text-xs text-slate-600">{issue.due_date ? formatDate(issue.due_date) : '-'}</td>
                     <td className="text-right">
                       <span className="inline-flex items-center gap-1 text-xs text-slate-400">
                         <MessageSquare size={12} />

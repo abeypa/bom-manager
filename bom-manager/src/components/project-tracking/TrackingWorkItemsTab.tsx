@@ -162,7 +162,7 @@ export default function TrackingWorkItemsTab() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-slate-500">
-          <span className="font-semibold text-slate-900">{allWorkItems.length}</span> work items ·{' '}
+          <span className="font-semibold text-slate-900">{allWorkItems.length}</span> work items -{' '}
           <span className="font-semibold text-slate-900">{allAssignments.length}</span> supplier assignments
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -236,8 +236,8 @@ export default function TrackingWorkItemsTab() {
                   <tr key={item.id} className="align-top">
                     <td>
                       <div className="text-sm font-medium text-slate-900">{item.name}</div>
-                      <div className="mt-0.5 text-xs text-slate-500">{item.project_name || 'General'}{item.supplier_name ? ` · ${item.supplier_name}` : ''}</div>
-                      <div className="mt-0.5 text-xs text-slate-400">Due: {item.due_date || 'Not set'} · {item.progress_percent ?? 0}%</div>
+                      <div className="mt-0.5 text-xs text-slate-500">{item.project_name || 'General'}{item.supplier_name ? ` - ${item.supplier_name}` : ''}</div>
+                      <div className="mt-0.5 text-xs text-slate-400">Due: {item.due_date || 'Not set'} - {item.progress_percent ?? 0}%</div>
                     </td>
                     <td className="text-xs text-slate-600">{item.assigned_user_name || item.assigned_user_email || 'Unassigned'}</td>
                     <td>
@@ -278,7 +278,7 @@ export default function TrackingWorkItemsTab() {
                   <tr key={assignment.id} className="align-top">
                     <td>
                       <div className="text-sm font-medium text-slate-900">{assignment.supplier_name}</div>
-                      <div className="mt-0.5 text-xs text-slate-500">{assignment.project_name} · {assignment.project_number}</div>
+                      <div className="mt-0.5 text-xs text-slate-500">{assignment.project_name} - {assignment.project_number}</div>
                       <div className="mt-0.5 text-xs text-slate-400">{[assignment.section_name, assignment.subsection_name].filter(Boolean).join(' / ') || 'Project-level tracking'}</div>
                     </td>
                     <td className="text-xs text-slate-600">{assignment.assigned_user_name || assignment.assigned_user_email || 'Unassigned'}</td>
@@ -324,7 +324,7 @@ export default function TrackingWorkItemsTab() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-slate-900">{item.name}</div>
-                  <div className="mt-0.5 text-xs text-slate-500">{item.project_name || 'General'}{item.supplier_name ? ` · ${item.supplier_name}` : ''}</div>
+                  <div className="mt-0.5 text-xs text-slate-500">{item.project_name || 'General'}{item.supplier_name ? ` - ${item.supplier_name}` : ''}</div>
                   <div className="mt-0.5 text-xs text-slate-400">{item.category?.replace(/_/g, ' ')}</div>
                 </div>
                 <button className="btn btn-secondary btn-xs shrink-0" onClick={() => setUpdateItem(item)}>

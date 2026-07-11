@@ -113,7 +113,7 @@ export default function TrackingProjectsTab() {
                   </div>
                   <h3 className="mt-1 truncate text-sm font-semibold text-slate-900">{project.project_name}</h3>
                   <div className="mt-1 text-xs text-slate-500">
-                    {project.customer || 'No customer'} · Target: {formatDate(project.target_completion_date)}
+                    {project.customer || 'No customer'} - Target: {formatDate(project.target_completion_date)}
                   </div>
                   <div className="mt-2.5 flex flex-wrap gap-1.5">
                     {PHASES.map(({ key, label }) => (
@@ -178,13 +178,13 @@ export default function TrackingProjectsTab() {
                           {projectPos.map((po: any) => (
                             <tr key={po.id}>
                               <td className="text-sm font-medium text-slate-900">{po.po_number}</td>
-                              <td className="text-xs text-slate-600">{po.supplier_name || '—'}</td>
+                              <td className="text-xs text-slate-600">{po.supplier_name || '-'}</td>
                               <td><span className={chipClass(poStatusTone, po.status)}>{po.status}</span></td>
                               <td className="text-xs text-slate-600">
                                 {po.expected_delivery_date ? formatDate(po.expected_delivery_date) : 'Not set'}
                                 {po.is_overdue && <span className="ml-1.5 font-medium text-red-600">({po.days_overdue}d late)</span>}
                               </td>
-                              <td className="text-xs text-slate-600">{po.received_pct}% · {po.received_qty}/{po.ordered_qty}</td>
+                              <td className="text-xs text-slate-600">{po.received_pct}% - {po.received_qty}/{po.ordered_qty}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -204,7 +204,7 @@ export default function TrackingProjectsTab() {
                           <div className="min-w-0">
                             <div className="truncate text-sm font-medium text-slate-800">{issue.title}</div>
                             <div className="text-xs text-slate-400">
-                              #{issue.id} · {issue.category}{issue.po_number ? ` · ${issue.po_number}` : ''}
+                              #{issue.id} - {issue.category}{issue.po_number ? ` - ${issue.po_number}` : ''}
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
