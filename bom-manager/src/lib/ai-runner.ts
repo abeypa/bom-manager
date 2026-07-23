@@ -552,8 +552,7 @@ export function ensureSystemMessage() {
 function pendingForCall(tc: { id: string; function: { name: string; arguments: string } }): PendingAction | null {
   const tool = findTool(tc.function.name)
   if (!tool || tool.kind !== 'write') return null
-  let args: any = {}
-  try { args = JSON.parse(tc.function.arguments || '{}') } catch {}
+  const args = parseToolArguments(tc.function.arguments)
   return {
     id: uid(),
     tool_call_id: tc.id,
@@ -563,6 +562,31 @@ function pendingForCall(tc: { id: string; function: { name: string; arguments: s
     status: 'pending',
     ts: Date.now(),
   }
+}
+
+export function parseToolArguments(raw: string): any {
+  try {
+    const args = JSON.parse(raw || '{}')
+    if (!args || Array.isArray(args) || typeof args !== 'object') {
+      throw new Error('arguments must be a JSON object')
+    }
+    return args
+  } catch (error: any) {
+    throw new Error(`Invalid tool arguments: ${error?.message || String(error)}`)
+  }
+}
+
+export function serializeToolPayload(payload: any, maxChars = 50_000): string {
+  const json = JSON.stringify(payload)
+  if (json.length <= maxChars) return json
+
+  const prefixLength = Math.max(0, maxChars - 200)
+  return JSON.stringify({
+    ok: payload?.ok !== false,
+    truncated: true,
+    result_prefix: json.slice(0, prefixLength),
+    message: `Tool result exceeded ${maxChars} characters and was truncated.`,
+  })
 }
 
 /**
@@ -693,9 +717,20 @@ async function runLoop() {
           // suppress the approval card and feed the error back to the
           // model so it can re-plan (e.g. switch from create_master_part
           // to update_master_part_price).
+          let args: any
+          try {
+            args = parseToolArguments(tc.function.arguments)
+          } catch (err: any) {
+            useAIStore.getState().pushMessage({
+              id: uid(),
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ error: err?.message || String(err) }),
+              ts: Date.now(),
+            })
+            continue
+          }
           if (tool.preflight) {
-            let args: any = {}
-            try { args = JSON.parse(tc.function.arguments || '{}') } catch {}
             try {
               await tool.preflight(args)
             } catch (err: any) {
@@ -713,15 +748,18 @@ async function runLoop() {
               continue
             }
           }
-          const p = pendingForCall(tc)
+          const p = pendingForCall({
+            ...tc,
+            function: { ...tc.function, arguments: JSON.stringify(args) },
+          })
           if (p) writePendings.push(p)
           continue
         }
 
         // READ tool — execute now
-        let args: any = {}
-        try { args = JSON.parse(tc.function.arguments || '{}') } catch {}
+        let args: any
         try {
+          args = parseToolArguments(tc.function.arguments)
           const result = await tool.handler(args)
           // render_html_report returns { title, html } — keep tool message terse
           const payload = tc.function.name === 'render_html_report'
@@ -731,7 +769,7 @@ async function runLoop() {
             id: uid(),
             role: 'tool',
             tool_call_id: tc.id,
-            content: JSON.stringify(payload).slice(0, 50_000),
+            content: serializeToolPayload(payload),
             ts: Date.now(),
           })
         } catch (err: any) {
@@ -776,18 +814,24 @@ async function runLoop() {
 
 export async function approvePending(p: PendingAction) {
   const store = useAIStore.getState()
-  const tool = findTool(p.tool_name)
-  if (!tool) return
-  store.updatePending(p.id, { status: 'approved' })
+  const current = store.pending.find(action => action.id === p.id)
+  if (!current || current.status !== 'pending') return
+
+  const tool = findTool(current.tool_name)
+  if (!tool || tool.kind !== 'write') {
+    store.updatePending(current.id, { status: 'failed', error: `Unknown write tool: ${current.tool_name}` })
+    return
+  }
+  store.updatePending(current.id, { status: 'approved' })
   store.setBusy(true)
   try {
-    const result = await tool.handler(p.args)
-    store.updatePending(p.id, { status: 'executed', result })
-    await feedToolResultAndContinue({ ...p, status: 'executed', result })
+    const result = await tool.handler(current.args)
+    store.updatePending(current.id, { status: 'executed', result })
+    await feedToolResultAndContinue({ ...current, status: 'executed', result })
   } catch (err: any) {
     const msg = err?.message || String(err)
-    store.updatePending(p.id, { status: 'failed', error: msg })
-    await feedToolResultAndContinue({ ...p, status: 'failed', error: msg })
+    store.updatePending(current.id, { status: 'failed', error: msg })
+    await feedToolResultAndContinue({ ...current, status: 'failed', error: msg })
   } finally {
     store.setBusy(false)
   }

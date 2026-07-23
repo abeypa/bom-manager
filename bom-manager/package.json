@@ -12,7 +12,7 @@
     "lint": "tsc --noEmit",
     "backfill:po-price-history": "node scripts/backfill_po_price_history.mjs",
     "backfill:po-tax-amounts": "node scripts/backfill_po_tax_amounts.mjs",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",
@@ -54,6 +54,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0"
+    "@types/node": "^25.5.0",
+    "vitest": "^4.1.10"
   }
 }

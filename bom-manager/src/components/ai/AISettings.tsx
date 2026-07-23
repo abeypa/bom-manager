@@ -113,7 +113,7 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
               type="text"
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="provider/model-id (e.g. anthropic/claude-3.5-sonnet)"
+              placeholder="provider/model-id (e.g. anthropic/claude-sonnet-4.5)"
               disabled={!isAdmin}
               className="w-full text-sm px-3 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20 font-mono disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
               spellCheck={false}

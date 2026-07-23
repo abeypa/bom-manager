@@ -26,6 +26,11 @@ export interface ORTool {
 export interface ORCompletionResponse {
   id: string
   model: string
+  error?: {
+    code?: number | string
+    message?: string
+    metadata?: Record<string, unknown>
+  }
   choices: Array<{
     finish_reason: string
     message: {
@@ -45,16 +50,26 @@ export interface AISettings {
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const STORAGE_KEY = 'bom-ai:openrouter'
 
-export const DEFAULT_MODEL = 'anthropic/claude-3.5-sonnet'
+export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4.5'
 
 export const RECOMMENDED_MODELS = [
-  { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet (recommended) - vision', vision: true },
-  { id: 'anthropic/claude-3.5-haiku', label: 'Claude 3.5 Haiku (fast/cheap) - vision', vision: true },
+  { id: 'anthropic/claude-sonnet-4.5', label: 'Claude Sonnet 4.5 (recommended) - vision', vision: true },
+  { id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4 - vision', vision: true },
   { id: 'openai/gpt-4o', label: 'GPT-4o - vision', vision: true },
   { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini - vision', vision: true },
   { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash - vision', vision: true },
   { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (text only)', vision: false },
 ]
+
+const RETIRED_MODEL_REPLACEMENTS: Record<string, string> = {
+  'anthropic/claude-3.5-sonnet': DEFAULT_MODEL,
+  'anthropic/claude-3.5-haiku': 'google/gemini-2.5-flash',
+}
+
+function normalizeModelId(model: unknown): string {
+  const modelId = typeof model === 'string' ? model.trim() : ''
+  return RETIRED_MODEL_REPLACEMENTS[modelId] || modelId || DEFAULT_MODEL
+}
 
 export function modelSupportsVision(modelId: string): boolean {
   const model = RECOMMENDED_MODELS.find((entry) => entry.id === modelId)
@@ -69,7 +84,7 @@ export function loadSettings(): AISettings {
     const parsed = JSON.parse(raw)
     return {
       apiKey: parsed.apiKey || '',
-      model: parsed.model || DEFAULT_MODEL,
+      model: normalizeModelId(parsed.model),
     }
   } catch {
     return { apiKey: '', model: DEFAULT_MODEL }
@@ -79,7 +94,7 @@ export function loadSettings(): AISettings {
 export function saveSettings(settings: AISettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     apiKey: settings.apiKey || '',
-    model: settings.model || DEFAULT_MODEL,
+    model: normalizeModelId(settings.model),
   }))
 }
 
@@ -99,7 +114,7 @@ export async function loadSettingsFromDB(): Promise<AISettings | null> {
 
     const rows = Array.isArray(data) ? data : []
     const apiKey = rows.find((row: any) => row.key === 'ai_api_key')?.value || ''
-    const model = rows.find((row: any) => row.key === 'ai_model')?.value || DEFAULT_MODEL
+    const model = normalizeModelId(rows.find((row: any) => row.key === 'ai_model')?.value)
 
     if (!apiKey && !model) return null
     return { apiKey, model }
@@ -110,14 +125,37 @@ export async function loadSettingsFromDB(): Promise<AISettings | null> {
 
 export async function saveSettingsToDB(settings: AISettings): Promise<void> {
   const payload = [
-    { key: 'ai_model', value: settings.model || DEFAULT_MODEL, updated_at: new Date().toISOString() },
+    { key: 'ai_model', value: normalizeModelId(settings.model), updated_at: new Date().toISOString() },
   ]
 
   if (settings.apiKey) {
     payload.push({ key: 'ai_api_key', value: settings.apiKey, updated_at: new Date().toISOString() })
   }
 
-  await (supabase as any).from('app_settings').upsert(payload)
+  const { error } = await (supabase as any).from('app_settings').upsert(payload)
+  if (error) throw error
+}
+
+function getOpenRouterError(payload: any): string | null {
+  const error = payload?.error
+  if (error?.message) return String(error.message)
+
+  const choice = payload?.choices?.[0]
+  if (choice?.finish_reason === 'error') {
+    return 'The model provider stopped before producing a response.'
+  }
+  return null
+}
+
+async function readResponsePayload(res: Response): Promise<any> {
+  const body = await res.text()
+  if (!body) return null
+  try {
+    return JSON.parse(body)
+  } catch {
+    if (!res.ok) return { error: { message: body.slice(0, 1_000) } }
+    throw new Error('OpenRouter returned an invalid JSON response.')
+  }
 }
 
 export async function chatCompletion(opts: {
@@ -159,10 +197,14 @@ export async function chatCompletion(opts: {
     signal: opts.signal,
   })
 
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`OpenRouter ${res.status}: ${body}`)
+  const payload = await readResponsePayload(res)
+  const providerError = getOpenRouterError(payload)
+  if (!res.ok || providerError) {
+    throw new Error(`OpenRouter ${res.status}: ${providerError || 'Request failed.'}`)
+  }
+  if (!Array.isArray(payload?.choices) || !payload.choices[0]?.message) {
+    throw new Error('OpenRouter returned no assistant response.')
   }
 
-  return (await res.json()) as ORCompletionResponse
+  return payload as ORCompletionResponse
 }
