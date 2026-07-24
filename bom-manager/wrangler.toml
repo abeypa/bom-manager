@@ -2,6 +2,9 @@
 name = "bom-manager"
 main = "./worker.ts"
 compatibility_date = "2025-09-01"
+# Runtime variables and secrets are managed in the Cloudflare dashboard.
+# Preserve them when Git/Wrangler publishes a new Worker version.
+keep_vars = true
 
 [assets]
 directory = "./dist"
