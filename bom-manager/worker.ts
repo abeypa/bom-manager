@@ -1,12 +1,14 @@
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> }
   OPENROUTER_CONFIG_SECRET?: string
-  SUPABASE_SERVICE_ROLE_KEY?: string
   VITE_SUPABASE_URL?: string
   VITE_SUPABASE_ANON_KEY?: string
 }
 
 type ConfigSource = 'app_settings' | 'none'
+type AuthResult =
+  | { ok: true; user: any; token: string }
+  | { ok: false; response: Response }
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1'
@@ -46,7 +48,7 @@ function missingAuthBindings(env: Env): string[] {
 }
 
 function missingSecureStorageBindings(env: Env): string[] {
-  return (['OPENROUTER_CONFIG_SECRET', 'SUPABASE_SERVICE_ROLE_KEY'] as const)
+  return (['OPENROUTER_CONFIG_SECRET'] as const)
     .filter((key) => !env[key]?.trim())
 }
 
@@ -98,12 +100,12 @@ async function decryptValue(secret: string, ciphertext: string, iv: string) {
   return new TextDecoder().decode(plain)
 }
 
-async function supabaseFetch(env: Env, path: string, init: RequestInit = {}) {
+async function supabaseFetch(env: Env, bearerToken: string, path: string, init: RequestInit = {}) {
   const baseUrl = requireEnv(env, 'VITE_SUPABASE_URL')
-  const serviceKey = requireEnv(env, 'SUPABASE_SERVICE_ROLE_KEY')
+  const anonKey = requireEnv(env, 'VITE_SUPABASE_ANON_KEY')
   const headers = new Headers(init.headers || {})
-  headers.set('apikey', serviceKey)
-  headers.set('Authorization', `Bearer ${serviceKey}`)
+  headers.set('apikey', anonKey)
+  headers.set('Authorization', `Bearer ${bearerToken}`)
   return fetch(`${baseUrl}/rest/v1/${path}`, { ...init, headers })
 }
 
@@ -120,17 +122,17 @@ async function getAuthUser(env: Env, bearerToken: string) {
   return await res.json() as any
 }
 
-async function requireAuthenticated(request: Request, env: Env) {
+async function requireAuthenticated(request: Request, env: Env): Promise<AuthResult> {
   const authHeader = request.headers.get('Authorization') || ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
   if (!token) {
-    return { ok: false, response: jsonResponse({ error: 'Authentication required' }, 401) }
+    return { ok: false as const, response: jsonResponse({ error: 'Authentication required' }, 401) }
   }
 
   const missingBindings = missingAuthBindings(env)
   if (missingBindings.length) {
     return {
-      ok: false,
+      ok: false as const,
       response: jsonResponse({
         error: `AI proxy is missing Cloudflare runtime bindings: ${missingBindings.join(', ')}`,
       }, 503),
@@ -142,18 +144,18 @@ async function requireAuthenticated(request: Request, env: Env) {
     user = await getAuthUser(env, token)
   } catch {
     return {
-      ok: false,
+      ok: false as const,
       response: jsonResponse({ error: 'AI proxy could not verify the Supabase session' }, 502),
     }
   }
   if (!user?.id) {
-    return { ok: false, response: jsonResponse({ error: 'Invalid session' }, 401) }
+    return { ok: false as const, response: jsonResponse({ error: 'Invalid session' }, 401) }
   }
 
-  return { ok: true as const, user }
+  return { ok: true as const, user, token }
 }
 
-async function requireAdmin(request: Request, env: Env) {
+async function requireAdmin(request: Request, env: Env): Promise<AuthResult> {
   const auth = await requireAuthenticated(request, env)
   if (!auth.ok) return auth
 
@@ -161,25 +163,29 @@ async function requireAdmin(request: Request, env: Env) {
 
   const res = await supabaseFetch(
     env,
+    auth.token,
     `profiles?select=role&id=eq.${encodeURIComponent(user.id)}&limit=1`,
     { method: 'GET' },
   )
   if (!res.ok) {
-    return { ok: false, response: jsonResponse({ error: 'Failed to verify admin role' }, 500) }
+    return { ok: false as const, response: jsonResponse({ error: 'Failed to verify admin role' }, 500) }
   }
   const rows = await res.json() as any[]
   const role = rows?.[0]?.role
   if (role !== 'admin') {
-    return { ok: false, response: jsonResponse({ error: 'Admin access required' }, 403) }
+    return { ok: false as const, response: jsonResponse({ error: 'Admin access required' }, 403) }
   }
 
-  return { ok: true as const, user }
+  return { ok: true as const, user, token: auth.token }
 }
 
-async function loadStoredOpenRouterKey(env: Env): Promise<{ key: string | null; source: ConfigSource }> {
+async function loadStoredOpenRouterKey(
+  env: Env,
+  bearerToken: string,
+): Promise<{ key: string | null; source: ConfigSource }> {
   const configSecret = requireEnv(env, 'OPENROUTER_CONFIG_SECRET')
   const query = `${SETTINGS_TABLE}?select=key,value&key=in.(${KEY_CIPHERTEXT},${KEY_IV})`
-  const res = await supabaseFetch(env, query, { method: 'GET' })
+  const res = await supabaseFetch(env, bearerToken, query, { method: 'GET' })
   if (res.ok) {
     const rows = await res.json() as any[]
     const ciphertext = rows.find((row) => row.key === KEY_CIPHERTEXT)?.value
@@ -193,14 +199,14 @@ async function loadStoredOpenRouterKey(env: Env): Promise<{ key: string | null; 
   return { key: null, source: 'none' }
 }
 
-async function saveStoredOpenRouterKey(env: Env, apiKey: string) {
+async function saveStoredOpenRouterKey(env: Env, bearerToken: string, apiKey: string) {
   const configSecret = requireEnv(env, 'OPENROUTER_CONFIG_SECRET')
   const payload = await encryptValue(configSecret, apiKey)
   const body = JSON.stringify([
     { key: KEY_CIPHERTEXT, value: payload.ciphertext, updated_at: new Date().toISOString() },
     { key: KEY_IV, value: payload.iv, updated_at: new Date().toISOString() },
   ])
-  const res = await supabaseFetch(env, `${SETTINGS_TABLE}?on_conflict=key`, {
+  const res = await supabaseFetch(env, bearerToken, `${SETTINGS_TABLE}?on_conflict=key`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -213,8 +219,8 @@ async function saveStoredOpenRouterKey(env: Env, apiKey: string) {
   }
 }
 
-async function clearStoredOpenRouterKey(env: Env) {
-  const res = await supabaseFetch(env, `${SETTINGS_TABLE}?key=in.(${KEY_CIPHERTEXT},${KEY_IV})`, {
+async function clearStoredOpenRouterKey(env: Env, bearerToken: string) {
+  const res = await supabaseFetch(env, bearerToken, `${SETTINGS_TABLE}?key=in.(${KEY_CIPHERTEXT},${KEY_IV})`, {
     method: 'DELETE',
   })
   if (!res.ok) {
@@ -238,7 +244,7 @@ async function handleOpenRouterConfig(request: Request, env: Env): Promise<Respo
     if (!auth.ok) return auth.response
     const storageError = requireSecureStorage(env)
     if (storageError) return storageError
-    const { key, source } = await loadStoredOpenRouterKey(env)
+    const { key, source } = await loadStoredOpenRouterKey(env, auth.token)
     return jsonResponse({ configured: Boolean(key), source }, 200)
   }
 
@@ -258,7 +264,7 @@ async function handleOpenRouterConfig(request: Request, env: Env): Promise<Respo
     if (!apiKey) return jsonResponse({ error: 'API key is required' }, 400)
 
     try {
-      await saveStoredOpenRouterKey(env, apiKey)
+      await saveStoredOpenRouterKey(env, auth.token, apiKey)
       return jsonResponse({ configured: true, source: 'app_settings' satisfies ConfigSource }, 200)
     } catch (error: any) {
       return jsonResponse({ error: error?.message || 'Failed to store API key' }, 500)
@@ -271,7 +277,7 @@ async function handleOpenRouterConfig(request: Request, env: Env): Promise<Respo
     const storageError = requireSecureStorage(env)
     if (storageError) return storageError
     try {
-      await clearStoredOpenRouterKey(env)
+      await clearStoredOpenRouterKey(env, auth.token)
       return jsonResponse({ configured: false, source: 'none' satisfies ConfigSource }, 200)
     } catch (error: any) {
       return jsonResponse({ error: error?.message || 'Failed to clear API key' }, 500)
@@ -301,7 +307,7 @@ async function handleOpenRouterProxy(request: Request, env: Env): Promise<Respon
   const storageError = requireSecureStorage(env)
   if (storageError) return storageError
 
-  const { key: apiKey } = await loadStoredOpenRouterKey(env)
+  const { key: apiKey } = await loadStoredOpenRouterKey(env, auth.token)
   if (!apiKey) {
     return jsonResponse({ error: 'AI proxy is not configured' }, 503)
   }
@@ -360,7 +366,7 @@ async function handleOpenRouterModelEndpoints(request: Request, env: Env): Promi
     return jsonResponse({ error: 'Model id must use the provider/model format' }, 400)
   }
 
-  const { key: apiKey } = await loadStoredOpenRouterKey(env)
+  const { key: apiKey } = await loadStoredOpenRouterKey(env, auth.token)
   if (!apiKey) return jsonResponse({ error: 'AI proxy is not configured' }, 503)
 
   const author = encodeURIComponent(model.slice(0, separatorIndex))
