@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { canDeletePurchaseOrder, PO_DELETE_USER_EMAIL } from '@/lib/po-delete-permissions'
 import type { Database } from '@/types/database'
 import { extractPurchaseOrderPdfTaxAmount } from '@/lib/po-pdf-tax'
 import { logActivityAsync } from './activity-logs'
@@ -532,17 +533,20 @@ export const purchaseOrdersApi = {
     return { success: true };
   },
 
-  // Delete PO (only if Draft or Cancelled)
+  // Permanently delete a PO. Restricted to the designated owner account.
   deletePO: async (poId: number) => {
-    const { data: po } = await supabase
+    const { data: authData } = await supabase.auth.getUser()
+    if (!canDeletePurchaseOrder(authData.user?.email)) {
+      throw new Error(`Only ${PO_DELETE_USER_EMAIL} can delete purchase orders`)
+    }
+
+    const { data: po, error: poError } = await supabase
       .from('purchase_orders')
-      .select('status')
+      .select('id, po_number, status')
       .eq('id', poId)
       .single();
 
-    if (!['Draft', 'Cancelled'].includes((po as any)?.status)) {
-      throw new Error('Only Draft or Cancelled POs can be deleted');
-    }
+    if (poError || !po) throw new Error('Purchase order not found')
 
     const { error } = await (supabase as any).from('purchase_orders').delete().eq('id', poId);
     if (error) throw error;

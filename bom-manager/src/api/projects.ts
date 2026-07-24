@@ -889,23 +889,14 @@ export const projectsApi = {
 
     if (linkErr || !link) throw new Error('Part record not found')
 
-    // 2. Security Check: Prevent deleting parts that are already "in flight" on released POs
+    // A project-tree part can be removed only when no PO line references it.
     const poItems = (link as any).po_items || []
-    const releasedItems = poItems.filter((i: any) => i.purchase_orders?.status && i.purchase_orders.status !== 'Draft' && i.purchase_orders.status !== 'Cancelled')
-    
-    if (releasedItems.length > 0) {
-      const status = releasedItems[0].purchase_orders.status
-      throw new Error(`Cannot remove part: It is linked to a PO that is already "${status}". You must cancel the PO or receive the items first.`)
-    }
-
-    // 3. Cleanup: If the part is on a Draft/Cancelled PO, remove it from the PO first to clear FK constraint
     if (poItems.length > 0) {
-      const { error: delPoErr } = await (supabase as any)
-        .from('purchase_order_items')
-        .delete()
-        .in('id', poItems.map((i: any) => i.id))
-      
-      if (delPoErr) throw new Error('Failed to clear PO associations: ' + delPoErr.message)
+      const status = poItems[0].purchase_orders?.status || 'Unknown'
+      throw new Error(
+        `Cannot remove part: ${poItems.length} PO line${poItems.length === 1 ? '' : 's'} ` +
+        `reference this project part (status: ${status}). Delete or remap the linked PO first.`,
+      )
     }
 
     const partTable = link.part_type as PartCategory
@@ -931,8 +922,8 @@ export const projectsApi = {
       console.warn(`Master part (table: ${partTable}, id: ${partId}) not found. Skipping stock restoration for project part link ${id}.`)
     }
 
-    // 4. Delete project part link (always allowed)
-    await (supabase as any).from('project_parts').delete().eq('id', id)
+    const { error: deleteError } = await (supabase as any).from('project_parts').delete().eq('id', id)
+    if (deleteError) throw deleteError
   },
 
   updatePartInSection: async (id: number, payload: any) => {

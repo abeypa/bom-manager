@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Filter, Download, ShoppingCart, ChevronRight, FileText } from 'lucide-react';
+import { Search, Plus, Filter, Download, ShoppingCart, ChevronRight, FileText, Trash2 } from 'lucide-react';
 import { purchaseOrdersApi } from '../api/purchase-orders';
 import PODetailModal from '../components/purchase-orders/PODetailModal';
 import exportUtils from '../utils/export';
 import { useToast } from '../context/ToastContext';
 import FastScrollSlider from '@/components/ui/FastScrollSlider';
+import { useRole } from '@/hooks/useRole';
+import { canDeletePurchaseOrder } from '@/lib/po-delete-permissions';
 
 export default function PurchaseOrders() {
   const { showToast } = useToast();
+  const { userEmail } = useRole();
   const [pos, setPos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -53,6 +56,22 @@ export default function PurchaseOrders() {
       showToast('success', `Manifest for PO ${po.po_number} exported.`);
     } catch (err) {
       showToast('error', 'Failed to generate export bundle');
+    }
+  };
+
+  const handleDeletePO = async (po: any) => {
+    const confirmed = confirm(
+      `Permanently delete PO ${po.po_number}?\n\nThis also removes its line items and linked PO records. This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await purchaseOrdersApi.deletePO(po.id);
+      if (selectedPOId === po.id) setSelectedPOId(null);
+      showToast('success', `PO ${po.po_number} deleted`);
+      await loadPOs();
+    } catch (error: any) {
+      showToast('error', error?.message || 'Failed to delete purchase order');
     }
   };
 
@@ -219,6 +238,15 @@ export default function PurchaseOrders() {
                           >
                             <Download size={14} />
                           </button>
+                          {canDeletePurchaseOrder(userEmail) && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeletePO(po); }}
+                              className="btn btn-icon btn-sm btn-ghost text-red-500 hover:bg-red-50 hover:text-red-700"
+                              title="Permanently delete PO"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                           <button className="btn btn-icon btn-sm btn-ghost">
                             <ChevronRight size={16} className="text-slate-300" />
                           </button>

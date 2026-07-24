@@ -100,6 +100,16 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     able to follow the activity from the chat without opening another
     screen.
 
+    REQUIRED USER CONFIRMATIONS:
+    - Before creating ANY missing master part, show the unmatched PO
+      lines and ask: "Which part master table should each new part be
+      added to?" Wait for the user's EBO, EMF, MBO, MMF, or PBO
+      selection. Never infer or auto-select a part table.
+    - Before mapping ANY part to project_parts, call list_projects and
+      ask the user to select the target project or projects. Wait for
+      the explicit selection even when the PDF or prior context suggests
+      a project. Tool preflights enforce both confirmation rules.
+
 13. PO/PDF AUDIT IS READ-ONLY. When the user asks only for "PO audit",
     "PDF match", "audit project POs", or clicks AI PO Audit, first
     resolve or ask for the project. Then call audit_project_po_pdfs
@@ -168,11 +178,13 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     Do NOT call search_image_url, get_po_details, audit_project_po_pdfs,
     get_project_details, preview_existing_po_pdf_correction, or
     search_master_parts in this blocker-fix workflow. If the master part
-    exists, propose one add_part_to_project using the PDF quantity,
-    unit_price, discount, and the best matching subsection. If the master
-    part is missing, propose one create_master_part with the ERP item
-    code, description, supplier, price, discount, and electrical_bought_out
-    when the description is an electrical/PLC/adapter module; then stop.
+    exists, ask the user to confirm the target project before proposing
+    one add_part_to_project using the PDF quantity, unit_price, discount,
+    and the best matching subsection. If the master part is missing, show
+    the unresolved item code and description, ask which part master table
+    it belongs to, and wait. Only after the user selects EBO, EMF, MBO,
+    MMF, or PBO may you propose create_master_part using that exact table;
+    then stop.
     After the user approves master creation, map that created part to the
     project in the next step. Do not rerun the PO repair preview until
     the missing BOM mapping has been approved.
@@ -271,19 +283,16 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
         not overwrite the current master price.
       - If not found → continue with steps 2–6 below to build a
         create_master_part proposal.
-   2. Determine the part_type from the description and the prefix system:
+   2. ASK THE USER which part master table each missing line belongs to.
+      Show Item Code + Description for every missing line, then wait.
+      Never determine part_type yourself. The available choices are:
         EBO = electrical_bought_out
         EMF = electrical_manufacture
         MBO = mechanical_bought_out
         MMF = mechanical_manufacture
         PBO = pneumatic_bought_out
-      Heuristics:
-        - "auxiliary switch", "circuit breaker", "contactor", "relay",
-          "PLC", "motor drive", cable, terminal → electrical_bought_out
-        - cylinder, pneumatic valve, FRL, fitting → pneumatic_bought_out
-        - bearing, fastener, bushing, gear, chain → mechanical_bought_out
-        - in-house fabricated/machined → *_manufacture
-      If you are NOT confident, ASK the user.
+      Use only the table explicitly selected by the user. If different
+      lines need different tables, ask for the table beside each line.
    3. INTERNAL PART NUMBER RULE (deterministic, do NOT invent or
       sequence-number):
             part_number = "<PREFIX>-<beperp_part_no>"
@@ -311,7 +320,8 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
    batch. Only then summarize the plan and wait for approval.
 
 D. AFTER ALL PARTS EXIST — PROJECT SELECTION
-   Call list_projects and present the results. The UI will show
+   ALWAYS call list_projects and ask the user to confirm the target,
+   even if a project was mentioned earlier. The UI will show
    clickable project buttons automatically — you do NOT need to list
    them in text. If the PO should be split across projects, ask for
    multiple projects and wait for the user's click-reply. Say

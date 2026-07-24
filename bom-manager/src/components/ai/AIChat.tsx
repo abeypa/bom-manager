@@ -446,7 +446,7 @@ function SmartCommandPanel({
         </div>
         <p>1. Attach one or more PO PDFs.</p>
         <p>2. Click PO Ingest.</p>
-        <p>3. I will ask for project or projects, supplier, category, and table choices only when needed.</p>
+        <p>3. I will always ask you to confirm the part master table and target project before adding or mapping parts.</p>
         <p>4. Approved actions appear here, then the draft PO is created.</p>
         <p>5. Use AI PO Audit to select a project and check stored POs against attached PDFs.</p>
       </div>
@@ -481,7 +481,7 @@ function QuickReplies({ lastMessage, onReply }: { lastMessage: ChatMessage | und
     .filter(Number.isFinite)
 
   const rawWantsProject = /which projects?|select.*projects?|target projects?|what projects?|choose.*projects?|add.*to.*projects?|project.*should i add|projects?.*list|project should i run|which projects? should i run|multiple projects?|more than one project/i.test(questionScope)
-  const rawWantsCategory = /part.*(type|category)|which category|classify|which type|what type/i.test(questionScope)
+  const rawWantsCategory = /part.*(master\s*)?(table|type|category)|which category|classify|which type|what type/i.test(questionScope)
   const rawWantsSection = /which section|which table|which subsection|target.*(section|table|subsection)|(section|table|subsection).*should|map.*to.*(section|table|subsection)/i.test(questionScope)
   const wantsMapAndDraftChoice =
     !rawWantsProject &&

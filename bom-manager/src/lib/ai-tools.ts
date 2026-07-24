@@ -29,6 +29,11 @@ import { parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
 import { backfillPurchaseOrderPdfTaxAmounts } from '@/lib/po-tax-backfill'
 import { useAIStore } from '@/store/useAIStore'
 import {
+  getConfirmedPartTypes,
+  getConfirmedProjectIds,
+  hasPOAttachment,
+} from '@/lib/ai-confirmations'
+import {
   findExistingProjectPartInProject,
   isProjectPartDuplicateExemptMaster,
   MASTER_PART_INTERLOCK_FIELDS,
@@ -180,6 +185,27 @@ function isUsefulImageUrl(url: string) {
 
 function normalizePartKey(value: any) {
   return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function assertPOPartTypeConfirmed(partType: string) {
+  const messages = useAIStore.getState().messages
+  if (!hasPOAttachment(messages)) return
+  if (!getConfirmedPartTypes(messages).has(partType)) {
+    throw new Error(
+      `The user has not confirmed part master table "${partType}" for this PO ingestion. ` +
+      'Ask which part master table each new PO line belongs to and wait for the user selection.',
+    )
+  }
+}
+
+function assertProjectConfirmed(projectId: number) {
+  const normalizedProjectId = Number(projectId)
+  if (!getConfirmedProjectIds(useAIStore.getState().messages).has(normalizedProjectId)) {
+    throw new Error(
+      `Project #${normalizedProjectId} has not been explicitly confirmed by the user. ` +
+      'Ask the user to select the target project and wait for the project selection before mapping any part.',
+    )
+  }
 }
 
 function findSourcePdfAttachmentForDraftPO(args: any) {
@@ -2040,6 +2066,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         (a.discount_percent ? ` (-${a.discount_percent}%)` : '')
     },
     preflight: async (a: any) => {
+      assertPOPartTypeConfirmed(a.part_type)
       const prefix = PREFIX_BY_PART_TYPE[a.part_type]
       if (!prefix) throw new Error(`Unknown part_type: ${a.part_type}`)
       if (a.beperp_part_no == null || String(a.beperp_part_no).trim() === '')
@@ -2096,6 +2123,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       }
     },
     handler: async (a: any) => {
+      assertPOPartTypeConfirmed(a.part_type)
       const prefix = PREFIX_BY_PART_TYPE[a.part_type]
       if (!prefix) throw new Error(`Unknown part_type: ${a.part_type}`)
       if (a.beperp_part_no == null || String(a.beperp_part_no).trim() === '')
@@ -2782,6 +2810,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .eq('id', a.project_subsection_id)
         .maybeSingle()
       if (!targetSub) throw new Error(`project_subsection ${a.project_subsection_id} not found.`)
+      assertProjectConfirmed(targetSub.project_id)
       if (!isProjectPartDuplicateExemptMaster(master)) {
         const existing = await findExistingProjectPartInProject(
           supabase as any,
@@ -2829,6 +2858,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .maybeSingle()
       if (subErr) throw subErr
       if (!targetSub) throw new Error(`project_subsection ${a.project_subsection_id} not found.`)
+      assertProjectConfirmed(targetSub.project_id)
 
       if (!isProjectPartDuplicateExemptMaster(master)) {
         const existing = await findExistingProjectPartInProject(
