@@ -48,11 +48,13 @@ export interface AISettings {
 }
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1'
 const STORAGE_KEY = 'bom-ai:openrouter'
 
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4.5'
 
 export const RECOMMENDED_MODELS = [
+  { id: 'inclusionai/ling-3.0-flash:free', label: 'Ling 3.0 Flash (free, text only)', vision: false },
   { id: 'anthropic/claude-sonnet-4.5', label: 'Claude Sonnet 4.5 (recommended) - vision', vision: true },
   { id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4 - vision', vision: true },
   { id: 'openai/gpt-4o', label: 'GPT-4o - vision', vision: true },
@@ -64,6 +66,17 @@ export const RECOMMENDED_MODELS = [
 function getConfiguredModelId(model: unknown): string {
   const modelId = typeof model === 'string' ? model.trim() : ''
   return modelId || DEFAULT_MODEL
+}
+
+function unavailableModelMessage(modelId: string) {
+  const lingSuggestion = modelId === 'inclusionai/ling-3.0-flash'
+    ? ' To use Ling 3.0 Flash, explicitly select "inclusionai/ling-3.0-flash:free" in AI Settings.'
+    : ''
+  return (
+    `The configured model "${modelId}" has no active OpenRouter endpoints.` +
+    lingSuggestion +
+    ' The app did not change your selected model automatically.'
+  )
 }
 
 export function modelSupportsVision(modelId: string): boolean {
@@ -176,6 +189,36 @@ async function readResponsePayload(res: Response): Promise<any> {
   }
 }
 
+export async function validateOpenRouterModel(apiKey: string, model: string): Promise<void> {
+  const modelId = getConfiguredModelId(model)
+  const separatorIndex = modelId.indexOf('/')
+  if (separatorIndex <= 0 || separatorIndex === modelId.length - 1) {
+    throw new Error('Model id must use the provider/model format.')
+  }
+
+  const author = encodeURIComponent(modelId.slice(0, separatorIndex))
+  const slug = encodeURIComponent(modelId.slice(separatorIndex + 1))
+  const response = await fetch(`${OPENROUTER_API_BASE}/models/${author}/${slug}/endpoints`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'BOM Manager',
+    },
+  })
+  const payload = await readResponsePayload(response)
+  const endpoints = payload?.data?.endpoints
+
+  if (response.status === 404 || (response.ok && Array.isArray(endpoints) && endpoints.length === 0)) {
+    throw new Error(unavailableModelMessage(modelId))
+  }
+  if (!response.ok) {
+    throw new Error(`OpenRouter could not validate model "${modelId}": ${getOpenRouterError(payload) || `HTTP ${response.status}`}`)
+  }
+  if (!Array.isArray(endpoints)) {
+    throw new Error(`OpenRouter returned an invalid endpoint response for model "${modelId}".`)
+  }
+}
+
 export async function chatCompletion(opts: {
   messages: ORMessage[]
   tools: ORTool[]
@@ -218,6 +261,9 @@ export async function chatCompletion(opts: {
   const payload = await readResponsePayload(res)
   const providerError = getOpenRouterError(payload)
   if (!res.ok || providerError) {
+    if (res.status === 404 && /no endpoints found/i.test(providerError || '')) {
+      throw new Error(`OpenRouter 404: ${unavailableModelMessage(model)}`)
+    }
     throw new Error(`OpenRouter ${res.status}: ${providerError || 'Request failed.'}`)
   }
   if (!Array.isArray(payload?.choices) || !payload.choices[0]?.message) {

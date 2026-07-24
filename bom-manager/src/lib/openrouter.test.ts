@@ -13,6 +13,7 @@ import {
   RECOMMENDED_MODELS,
   saveSettings,
   saveSettingsToDB,
+  validateOpenRouterModel,
 } from '@/lib/openrouter'
 
 const storage = new Map<string, string>()
@@ -31,6 +32,10 @@ describe('OpenRouter client', () => {
   it('uses a currently recommended model as the default', () => {
     expect(RECOMMENDED_MODELS.some(model => model.id === DEFAULT_MODEL)).toBe(true)
     expect(DEFAULT_MODEL).not.toContain('claude-3.5')
+  })
+
+  it('offers the routable Ling 3.0 free endpoint without rewriting configured models', () => {
+    expect(RECOMMENDED_MODELS.some(model => model.id === 'inclusionai/ling-3.0-flash:free')).toBe(true)
   })
 
   it.each([
@@ -58,6 +63,30 @@ describe('OpenRouter client', () => {
 
     const request = fetchMock.mock.calls[0][1]
     expect(JSON.parse(String(request.body)).model).toBe(model)
+  })
+
+  it('validates the exact configured model endpoint before saving', async () => {
+    const model = 'inclusionai/ling-3.0-flash:free'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: { id: model, endpoints: [{ name: 'ExampleProvider' }] },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await validateOpenRouterModel('test-key', model)
+
+    expect(fetchMock.mock.calls[0][0]).toContain('inclusionai/ling-3.0-flash%3Afree/endpoints')
+  })
+
+  it('explains the valid Ling variant without changing the selected model', async () => {
+    const model = 'inclusionai/ling-3.0-flash'
+    saveSettings({ apiKey: 'test-key', model })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: { id: model, endpoints: [] },
+    }), { status: 200 })))
+
+    await expect(validateOpenRouterModel('test-key', model))
+      .rejects.toThrow('inclusionai/ling-3.0-flash:free')
+    expect(loadSettings().model).toBe(model)
   })
 
   it('surfaces provider errors returned with HTTP 200', async () => {

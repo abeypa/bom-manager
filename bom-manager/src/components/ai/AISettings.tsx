@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { X, Cpu, ShieldCheck, KeyRound } from 'lucide-react'
-import { loadSettings, loadSettingsFromDB, saveSettings, saveSettingsToDB, RECOMMENDED_MODELS } from '@/lib/openrouter'
+import {
+  loadSettings,
+  loadSettingsFromDB,
+  saveSettings,
+  saveSettingsToDB,
+  RECOMMENDED_MODELS,
+  validateOpenRouterModel,
+} from '@/lib/openrouter'
 import { useRole } from '@/hooks/useRole'
 
 export default function AISettings({ onClose }: { onClose: () => void }) {
@@ -49,6 +56,7 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
     setSaving(true)
     try {
       const nextSettings = { apiKey: effectiveKey, model: trimmedModel }
+      await validateOpenRouterModel(effectiveKey, trimmedModel)
       await saveSettingsToDB(nextSettings)
       saveSettings(nextSettings)
       setConfigured(true)
