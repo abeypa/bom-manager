@@ -29,7 +29,7 @@ const SMART_COMMANDS = [
     label: 'PO Ingest',
     icon: ClipboardList,
     prompt:
-      'PO ingest: I will attach one or more PO PDFs. Ask me for the target project or projects if not clear, and allow mapping different PO lines across multiple projects when needed. For each PO, resolve or create the supplier, create missing master parts, update existing part prices with the PO date, ask me when part category or project table is uncertain, map each part only once in its target project, then draft the matching PO after mapping.',
+      'PO ingest: I will attach one or more PO PDFs. Always ask me to confirm the target project or projects and the Part Master table for every missing part before creating or mapping anything. Allow mapping different PO lines across multiple projects when needed. For each PO, resolve or create the supplier, create missing master parts only in my selected table, update existing part prices with the PO date, map each part only once in its confirmed target project, then draft the matching PO after mapping.',
   },
   {
     label: 'Select Project',
@@ -66,6 +66,12 @@ const SMART_COMMANDS = [
     icon: HeartPulse,
     prompt:
       'Run a smart BOM health audit. If a project is not clear, ask me to select one. Check missing images, missing suppliers, zero prices, duplicate project mappings, and parts not connected to any PO. Show a concise issue summary and recommended next actions. Do not change any data.',
+  },
+  {
+    label: 'Clean Project Tree',
+    icon: Trash2,
+    prompt:
+      'Help me delete parts from a Project Tree only when they have no linked PO lines. Ask me to select and confirm the project, inspect its BOM, and show only eligible unlinked project parts with their Project Tree row IDs, part numbers, descriptions, sections, and quantities. Ask me to confirm the exact rows to remove. Delete only the approved project mappings, never the Part Master records. If any row has a PO link, do not delete it and report the blocking PO.',
   },
   {
     label: 'Price Watch',

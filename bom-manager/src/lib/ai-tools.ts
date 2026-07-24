@@ -1041,6 +1041,11 @@ async function getMasterPartForMerge(partType: string, partId: number) {
 
 const TEMP_AI_DELETE_ENABLED = true
 
+async function assertAiProjectPartDeleteUser() {
+  const { data: authData } = await supabase.auth.getUser()
+  if (!authData.user) throw new Error('You must be signed in to delete a Project Tree part.')
+}
+
 async function assertTempAiDeleteAdmin() {
   if (!TEMP_AI_DELETE_ENABLED) {
     throw new Error('Temporary AI delete tools are disabled in this build.')
@@ -2509,10 +2514,10 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
   },
   {
-    name: 'admin_delete_project_bom_line',
+    name: 'delete_unlinked_project_part',
     kind: 'write',
     description:
-      'TEMPORARY ADMIN TOOL. Delete a project BOM line from project_parts. Intended for cleanup of wrong or zero-qty BOM rows. Blocks deletion when linked PO items exist.',
+      'Remove one Project Tree/BOM mapping and restore its allocated quantity to master stock. Use only after the user confirms the project and exact row. Blocks deletion when any PO item is linked; never deletes the Part Master record.',
     parameters: {
       type: 'object',
       required: ['project_part_id', 'reason'],
@@ -2521,9 +2526,9 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         reason: { type: 'string', description: 'Why this BOM line is being deleted.' },
       },
     },
-    summarize: (a) => `Temporarily delete project BOM line #${a.project_part_id} (${a.reason})`,
+    summarize: (a) => `Remove unlinked Project Tree part #${a.project_part_id} (${a.reason})`,
     preflight: async (a: any) => {
-      await assertTempAiDeleteAdmin()
+      await assertAiProjectPartDeleteUser()
       assertInteger('project_part_id', a.project_part_id)
       assertNonEmpty('reason', a.reason)
 
@@ -2533,6 +2538,16 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .eq('id', a.project_part_id)
         .single()
       if (error || !row) throw new Error(`Project BOM line #${a.project_part_id} does not exist.`)
+
+      const { data: subsection, error: subsectionError } = await (supabase as any)
+        .from('project_subsections')
+        .select('project_id')
+        .eq('id', row.project_section_id)
+        .single()
+      if (subsectionError || !subsection) {
+        throw new Error(`Project for BOM line #${a.project_part_id} could not be resolved.`)
+      }
+      assertProjectConfirmed(subsection.project_id)
 
       const { count: poLinks } = await (supabase as any)
         .from('purchase_order_items')
@@ -2546,7 +2561,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       }
     },
     handler: async (a: any) => {
-      await assertTempAiDeleteAdmin()
+      await assertAiProjectPartDeleteUser()
       assertInteger('project_part_id', a.project_part_id)
       assertNonEmpty('reason', a.reason)
 
@@ -2557,16 +2572,22 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .single()
       if (error || !row) throw new Error(`Project BOM line #${a.project_part_id} does not exist.`)
 
+      const { data: subsection, error: subsectionError } = await (supabase as any)
+        .from('project_subsections')
+        .select('project_id')
+        .eq('id', row.project_section_id)
+        .single()
+      if (subsectionError || !subsection) {
+        throw new Error(`Project for BOM line #${a.project_part_id} could not be resolved.`)
+      }
+      assertProjectConfirmed(subsection.project_id)
+
       const { count: trackingLinks } = await (supabase as any)
         .from('pending_parts')
         .select('id', { count: 'exact', head: true })
         .eq('project_part_id', a.project_part_id)
 
-      if ((trackingLinks || 0) > 0) {
-        await (supabase as any).from('pending_parts').delete().eq('project_part_id', a.project_part_id)
-      }
-
-      await (supabase as any).from('project_parts').delete().eq('id', a.project_part_id).throwOnError()
+      await projectsApi.removePartFromSection(a.project_part_id)
 
       return {
         deleted_project_part_id: a.project_part_id,
