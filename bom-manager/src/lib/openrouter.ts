@@ -58,14 +58,14 @@ export const RECOMMENDED_MODELS = [
   { id: 'openai/gpt-4o', label: 'GPT-4o - vision', vision: true },
   { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini - vision', vision: true },
   { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash - vision', vision: true },
-  { id: 'inclusionai/ling-2.6-flash', label: 'Ling 2.6 Flash (fast/cheap, text only)', vision: false },
   { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (text only)', vision: false },
 ]
 
 const RETIRED_MODEL_REPLACEMENTS: Record<string, string> = {
   'anthropic/claude-3.5-sonnet': DEFAULT_MODEL,
   'anthropic/claude-3.5-haiku': 'google/gemini-2.5-flash',
-  'inclusionai/ling-3.0-flash': 'inclusionai/ling-2.6-flash',
+  'inclusionai/ling-3.0-flash': DEFAULT_MODEL,
+  'inclusionai/ling-2.6-flash': DEFAULT_MODEL,
 }
 
 function normalizeModelId(model: unknown): string {
@@ -140,7 +140,30 @@ export async function saveSettingsToDB(settings: AISettings): Promise<void> {
 
 function getOpenRouterError(payload: any): string | null {
   const error = payload?.error
-  if (error?.message) return String(error.message)
+  if (error?.message) {
+    const message = String(error.message)
+    const metadata = error.metadata || {}
+    const provider = metadata.provider_name || metadata.provider
+    const errorType = metadata.error_type
+    const raw = metadata.raw
+    let detail = ''
+
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw)
+        detail = String(parsed?.error?.message || parsed?.message || '')
+      } catch {
+        detail = raw
+      }
+    }
+
+    const context = [
+      provider ? `provider: ${provider}` : '',
+      errorType ? `type: ${errorType}` : '',
+      detail && detail !== message ? detail.slice(0, 500) : '',
+    ].filter(Boolean)
+    return context.length ? `${message} (${context.join('; ')})` : message
+  }
 
   const choice = payload?.choices?.[0]
   if (choice?.finish_reason === 'error') {

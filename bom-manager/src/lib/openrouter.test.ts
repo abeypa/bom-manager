@@ -42,13 +42,13 @@ describe('OpenRouter client', () => {
     expect(loadSettings().model).toBe(DEFAULT_MODEL)
   })
 
-  it('repairs the unavailable Ling 3.0 model id', () => {
-    storage.set('bom-ai:openrouter', JSON.stringify({
-      apiKey: 'test-key',
-      model: 'inclusionai/ling-3.0-flash',
-    }))
+  it.each([
+    'inclusionai/ling-3.0-flash',
+    'inclusionai/ling-2.6-flash',
+  ])('migrates provider-incompatible Ling model %s to the default', model => {
+    storage.set('bom-ai:openrouter', JSON.stringify({ apiKey: 'test-key', model }))
 
-    expect(loadSettings().model).toBe('inclusionai/ling-2.6-flash')
+    expect(loadSettings().model).toBe(DEFAULT_MODEL)
   })
 
   it('surfaces provider errors returned with HTTP 200', async () => {
@@ -60,6 +60,23 @@ describe('OpenRouter client', () => {
 
     await expect(chatCompletion({ messages: [], tools: [] }))
       .rejects.toThrow('Provider unavailable')
+  })
+
+  it('includes safe provider diagnostics in request errors', async () => {
+    saveSettings({ apiKey: 'test-key', model: DEFAULT_MODEL })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        message: 'Provider returned error',
+        metadata: {
+          provider_name: 'ExampleProvider',
+          error_type: 'invalid_request',
+          raw: JSON.stringify({ error: { message: 'Too many tools' } }),
+        },
+      },
+    }), { status: 400 })))
+
+    await expect(chatCompletion({ messages: [], tools: [] }))
+      .rejects.toThrow('provider: ExampleProvider; type: invalid_request; Too many tools')
   })
 
   it('rejects successful responses that contain no assistant message', async () => {
