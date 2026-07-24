@@ -55,7 +55,7 @@ export interface AISettings {
 
 export interface AIProxyConfigStatus {
   configured: boolean
-  source: 'app_settings' | 'worker_secret' | 'none'
+  source: 'app_settings' | 'none'
 }
 
 const CHAT_URL = '/api/openrouter/chat'

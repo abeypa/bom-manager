@@ -95,7 +95,7 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
   const statusLabel = loading
     ? 'Checking...'
     : status?.configured
-      ? `Configured (${status.source === 'app_settings' ? 'secure app setting' : 'worker secret'})`
+      ? 'Configured (secure app setting)'
       : 'Not configured'
 
   return (
@@ -113,7 +113,8 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
             <ShieldCheck size={16} className="text-blue-500 mt-0.5 shrink-0" />
             <div className="text-[12px] text-blue-900 leading-relaxed">
               <strong>{isAdmin ? 'Write-only secret flow.' : 'Managed by admin.'}</strong> The OpenRouter API key is
-              held by the secure AI proxy and is never returned to the browser after it is saved.
+              encrypted after you save it here and is never returned to the browser. Enter a new key here whenever
+              you rotate it; no Cloudflare deployment is needed.
             </div>
           </div>
 

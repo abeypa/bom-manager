@@ -1,13 +1,12 @@
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> }
-  OPENROUTER_API_KEY?: string
   OPENROUTER_CONFIG_SECRET?: string
   SUPABASE_SERVICE_ROLE_KEY?: string
   VITE_SUPABASE_URL?: string
   VITE_SUPABASE_ANON_KEY?: string
 }
 
-type ConfigSource = 'app_settings' | 'worker_secret' | 'none'
+type ConfigSource = 'app_settings' | 'none'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1'
@@ -44,6 +43,19 @@ function requireEnv(env: Env, key: Exclude<keyof Env, 'ASSETS'>): string {
 function missingAuthBindings(env: Env): string[] {
   return (['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] as const)
     .filter((key) => !env[key]?.trim())
+}
+
+function missingSecureStorageBindings(env: Env): string[] {
+  return (['OPENROUTER_CONFIG_SECRET', 'SUPABASE_SERVICE_ROLE_KEY'] as const)
+    .filter((key) => !env[key]?.trim())
+}
+
+function requireSecureStorage(env: Env) {
+  const missingBindings = missingSecureStorageBindings(env)
+  if (!missingBindings.length) return null
+  return jsonResponse({
+    error: `AI Settings storage is missing Cloudflare secrets: ${missingBindings.join(', ')}`,
+  }, 503)
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -165,23 +177,19 @@ async function requireAdmin(request: Request, env: Env) {
 }
 
 async function loadStoredOpenRouterKey(env: Env): Promise<{ key: string | null; source: ConfigSource }> {
-  const directKey = env.OPENROUTER_API_KEY?.trim()
-
-  if (env.SUPABASE_SERVICE_ROLE_KEY && env.OPENROUTER_CONFIG_SECRET && env.VITE_SUPABASE_URL) {
-    const query = `${SETTINGS_TABLE}?select=key,value&key=in.(${KEY_CIPHERTEXT},${KEY_IV})`
-    const res = await supabaseFetch(env, query, { method: 'GET' })
-    if (res.ok) {
-      const rows = await res.json() as any[]
-      const ciphertext = rows.find((row) => row.key === KEY_CIPHERTEXT)?.value
-      const iv = rows.find((row) => row.key === KEY_IV)?.value
-      if (ciphertext && iv) {
-        const decrypted = await decryptValue(env.OPENROUTER_CONFIG_SECRET, ciphertext, iv)
-        return { key: decrypted, source: 'app_settings' }
-      }
+  const configSecret = requireEnv(env, 'OPENROUTER_CONFIG_SECRET')
+  const query = `${SETTINGS_TABLE}?select=key,value&key=in.(${KEY_CIPHERTEXT},${KEY_IV})`
+  const res = await supabaseFetch(env, query, { method: 'GET' })
+  if (res.ok) {
+    const rows = await res.json() as any[]
+    const ciphertext = rows.find((row) => row.key === KEY_CIPHERTEXT)?.value
+    const iv = rows.find((row) => row.key === KEY_IV)?.value
+    if (ciphertext && iv) {
+      const decrypted = await decryptValue(configSecret, ciphertext, iv)
+      return { key: decrypted, source: 'app_settings' }
     }
   }
 
-  if (directKey) return { key: directKey, source: 'worker_secret' }
   return { key: null, source: 'none' }
 }
 
@@ -228,6 +236,8 @@ async function handleOpenRouterConfig(request: Request, env: Env): Promise<Respo
   if (request.method === 'GET') {
     const auth = await requireAuthenticated(request, env)
     if (!auth.ok) return auth.response
+    const storageError = requireSecureStorage(env)
+    if (storageError) return storageError
     const { key, source } = await loadStoredOpenRouterKey(env)
     return jsonResponse({ configured: Boolean(key), source }, 200)
   }
@@ -235,6 +245,8 @@ async function handleOpenRouterConfig(request: Request, env: Env): Promise<Respo
   if (request.method === 'POST') {
     const auth = await requireAdmin(request, env)
     if (!auth.ok) return auth.response
+    const storageError = requireSecureStorage(env)
+    if (storageError) return storageError
 
     let body: any
     try {
@@ -256,9 +268,11 @@ async function handleOpenRouterConfig(request: Request, env: Env): Promise<Respo
   if (request.method === 'DELETE') {
     const auth = await requireAdmin(request, env)
     if (!auth.ok) return auth.response
+    const storageError = requireSecureStorage(env)
+    if (storageError) return storageError
     try {
       await clearStoredOpenRouterKey(env)
-      return jsonResponse({ configured: false, source: env.OPENROUTER_API_KEY ? 'worker_secret' : 'none' }, 200)
+      return jsonResponse({ configured: false, source: 'none' satisfies ConfigSource }, 200)
     } catch (error: any) {
       return jsonResponse({ error: error?.message || 'Failed to clear API key' }, 500)
     }
@@ -284,6 +298,8 @@ async function handleOpenRouterProxy(request: Request, env: Env): Promise<Respon
 
   const auth = await requireAuthenticated(request, env)
   if (!auth.ok) return auth.response
+  const storageError = requireSecureStorage(env)
+  if (storageError) return storageError
 
   const { key: apiKey } = await loadStoredOpenRouterKey(env)
   if (!apiKey) {
@@ -335,6 +351,8 @@ async function handleOpenRouterModelEndpoints(request: Request, env: Env): Promi
 
   const auth = await requireAuthenticated(request, env)
   if (!auth.ok) return auth.response
+  const storageError = requireSecureStorage(env)
+  if (storageError) return storageError
 
   const model = new URL(request.url).searchParams.get('model')?.trim() || ''
   const separatorIndex = model.indexOf('/')

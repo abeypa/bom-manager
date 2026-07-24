@@ -1,6 +1,6 @@
--- OpenRouter API keys must never be readable from app_settings because
--- authenticated users have read access to this table. The key now lives only
--- in the Cloudflare Worker secret OPENROUTER_API_KEY.
+-- Remove the legacy plaintext OpenRouter key. The Worker stores replacements
+-- entered in AI Settings as AES-GCM ciphertext plus a separate IV; the
+-- encryption key remains a Cloudflare-only secret.
 
 delete from app_settings
 where key = 'ai_api_key';
