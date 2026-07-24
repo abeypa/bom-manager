@@ -1,5 +1,5 @@
 interface Env {
-  ASSETS: Fetcher
+  ASSETS: { fetch(request: Request): Promise<Response> }
   OPENROUTER_API_KEY?: string
   OPENROUTER_CONFIG_SECRET?: string
   SUPABASE_SERVICE_ROLE_KEY?: string
@@ -35,10 +35,15 @@ function jsonResponse(body: unknown, status: number): Response {
   })
 }
 
-function requireEnv(env: Env, key: keyof Env): string {
+function requireEnv(env: Env, key: Exclude<keyof Env, 'ASSETS'>): string {
   const value = env[key]
   if (!value) throw new Error(`Missing Worker secret/env: ${String(key)}`)
   return value
+}
+
+function missingAuthBindings(env: Env): string[] {
+  return (['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] as const)
+    .filter((key) => !env[key]?.trim())
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -100,7 +105,7 @@ async function getAuthUser(env: Env, bearerToken: string) {
     },
   })
   if (!res.ok) return null
-  return res.json<any>()
+  return await res.json() as any
 }
 
 async function requireAuthenticated(request: Request, env: Env) {
@@ -110,7 +115,25 @@ async function requireAuthenticated(request: Request, env: Env) {
     return { ok: false, response: jsonResponse({ error: 'Authentication required' }, 401) }
   }
 
-  const user = await getAuthUser(env, token)
+  const missingBindings = missingAuthBindings(env)
+  if (missingBindings.length) {
+    return {
+      ok: false,
+      response: jsonResponse({
+        error: `AI proxy is missing Cloudflare runtime bindings: ${missingBindings.join(', ')}`,
+      }, 503),
+    }
+  }
+
+  let user: any
+  try {
+    user = await getAuthUser(env, token)
+  } catch {
+    return {
+      ok: false,
+      response: jsonResponse({ error: 'AI proxy could not verify the Supabase session' }, 502),
+    }
+  }
   if (!user?.id) {
     return { ok: false, response: jsonResponse({ error: 'Invalid session' }, 401) }
   }
@@ -132,7 +155,7 @@ async function requireAdmin(request: Request, env: Env) {
   if (!res.ok) {
     return { ok: false, response: jsonResponse({ error: 'Failed to verify admin role' }, 500) }
   }
-  const rows = await res.json<any[]>()
+  const rows = await res.json() as any[]
   const role = rows?.[0]?.role
   if (role !== 'admin') {
     return { ok: false, response: jsonResponse({ error: 'Admin access required' }, 403) }
@@ -148,7 +171,7 @@ async function loadStoredOpenRouterKey(env: Env): Promise<{ key: string | null; 
     const query = `${SETTINGS_TABLE}?select=key,value&key=in.(${KEY_CIPHERTEXT},${KEY_IV})`
     const res = await supabaseFetch(env, query, { method: 'GET' })
     if (res.ok) {
-      const rows = await res.json<any[]>()
+      const rows = await res.json() as any[]
       const ciphertext = rows.find((row) => row.key === KEY_CIPHERTEXT)?.value
       const iv = rows.find((row) => row.key === KEY_IV)?.value
       if (ciphertext && iv) {
@@ -339,20 +362,24 @@ async function handleOpenRouterModelEndpoints(request: Request, env: Env): Promi
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url)
+    try {
+      const url = new URL(request.url)
 
-    if (url.pathname === '/api/openrouter/chat') {
-      return handleOpenRouterProxy(request, env)
+      if (url.pathname === '/api/openrouter/chat') {
+        return handleOpenRouterProxy(request, env)
+      }
+
+      if (url.pathname === '/api/openrouter/config') {
+        return handleOpenRouterConfig(request, env)
+      }
+
+      if (url.pathname === '/api/openrouter/model-endpoints') {
+        return handleOpenRouterModelEndpoints(request, env)
+      }
+
+      return env.ASSETS.fetch(request)
+    } catch {
+      return jsonResponse({ error: 'AI proxy encountered an internal configuration error' }, 500)
     }
-
-    if (url.pathname === '/api/openrouter/config') {
-      return handleOpenRouterConfig(request, env)
-    }
-
-    if (url.pathname === '/api/openrouter/model-endpoints') {
-      return handleOpenRouterModelEndpoints(request, env)
-    }
-
-    return env.ASSETS.fetch(request)
   },
 }
