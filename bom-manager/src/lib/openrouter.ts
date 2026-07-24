@@ -61,16 +61,9 @@ export const RECOMMENDED_MODELS = [
   { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (text only)', vision: false },
 ]
 
-const RETIRED_MODEL_REPLACEMENTS: Record<string, string> = {
-  'anthropic/claude-3.5-sonnet': DEFAULT_MODEL,
-  'anthropic/claude-3.5-haiku': 'google/gemini-2.5-flash',
-  'inclusionai/ling-3.0-flash': DEFAULT_MODEL,
-  'inclusionai/ling-2.6-flash': DEFAULT_MODEL,
-}
-
-function normalizeModelId(model: unknown): string {
+function getConfiguredModelId(model: unknown): string {
   const modelId = typeof model === 'string' ? model.trim() : ''
-  return RETIRED_MODEL_REPLACEMENTS[modelId] || modelId || DEFAULT_MODEL
+  return modelId || DEFAULT_MODEL
 }
 
 export function modelSupportsVision(modelId: string): boolean {
@@ -86,7 +79,7 @@ export function loadSettings(): AISettings {
     const parsed = JSON.parse(raw)
     return {
       apiKey: parsed.apiKey || '',
-      model: normalizeModelId(parsed.model),
+      model: getConfiguredModelId(parsed.model),
     }
   } catch {
     return { apiKey: '', model: DEFAULT_MODEL }
@@ -96,7 +89,7 @@ export function loadSettings(): AISettings {
 export function saveSettings(settings: AISettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     apiKey: settings.apiKey || '',
-    model: normalizeModelId(settings.model),
+    model: getConfiguredModelId(settings.model),
   }))
 }
 
@@ -116,7 +109,7 @@ export async function loadSettingsFromDB(): Promise<AISettings | null> {
 
     const rows = Array.isArray(data) ? data : []
     const apiKey = rows.find((row: any) => row.key === 'ai_api_key')?.value || ''
-    const model = normalizeModelId(rows.find((row: any) => row.key === 'ai_model')?.value)
+    const model = getConfiguredModelId(rows.find((row: any) => row.key === 'ai_model')?.value)
 
     if (!apiKey && !model) return null
     return { apiKey, model }
@@ -127,7 +120,7 @@ export async function loadSettingsFromDB(): Promise<AISettings | null> {
 
 export async function saveSettingsToDB(settings: AISettings): Promise<void> {
   const payload = [
-    { key: 'ai_model', value: normalizeModelId(settings.model), updated_at: new Date().toISOString() },
+    { key: 'ai_model', value: getConfiguredModelId(settings.model), updated_at: new Date().toISOString() },
   ]
 
   if (settings.apiKey) {

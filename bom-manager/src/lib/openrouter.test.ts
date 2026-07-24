@@ -33,22 +33,31 @@ describe('OpenRouter client', () => {
     expect(DEFAULT_MODEL).not.toContain('claude-3.5')
   })
 
-  it('migrates retired model ids already stored in the browser', () => {
-    storage.set('bom-ai:openrouter', JSON.stringify({
-      apiKey: 'test-key',
-      model: 'anthropic/claude-3.5-sonnet',
-    }))
-
-    expect(loadSettings().model).toBe(DEFAULT_MODEL)
-  })
-
   it.each([
+    'anthropic/claude-3.5-sonnet',
     'inclusionai/ling-3.0-flash',
     'inclusionai/ling-2.6-flash',
-  ])('migrates provider-incompatible Ling model %s to the default', model => {
+    'custom-provider/custom-model',
+  ])('preserves the configured model id %s', model => {
     storage.set('bom-ai:openrouter', JSON.stringify({ apiKey: 'test-key', model }))
 
-    expect(loadSettings().model).toBe(DEFAULT_MODEL)
+    expect(loadSettings().model).toBe(model)
+  })
+
+  it('sends the configured model to OpenRouter without substitution', async () => {
+    const model = 'inclusionai/ling-3.0-flash'
+    saveSettings({ apiKey: 'test-key', model })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'gen-1',
+      model,
+      choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'OK' } }],
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await chatCompletion({ messages: [], tools: [] })
+
+    const request = fetchMock.mock.calls[0][1]
+    expect(JSON.parse(String(request.body)).model).toBe(model)
   })
 
   it('surfaces provider errors returned with HTTP 200', async () => {
