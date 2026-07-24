@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$branch = "main"
+$branch = "master"
 
 Write-Host "`n=== BEP BOM Manager Deploy ===" -ForegroundColor Cyan
 

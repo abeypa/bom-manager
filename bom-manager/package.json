@@ -5,7 +5,9 @@
   "description": "A Bill of Materials (BOM) management system for tracking components, assemblies, and inventory.",
   "scripts": {
     "dev": "vite",
+    "dev:worker": "npx wrangler dev",
     "build": "vite build",
+    "deploy": "npm run build && npx wrangler deploy",
     "preview": "vite preview",
     "preview:prod": "vite preview --host",
     "type-check": "tsc --noEmit",
