@@ -10,6 +10,7 @@ interface Env {
 type ConfigSource = 'app_settings' | 'worker_secret' | 'none'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1'
 const APP_TITLE = 'BOM Manager'
 const SETTINGS_TABLE = 'app_settings'
 const KEY_CIPHERTEXT = 'ai_api_key_ciphertext'
@@ -258,6 +259,9 @@ async function handleOpenRouterProxy(request: Request, env: Env): Promise<Respon
     return jsonResponse({ error: 'Method not allowed' }, 405)
   }
 
+  const auth = await requireAuthenticated(request, env)
+  if (!auth.ok) return auth.response
+
   const { key: apiKey } = await loadStoredOpenRouterKey(env)
   if (!apiKey) {
     return jsonResponse({ error: 'AI proxy is not configured' }, 503)
@@ -294,6 +298,45 @@ async function handleOpenRouterProxy(request: Request, env: Env): Promise<Respon
   })
 }
 
+async function handleOpenRouterModelEndpoints(request: Request, env: Env): Promise<Response> {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Cache-Control': 'no-store',
+        ...corsHeaders(),
+      },
+    })
+  }
+  if (request.method !== 'GET') return jsonResponse({ error: 'Method not allowed' }, 405)
+
+  const auth = await requireAuthenticated(request, env)
+  if (!auth.ok) return auth.response
+
+  const model = new URL(request.url).searchParams.get('model')?.trim() || ''
+  const separatorIndex = model.indexOf('/')
+  if (separatorIndex <= 0 || separatorIndex === model.length - 1) {
+    return jsonResponse({ error: 'Model id must use the provider/model format' }, 400)
+  }
+
+  const { key: apiKey } = await loadStoredOpenRouterKey(env)
+  if (!apiKey) return jsonResponse({ error: 'AI proxy is not configured' }, 503)
+
+  const author = encodeURIComponent(model.slice(0, separatorIndex))
+  const slug = encodeURIComponent(model.slice(separatorIndex + 1))
+  const upstream = await fetch(`${OPENROUTER_API_BASE}/models/${author}/${slug}/endpoints`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': new URL(request.url).origin,
+      'X-Title': APP_TITLE,
+    },
+  })
+  const headers = new Headers(upstream.headers)
+  headers.set('Cache-Control', 'no-store')
+  for (const [key, value] of Object.entries(corsHeaders())) headers.set(key, value)
+  return new Response(upstream.body, { status: upstream.status, headers })
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -304,6 +347,10 @@ export default {
 
     if (url.pathname === '/api/openrouter/config') {
       return handleOpenRouterConfig(request, env)
+    }
+
+    if (url.pathname === '/api/openrouter/model-endpoints') {
+      return handleOpenRouterModelEndpoints(request, env)
     }
 
     return env.ASSETS.fetch(request)

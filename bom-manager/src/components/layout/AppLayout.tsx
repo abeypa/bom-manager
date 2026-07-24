@@ -152,10 +152,10 @@ export default function AppLayout() {
   const [searchOpen, setSearchOpen] = useState(false);
   const bomBasketProjectId = useBOMBasketStore((state) => state.currentProjectId);
 
-  // Sync admin-configured AI key from DB into localStorage so all users can use AI
+  // Sync the shared model choice; the API key remains only in the secure Worker.
   useEffect(() => {
     if (!user) return;
-    loadSettingsFromDB().then(s => { if (s?.apiKey) saveSettings(s); });
+    loadSettingsFromDB().then(s => { if (s?.model) saveSettings(s); });
   }, [user]);
 
   useEffect(() => {
