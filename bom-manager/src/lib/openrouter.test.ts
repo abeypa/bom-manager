@@ -42,6 +42,15 @@ describe('OpenRouter client', () => {
     expect(loadSettings().model).toBe(DEFAULT_MODEL)
   })
 
+  it('repairs the unavailable Ling 3.0 model id', () => {
+    storage.set('bom-ai:openrouter', JSON.stringify({
+      apiKey: 'test-key',
+      model: 'inclusionai/ling-3.0-flash',
+    }))
+
+    expect(loadSettings().model).toBe('inclusionai/ling-2.6-flash')
+  })
+
   it('surfaces provider errors returned with HTTP 200', async () => {
     saveSettings({ apiKey: 'test-key', model: DEFAULT_MODEL })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(

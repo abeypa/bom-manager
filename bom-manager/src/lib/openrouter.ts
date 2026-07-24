@@ -58,12 +58,14 @@ export const RECOMMENDED_MODELS = [
   { id: 'openai/gpt-4o', label: 'GPT-4o - vision', vision: true },
   { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini - vision', vision: true },
   { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash - vision', vision: true },
+  { id: 'inclusionai/ling-2.6-flash', label: 'Ling 2.6 Flash (fast/cheap, text only)', vision: false },
   { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (text only)', vision: false },
 ]
 
 const RETIRED_MODEL_REPLACEMENTS: Record<string, string> = {
   'anthropic/claude-3.5-sonnet': DEFAULT_MODEL,
   'anthropic/claude-3.5-haiku': 'google/gemini-2.5-flash',
+  'inclusionai/ling-3.0-flash': 'inclusionai/ling-2.6-flash',
 }
 
 function normalizeModelId(model: unknown): string {
