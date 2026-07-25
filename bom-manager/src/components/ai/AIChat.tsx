@@ -138,7 +138,7 @@ export default function AIChat() {
     if (busy) return
     if (!isConfigured()) {
       const dbSettings = await loadSettingsFromDB()
-      if (dbSettings?.model) saveSettings(dbSettings)
+      if (dbSettings?.apiKey) saveSettings(dbSettings)
     }
     if (!isConfigured()) { setShowSettings(true); return }
     const atts = attachments
@@ -158,7 +158,7 @@ export default function AIChat() {
     // If key not in localStorage yet, try DB sync before giving up
     if (!isConfigured()) {
       const dbSettings = await loadSettingsFromDB()
-      if (dbSettings?.model) saveSettings(dbSettings)
+      if (dbSettings?.apiKey) saveSettings(dbSettings)
     }
     if (!isConfigured()) { setShowSettings(true); return }
     const text = t || '(see attached file)'
@@ -174,7 +174,7 @@ export default function AIChat() {
     if (busy) return
     if (!isConfigured()) {
       const dbSettings = await loadSettingsFromDB()
-      if (dbSettings?.model) saveSettings(dbSettings)
+      if (dbSettings?.apiKey) saveSettings(dbSettings)
     }
     if (!isConfigured()) { setShowSettings(true); return }
     await sendUserMessage(text, undefined)

@@ -1,10 +1,3 @@
-/**
- * Browser-side OpenRouter client.
- *
- * The OpenRouter key is held by the Cloudflare Worker and never read back
- * into the browser. The browser sends its Supabase session token to the
- * Worker, which adds the OpenRouter authentication header upstream.
- */
 import { supabase } from './supabase'
 
 export type ORContentPart =
@@ -50,18 +43,12 @@ export interface ORCompletionResponse {
 }
 
 export interface AISettings {
+  apiKey: string
   model: string
 }
 
-export interface AIProxyConfigStatus {
-  configured: boolean
-  source: 'app_settings' | 'none'
-}
-
-const CHAT_URL = '/api/openrouter/chat'
-const CONFIG_URL = '/api/openrouter/config'
-const MODEL_ENDPOINTS_URL = '/api/openrouter/model-endpoints'
-const DIRECT_WORKER_URL = 'http://127.0.0.1:8787'
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1'
 const STORAGE_KEY = 'bom-ai:openrouter'
 
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4.5'
@@ -79,39 +66,6 @@ export const RECOMMENDED_MODELS = [
 function getConfiguredModelId(model: unknown): string {
   const modelId = typeof model === 'string' ? model.trim() : ''
   return modelId || DEFAULT_MODEL
-}
-
-function isLocalDev() {
-  return typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
-}
-
-function workerEndpoints(path: string) {
-  const endpoints = [path]
-  if (isLocalDev()) endpoints.push(`${DIRECT_WORKER_URL}${path}`)
-  return endpoints
-}
-
-async function getAuthHeaders(includeJson = true) {
-  const { data } = await supabase.auth.getSession()
-  const token = data.session?.access_token
-  if (!token) throw new Error('Your session has expired. Sign in again to use AI.')
-  return {
-    ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
-    Authorization: `Bearer ${token}`,
-  }
-}
-
-async function workerFetch(path: string, init: RequestInit): Promise<Response> {
-  const endpoints = workerEndpoints(path)
-  let lastResponse: Response | null = null
-
-  for (const endpoint of endpoints) {
-    const response = await fetch(endpoint, init)
-    lastResponse = response
-    if (!(isLocalDev() && endpoint === path && response.status === 405)) return response
-  }
-
-  return lastResponse as Response
 }
 
 function unavailableModelMessage(modelId: string) {
@@ -134,25 +88,27 @@ export function modelSupportsVision(modelId: string): boolean {
 export function loadSettings(): AISettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { model: DEFAULT_MODEL }
+    if (!raw) return { apiKey: '', model: DEFAULT_MODEL }
     const parsed = JSON.parse(raw)
-    const settings = { model: getConfiguredModelId(parsed.model) }
-    // Remove legacy browser-stored API keys left by the old direct-client flow.
-    if (parsed.apiKey) saveSettings(settings)
-    return settings
+    return {
+      apiKey: parsed.apiKey || '',
+      model: getConfiguredModelId(parsed.model),
+    }
   } catch {
-    return { model: DEFAULT_MODEL }
+    return { apiKey: '', model: DEFAULT_MODEL }
   }
 }
 
 export function saveSettings(settings: AISettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    apiKey: settings.apiKey || '',
     model: getConfiguredModelId(settings.model),
   }))
 }
 
 export function isConfigured(): boolean {
-  return !!loadSettings().model
+  const { apiKey, model } = loadSettings()
+  return !!apiKey && !!model
 }
 
 export async function loadSettingsFromDB(): Promise<AISettings | null> {
@@ -160,65 +116,36 @@ export async function loadSettingsFromDB(): Promise<AISettings | null> {
     const { data, error } = await (supabase as any)
       .from('app_settings')
       .select('key, value')
-      .eq('key', 'ai_model')
-      .maybeSingle()
+      .in('key', ['ai_api_key', 'ai_model'])
 
     if (error) return null
-    return { model: getConfiguredModelId(data?.value) }
+
+    const rows = Array.isArray(data) ? data : []
+    const apiKey = rows.find((row: any) => row.key === 'ai_api_key')?.value || ''
+    const model = getConfiguredModelId(rows.find((row: any) => row.key === 'ai_model')?.value)
+
+    if (!apiKey && !model) return null
+    return { apiKey, model }
   } catch {
     return null
   }
 }
 
 export async function saveSettingsToDB(settings: AISettings): Promise<void> {
-  const { error } = await (supabase as any).from('app_settings').upsert([
+  const payload = [
     { key: 'ai_model', value: getConfiguredModelId(settings.model), updated_at: new Date().toISOString() },
-  ])
+  ]
+
+  if (settings.apiKey) {
+    payload.push({ key: 'ai_api_key', value: settings.apiKey, updated_at: new Date().toISOString() })
+  }
+
+  const { error } = await (supabase as any).from('app_settings').upsert(payload)
   if (error) throw error
-}
-
-export async function getAIProxyConfigStatus(): Promise<AIProxyConfigStatus> {
-  const response = await workerFetch(CONFIG_URL, {
-    method: 'GET',
-    headers: await getAuthHeaders(false),
-  })
-  const payload = await readResponsePayload(response)
-  if (!response.ok) {
-    throw new Error(`AI proxy ${response.status}: ${getOpenRouterError(payload) || 'Failed to read configuration.'}`)
-  }
-  return payload as AIProxyConfigStatus
-}
-
-export async function saveAIProxyApiKey(apiKey: string): Promise<AIProxyConfigStatus> {
-  const trimmedKey = apiKey.trim()
-  if (!trimmedKey) throw new Error('OpenRouter API key is required.')
-  const response = await workerFetch(CONFIG_URL, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ apiKey: trimmedKey }),
-  })
-  const payload = await readResponsePayload(response)
-  if (!response.ok) {
-    throw new Error(`AI proxy ${response.status}: ${getOpenRouterError(payload) || 'Failed to save the API key.'}`)
-  }
-  return payload as AIProxyConfigStatus
-}
-
-export async function clearAIProxyApiKey(): Promise<AIProxyConfigStatus> {
-  const response = await workerFetch(CONFIG_URL, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(false),
-  })
-  const payload = await readResponsePayload(response)
-  if (!response.ok) {
-    throw new Error(`AI proxy ${response.status}: ${getOpenRouterError(payload) || 'Failed to clear the API key.'}`)
-  }
-  return payload as AIProxyConfigStatus
 }
 
 function getOpenRouterError(payload: any): string | null {
   const error = payload?.error
-  if (typeof error === 'string') return error
   if (error?.message) {
     const message = String(error.message)
     const metadata = error.metadata || {}
@@ -262,16 +189,21 @@ async function readResponsePayload(res: Response): Promise<any> {
   }
 }
 
-export async function validateOpenRouterModel(model: string): Promise<void> {
+export async function validateOpenRouterModel(apiKey: string, model: string): Promise<void> {
   const modelId = getConfiguredModelId(model)
   const separatorIndex = modelId.indexOf('/')
   if (separatorIndex <= 0 || separatorIndex === modelId.length - 1) {
     throw new Error('Model id must use the provider/model format.')
   }
 
-  const response = await workerFetch(`${MODEL_ENDPOINTS_URL}?model=${encodeURIComponent(modelId)}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(false),
+  const author = encodeURIComponent(modelId.slice(0, separatorIndex))
+  const slug = encodeURIComponent(modelId.slice(separatorIndex + 1))
+  const response = await fetch(`${OPENROUTER_API_BASE}/models/${author}/${slug}/endpoints`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'BOM Manager',
+    },
   })
   const payload = await readResponsePayload(response)
   const endpoints = payload?.data?.endpoints
@@ -293,23 +225,29 @@ export async function chatCompletion(opts: {
   toolChoice?: 'auto' | 'none' | 'required'
   signal?: AbortSignal
 }): Promise<ORCompletionResponse> {
-  let { model } = loadSettings()
+  let { apiKey, model } = loadSettings()
 
-  if (!model) {
+  if (!apiKey || !model) {
     const dbSettings = await loadSettingsFromDB()
-    if (dbSettings?.model) {
+    if (dbSettings?.apiKey) {
       saveSettings(dbSettings)
+      apiKey = dbSettings.apiKey
       model = dbSettings.model
     }
   }
 
-  if (!model) {
-    throw new Error('AI not configured - ask an admin to configure the model and OpenRouter key.')
+  if (!apiKey || !model) {
+    throw new Error('AI not configured - set the OpenRouter API key and model in AI Settings.')
   }
 
-  const res = await workerFetch(CHAT_URL, {
+  const res = await fetch(OPENROUTER_URL, {
     method: 'POST',
-    headers: await getAuthHeaders(),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'BOM Manager',
+    },
     body: JSON.stringify({
       model,
       messages: opts.messages,
