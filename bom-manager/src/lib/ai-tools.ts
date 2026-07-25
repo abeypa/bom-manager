@@ -3,10 +3,9 @@
  *
  * RULES (enforced here, not by the LLM):
  *   1. Tools tagged `read` execute immediately and return JSON to the model.
- *   2. Tools tagged `write` NEVER execute on their own. The model can only
- *      *propose* a write — the proposal is queued in the chat as a card with
- *      Approve / Reject buttons. The user must press Approve before the
- *      mutation actually runs against Supabase.
+ *   2. Write tools are routed by the runner. PO-ingestion entry writes
+ *      execute automatically after preflights; destructive/normal workflows
+ *      use Approve / Reject cards.
  *   3. Every tool input is validated against its declared schema before it
  *      is executed or queued. Unknown tools are rejected.
  *
@@ -26,12 +25,11 @@ import { auditPurchaseOrderPdf } from '@/lib/po-pdf-audit'
 import { getSignedUrl } from '@/api/storage'
 import { urlToPDFAttachment } from '@/lib/ai-attachments'
 import { parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
+import { compareAttachedPOWithDatabasePO as compareAttachedPOWithDatabasePOPure } from '@/lib/po-ingestion-duplicate'
 import { backfillPurchaseOrderPdfTaxAmounts } from '@/lib/po-tax-backfill'
 import { useAIStore } from '@/store/useAIStore'
 import {
-  getConfirmedPartTypes,
   getConfirmedProjectIds,
-  hasPOAttachment,
 } from '@/lib/ai-confirmations'
 import {
   findExistingProjectPartInProject,
@@ -58,7 +56,7 @@ export interface ToolSpec {
    * should not even see in the approval queue.
    */
   preflight?: (args: any) => Promise<void>
-  /** Actual handler. For write tools this is invoked AFTER user approves. */
+  /** Invoked after approval or after automatic PO-entry preflights pass. */
   handler: (args: any) => Promise<any>
 }
 
@@ -187,17 +185,6 @@ function normalizePartKey(value: any) {
   return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 }
 
-function assertPOPartTypeConfirmed(partType: string) {
-  const messages = useAIStore.getState().messages
-  if (!hasPOAttachment(messages)) return
-  if (!getConfirmedPartTypes(messages).has(partType)) {
-    throw new Error(
-      `The user has not confirmed part master table "${partType}" for this PO ingestion. ` +
-      'Ask which part master table each new PO line belongs to and wait for the user selection.',
-    )
-  }
-}
-
 function assertProjectConfirmed(projectId: number) {
   const normalizedProjectId = Number(projectId)
   if (!getConfirmedProjectIds(useAIStore.getState().messages).has(normalizedProjectId)) {
@@ -240,6 +227,452 @@ function findSourcePdfAttachmentForDraftPO(args: any) {
   }
 
   return null
+}
+
+const normalizePOValue = (value: any) =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+const closePOValue = (left: any, right: any, tolerance = 0.05) =>
+  Math.abs(Number(left || 0) - Number(right || 0)) <= tolerance
+
+function poItemCodeCandidates(item: any) {
+  return [
+    item?.part_number,
+    String(item?.part_number || '').split('-').at(-1),
+    item?.manufacturer_part_number,
+    item?.beperp_part_no,
+  ].map(normalizePOValue).filter(Boolean)
+}
+
+function findDatabasePOLine(pdfLine: any, databaseItems: any[]) {
+  const pdfCode = normalizePOValue(pdfLine?.item_code)
+  if (pdfCode) {
+    const codeMatch = databaseItems.find((item) =>
+      poItemCodeCandidates(item).some((candidate) =>
+        candidate === pdfCode || candidate.endsWith(pdfCode) || pdfCode.endsWith(candidate),
+      ),
+    )
+    if (codeMatch) return codeMatch
+  }
+
+  const pdfDescription = normalizePOValue(pdfLine?.description).slice(0, 24)
+  if (!pdfDescription) return null
+  return databaseItems.find((item) => {
+    const description = normalizePOValue(item?.description).slice(0, 24)
+    return description && (
+      description.includes(pdfDescription) ||
+      pdfDescription.includes(description)
+    )
+  }) || null
+}
+
+export function compareAttachedPOWithDatabasePO(parsed: any, po: any) {
+  const issues: Array<{ field: string; expected: any; actual: any }> = []
+  const databaseItems = po.purchase_order_items || []
+  const matchedDatabaseItemIds = new Set<number>()
+  const matchedPdfLineIndexes: number[] = []
+  let matchingLineValues = 0
+
+  parsed.lines.forEach((line: any, index: number) => {
+    const item = findDatabasePOLine(line, databaseItems)
+    if (!item) {
+      issues.push({
+        field: `line:${line.item_code || index + 1}`,
+        expected: 'Matching database PO line',
+        actual: 'Missing',
+      })
+      return
+    }
+
+    matchedPdfLineIndexes.push(index)
+    if (item.id != null) matchedDatabaseItemIds.add(Number(item.id))
+    const lineIssuesBefore = issues.length
+    if (line.quantity != null && !closePOValue(item.quantity, line.quantity)) {
+      issues.push({ field: `quantity:${line.item_code || index + 1}`, expected: line.quantity, actual: item.quantity })
+    }
+    if (line.unit_price != null && !closePOValue(item.unit_price, line.unit_price)) {
+      issues.push({ field: `unit_price:${line.item_code || index + 1}`, expected: line.unit_price, actual: item.unit_price })
+    }
+    if (
+      line.discount_percent != null &&
+      !closePOValue(item.discount_percent || 0, line.discount_percent || 0)
+    ) {
+      issues.push({
+        field: `discount_percent:${line.item_code || index + 1}`,
+        expected: line.discount_percent || 0,
+        actual: item.discount_percent || 0,
+      })
+    }
+    if (
+      line.total_amount != null &&
+      Number(item.total_amount || 0) > 0 &&
+      !closePOValue(item.total_amount, line.total_amount, 1)
+    ) {
+      issues.push({
+        field: `total_amount:${line.item_code || index + 1}`,
+        expected: line.total_amount,
+        actual: item.total_amount,
+      })
+    }
+    if (issues.length === lineIssuesBefore) matchingLineValues += 1
+  })
+
+  for (const item of databaseItems) {
+    if (item.id != null && !matchedDatabaseItemIds.has(Number(item.id))) {
+      issues.push({
+        field: `database_line:${item.part_number || item.id}`,
+        expected: 'Line present in attached PO',
+        actual: 'Extra database line',
+      })
+    }
+  }
+
+  const parsedPONumber = normalizePOValue(parsed.po_number)
+  const databasePONumber = normalizePOValue(po.po_number)
+  const exactPONumber = Boolean(parsedPONumber && parsedPONumber === databasePONumber)
+  const parsedSupplier = normalizePOValue(parsed.supplier_name)
+  const databaseSupplier = normalizePOValue(po.suppliers?.name)
+  const supplierMatches = Boolean(
+    parsedSupplier &&
+    databaseSupplier &&
+    (parsedSupplier.includes(databaseSupplier) || databaseSupplier.includes(parsedSupplier)),
+  )
+  const dateMatches = Boolean(parsed.po_date && po.po_date && String(parsed.po_date) === String(po.po_date))
+  const lineCoverage = parsed.lines.length
+    ? matchedPdfLineIndexes.length / parsed.lines.length
+    : 0
+  const lineValueCoverage = parsed.lines.length
+    ? matchingLineValues / parsed.lines.length
+    : 0
+
+  if (exactPONumber && parsed.po_date && po.po_date && !dateMatches) {
+    issues.push({ field: 'po_date', expected: parsed.po_date, actual: po.po_date })
+  }
+  if (exactPONumber && parsed.supplier_name && !supplierMatches) {
+    issues.push({ field: 'supplier', expected: parsed.supplier_name, actual: po.suppliers?.name || null })
+  }
+  if (exactPONumber && parsed.currency && normalizePOValue(parsed.currency) !== normalizePOValue(po.currency || 'INR')) {
+    issues.push({ field: 'currency', expected: parsed.currency, actual: po.currency || 'INR' })
+  }
+  if (exactPONumber && parsed.lines.length !== databaseItems.length) {
+    issues.push({ field: 'line_count', expected: parsed.lines.length, actual: databaseItems.length })
+  }
+
+  const parsedBasicTotal = Number(
+    parsed.basic_amount ??
+    parsed.subtotal ??
+    parsed.lines.reduce((sum: number, line: any) => sum + Number(line.total_amount || 0), 0),
+  )
+  if (
+    exactPONumber &&
+    parsedBasicTotal > 0 &&
+    Number(po.grand_total || 0) > 0 &&
+    !closePOValue(parsedBasicTotal, po.grand_total, 5)
+  ) {
+    issues.push({ field: 'grand_total_excluding_tax', expected: parsedBasicTotal, actual: po.grand_total })
+  }
+
+  const likelyDuplicate = exactPONumber || (
+    supplierMatches &&
+    lineCoverage >= 0.6 &&
+    lineValueCoverage >= 0.6 &&
+    (dateMatches || lineCoverage >= 0.9)
+  )
+
+  return {
+    po_id: po.id,
+    po_number: po.po_number,
+    status: po.status,
+    project_id: po.project_id,
+    project: po.project || null,
+    supplier: po.suppliers?.name || null,
+    po_date: po.po_date,
+    exact_po_number: exactPONumber,
+    supplier_matches: supplierMatches,
+    date_matches: dateMatches,
+    matched_pdf_line_indexes: matchedPdfLineIndexes,
+    matched_line_count: matchedPdfLineIndexes.length,
+    pdf_line_count: parsed.lines.length,
+    database_line_count: databaseItems.length,
+    line_coverage: Number(lineCoverage.toFixed(4)),
+    line_value_coverage: Number(lineValueCoverage.toFixed(4)),
+    likely_duplicate: likelyDuplicate,
+    data_matches: exactPONumber && issues.length === 0,
+    issues,
+  }
+}
+
+async function inspectAttachedPOAgainstDatabase(args: any = {}) {
+  const attachment = findSourcePdfAttachmentForDraftPO(args)
+  if (!attachment) {
+    throw new Error('Attach the source PO PDF before starting PO ingestion.')
+  }
+
+  const parsed = parsePurchaseOrderText(attachment.text || '')
+  if (!parsed.po_number && parsed.lines.length === 0) {
+    throw new Error(`Could not read a PO number or material lines from ${attachment.name}.`)
+  }
+
+  const { data: rows, error } = await (supabase as any)
+    .from('purchase_orders')
+    .select(`
+      id, po_number, status, project_id, supplier_id, po_date, currency, grand_total,
+      suppliers(name),
+      project:projects(id, project_number, project_name),
+      purchase_order_items(
+        id, part_number, description, quantity, unit_price, discount_percent,
+        total_amount, part_type, part_id, project_part_id
+      )
+    `)
+    .order('po_date', { ascending: false })
+    .limit(1000)
+  if (error) throw error
+
+  const comparisons = (rows || [])
+    .map((po: any) => compareAttachedPOWithDatabasePOPure(parsed, po))
+    .filter((comparison: any) =>
+      comparison.exact_po_number ||
+      comparison.likely_duplicate ||
+      comparison.matched_line_count > 0,
+    )
+    .sort((left: any, right: any) =>
+      Number(right.exact_po_number) - Number(left.exact_po_number) ||
+      Number(right.likely_duplicate) - Number(left.likely_duplicate) ||
+      right.line_coverage - left.line_coverage,
+    )
+
+  const contentCandidates = comparisons.filter((comparison: any) =>
+    comparison.exact_po_number || (
+      comparison.supplier_matches &&
+      comparison.matched_line_count > 0 &&
+      comparison.line_value_coverage >= 0.25 &&
+      (comparison.date_matches || comparison.line_coverage >= 0.8)
+    ),
+  )
+  const coveredLines = new Set<number>()
+  for (const comparison of contentCandidates) {
+    for (const index of comparison.matched_pdf_line_indexes) coveredLines.add(index)
+  }
+  const combinedCoverage = parsed.lines.length ? coveredLines.size / parsed.lines.length : 0
+  const groupDuplicate = contentCandidates.length > 1 && combinedCoverage >= 0.8
+  const likelyDuplicates = comparisons
+    .filter((comparison: any) => comparison.likely_duplicate || (
+      groupDuplicate && contentCandidates.some((candidate: any) => candidate.po_id === comparison.po_id)
+    ))
+    .map((comparison: any) => ({
+      ...comparison,
+      likely_duplicate: true,
+      duplicate_basis: comparison.exact_po_number
+        ? 'exact_po_number'
+        : groupDuplicate
+          ? 'combined_content_across_purchase_orders'
+          : 'matching_po_content',
+    }))
+  const projectIds = Array.from(new Set(
+    likelyDuplicates.map((comparison: any) => comparison.project_id).filter(Boolean),
+  ))
+  const poNumbers = Array.from(new Set(
+    likelyDuplicates.map((comparison: any) => comparison.po_number).filter(Boolean),
+  ))
+  const alreadyIngested = likelyDuplicates.some((comparison: any) => comparison.exact_po_number) ||
+    (likelyDuplicates.length > 0 && combinedCoverage >= 0.8)
+  const exactMatches = likelyDuplicates.filter((comparison: any) => comparison.exact_po_number)
+  const resultMatches = comparisons.map((comparison: any) =>
+    likelyDuplicates.find((candidate: any) => candidate.po_id === comparison.po_id) || comparison,
+  )
+
+  return {
+    source: {
+      file_name: attachment.name,
+      po_number: parsed.po_number,
+      supplier_name: parsed.supplier_name,
+      po_date: parsed.po_date,
+      currency: parsed.currency,
+      line_count: parsed.lines.length,
+      parse_status: parsed.parse_status,
+      parse_warnings: parsed.parse_warnings,
+    },
+    already_ingested: alreadyIngested,
+    exact_po_number_found: likelyDuplicates.some((comparison: any) => comparison.exact_po_number),
+    all_exact_po_data_matches: exactMatches.length > 0 &&
+      exactMatches.every((comparison: any) => comparison.data_matches),
+    duplicate_across_different_po_numbers: alreadyIngested &&
+      likelyDuplicates.some((comparison: any) => !comparison.exact_po_number),
+    duplicate_across_multiple_projects: alreadyIngested && projectIds.length > 1,
+    combined_line_coverage: Number(combinedCoverage.toFixed(4)),
+    matching_po_numbers: poNumbers,
+    matching_project_ids: projectIds,
+    matches: resultMatches.slice(0, 25),
+  }
+}
+
+async function recommendAttachedPOProjectTargets(args: any = {}) {
+  const attachment = findSourcePdfAttachmentForDraftPO(args)
+  if (!attachment) throw new Error('Attach the source PO PDF before resolving project targets.')
+  const parsed = parsePurchaseOrderText(attachment.text || '')
+  const itemCodes = Array.from(new Set(
+    parsed.lines.map((line: any) => String(line.item_code || '').trim()).filter(Boolean),
+  ))
+
+  const { data: projects, error: projectsError } = await (supabase as any)
+    .from('projects')
+    .select('id, project_number, project_name, status')
+    .not('status', 'eq', 'cancelled')
+    .limit(1000)
+  if (projectsError) throw projectsError
+
+  const projectScores = new Map<number, {
+    project: any
+    score: number
+    evidence: string[]
+    matched_line_codes: Set<string>
+  }>()
+  for (const project of projects || []) {
+    const evidence: string[] = []
+    let score = 0
+    const rawText = normalizePOValue(parsed.raw_text)
+    const projectNumber = normalizePOValue(project.project_number)
+    const projectName = normalizePOValue(project.project_name)
+    if (projectNumber.length >= 4 && rawText.includes(projectNumber)) {
+      score += 100
+      evidence.push(`PO text contains project number ${project.project_number}`)
+    }
+    if (projectName.length >= 8 && rawText.includes(projectName)) {
+      score += 80
+      evidence.push(`PO text contains project name ${project.project_name}`)
+    }
+    if (score > 0) {
+      projectScores.set(project.id, {
+        project,
+        score,
+        evidence,
+        matched_line_codes: new Set(),
+      })
+    }
+  }
+
+  const masterMatches: Array<{ line_code: string; part_type: string; part_id: number }> = []
+  if (itemCodes.length) {
+    for (const partType of part_type_enum) {
+      const { data } = await (supabase as any)
+        .from(partType)
+        .select('id, beperp_part_no')
+        .in('beperp_part_no', itemCodes)
+      for (const row of data || []) {
+        masterMatches.push({
+          line_code: String(row.beperp_part_no),
+          part_type: partType,
+          part_id: Number(row.id),
+        })
+      }
+    }
+  }
+
+  const projectParts: any[] = []
+  for (const partType of part_type_enum) {
+    const partIds = masterMatches
+      .filter((match) => match.part_type === partType)
+      .map((match) => match.part_id)
+    if (!partIds.length) continue
+    const { data } = await (supabase as any)
+      .from('project_parts')
+      .select('id, part_type, part_id, project_section_id')
+      .eq('part_type', partType)
+      .in('part_id', partIds)
+    projectParts.push(...(data || []))
+  }
+
+  const subsectionIds = Array.from(new Set(
+    projectParts.map((row) => row.project_section_id).filter(Boolean),
+  ))
+  const { data: subsections } = subsectionIds.length
+    ? await (supabase as any)
+        .from('project_subsections')
+        .select('id, project_id, section_name')
+        .in('id', subsectionIds)
+    : { data: [] }
+  const subsectionById = new Map<number, any>((subsections || []).map((row: any) => [Number(row.id), row]))
+  const projectById = new Map<number, any>((projects || []).map((project: any) => [Number(project.id), project]))
+
+  const lineRecommendations = parsed.lines.map((line: any) => {
+    const lineCode = String(line.item_code || '')
+    const master = masterMatches.find(
+      (match) => normalizePOValue(match.line_code) === normalizePOValue(lineCode),
+    )
+    const matchingMappings = master
+      ? projectParts.filter(
+          (row) => row.part_type === master.part_type && Number(row.part_id) === master.part_id,
+        )
+      : []
+    const candidates: any[] = []
+    for (const mapping of matchingMappings) {
+      const subsection = subsectionById.get(Number(mapping.project_section_id))
+      const project = subsection ? projectById.get(Number(subsection.project_id)) : null
+      if (!project) continue
+      candidates.push({
+        project_id: project.id,
+        project_number: project.project_number,
+        project_name: project.project_name,
+        project_part_id: mapping.id,
+        subsection_id: subsection.id,
+        subsection_name: subsection.section_name,
+        evidence: 'Part already exists in this project BOM',
+      })
+      const current = projectScores.get(project.id) || {
+        project,
+        score: 0,
+        evidence: [],
+        matched_line_codes: new Set<string>(),
+      }
+      if (!current.matched_line_codes.has(lineCode)) {
+        current.score += 10
+        current.matched_line_codes.add(lineCode)
+        current.evidence.push(`Existing BOM mapping for PO item ${lineCode}`)
+      }
+      projectScores.set(project.id, current)
+    }
+    return {
+      item_code: line.item_code,
+      description: line.description,
+      existing_master: master || null,
+      candidates,
+    }
+  })
+
+  const rankedProjects = Array.from(projectScores.values())
+    .sort((left, right) => right.score - left.score)
+    .map((entry) => ({
+      ...entry.project,
+      score: entry.score,
+      evidence: entry.evidence,
+      matched_line_codes: Array.from(entry.matched_line_codes),
+    }))
+  const top = rankedProjects[0]
+  const runnerUp = rankedProjects[1]
+  const unambiguousLineEvidence = lineRecommendations.length > 0 &&
+    lineRecommendations.every((line: any) => {
+      const candidateProjectIds = new Set(line.candidates.map((candidate: any) => candidate.project_id))
+      return candidateProjectIds.size === 1
+    })
+  const defensible = Boolean(top && (
+    top.score >= 80 ||
+    (!runnerUp && top.score >= 10) ||
+    top.score >= (runnerUp?.score || 0) + 20 ||
+    unambiguousLineEvidence
+  ))
+
+  return {
+    source_file: attachment.name,
+    po_number: parsed.po_number,
+    defensible_target_found: defensible,
+    recommended_project: defensible && (rankedProjects.length === 1 || top.score >= 80) ? top : null,
+    recommended_projects: defensible ? rankedProjects.filter((project) => project.score > 0) : [],
+    ranked_projects: rankedProjects.slice(0, 10),
+    line_recommendations: lineRecommendations,
+    guidance: defensible
+      ? 'Use the recommended project for unmatched lines; preserve stronger per-line existing BOM evidence when it points elsewhere.'
+      : 'Do not guess a project. Stop ingestion and report that no project has sufficient document/BOM evidence.',
+  }
 }
 
 function normalizeManufacturerPartKey(value: any) {
@@ -1496,6 +1929,103 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
   },
   {
+    name: 'classify_po_part_master_table',
+    kind: 'read',
+    description:
+      'Classify a missing PO line into EBO, EMF, MBO, MMF, or PBO using deterministic industrial-part keywords. Use for every missing master part during automatic PO ingestion; combine the result with similar master-part evidence and do not ask the user to confirm.',
+    parameters: {
+      type: 'object',
+      required: ['description'],
+      properties: {
+        description: { type: 'string' },
+        manufacturer: { type: 'string' },
+        manufacturer_part_number: { type: 'string' },
+      },
+    },
+    handler: async ({ description, manufacturer, manufacturer_part_number }: any) => {
+      const text = `${description || ''} ${manufacturer || ''} ${manufacturer_part_number || ''}`.toLowerCase()
+      const rules: Array<{
+        part_type: string
+        prefix: string
+        keywords: string[]
+      }> = [
+        {
+          part_type: 'pneumatic_bought_out',
+          prefix: 'PBO',
+          keywords: [
+            'pneumatic', 'cylinder', 'solenoid valve', 'air valve', 'frl',
+            'air filter', 'air regulator', 'pu tube', 'pneumatic fitting',
+          ],
+        },
+        {
+          part_type: 'electrical_manufacture',
+          prefix: 'EMF',
+          keywords: [
+            'control panel assembly', 'electrical panel assembly', 'wiring harness',
+            'cable assembly', 'panel wiring', 'electrical fabrication',
+          ],
+        },
+        {
+          part_type: 'mechanical_manufacture',
+          prefix: 'MMF',
+          keywords: [
+            'fabricated', 'machined', 'weldment', 'bracket', 'mounting plate',
+            'base plate', 'shaft', 'frame assembly', 'sheet metal',
+          ],
+        },
+        {
+          part_type: 'electrical_bought_out',
+          prefix: 'EBO',
+          keywords: [
+            'relay', 'contactor', 'sensor', 'switch', 'terminal', 'cable', 'wire',
+            'connector', 'plc', 'hmi', 'mcb', 'mccb', 'fuse', 'power supply',
+            'servo', 'drive', 'motor', 'encoder', 'transformer', 'electrical',
+          ],
+        },
+        {
+          part_type: 'mechanical_bought_out',
+          prefix: 'MBO',
+          keywords: [
+            'bearing', 'bolt', 'nut', 'washer', 'screw', 'coupling', 'gearbox',
+            'pulley', 'belt', 'chain', 'sprocket', 'wheel', 'caster', 'seal',
+            'spring', 'mechanical',
+          ],
+        },
+      ]
+
+      const scored = rules
+        .map((rule) => ({
+          ...rule,
+          matched_keywords: rule.keywords.filter((keyword) => text.includes(keyword)),
+        }))
+        .map((rule) => ({ ...rule, score: rule.matched_keywords.length }))
+        .sort((left, right) => right.score - left.score)
+      const best = scored[0]
+      const second = scored[1]
+
+      if (!best || best.score === 0) {
+        return {
+          part_type: 'mechanical_bought_out',
+          prefix: 'MBO',
+          confidence: 'low',
+          evidence: ['No strong keyword match; use similar master records before accepting this fallback.'],
+          alternatives: scored.slice(0, 3).map(({ part_type, prefix }) => ({ part_type, prefix })),
+        }
+      }
+
+      return {
+        part_type: best.part_type,
+        prefix: best.prefix,
+        confidence: best.score > (second?.score || 0) || best.score >= 2 ? 'high' : 'medium',
+        evidence: best.matched_keywords,
+        alternatives: scored
+          .filter((candidate) => candidate.part_type !== best.part_type && candidate.score > 0)
+          .slice(0, 2)
+          .map(({ part_type, prefix, matched_keywords }) => ({ part_type, prefix, matched_keywords })),
+      }
+    },
+  },
+  {
     name: 'find_master_part_by_erp_id',
     kind: 'read',
     description:
@@ -1684,6 +2214,46 @@ export const TOOL_REGISTRY: ToolSpec[] = [
 
       return { found: false, image_url: null }
     },
+  },
+  {
+    name: 'recommend_attached_po_project_targets',
+    kind: 'read',
+    description:
+      'Resolve PO-line project targets automatically from explicit project numbers/names in the attached PO and existing BOM mappings for its ERP item codes. Use after the duplicate check and before any project mapping. If defensible_target_found is false, do not guess or write project mappings.',
+    parameters: {
+      type: 'object',
+      properties: {
+        po_number: {
+          type: 'string',
+          description: 'PO number read from the attached document, used to select the correct PDF when several are attached.',
+        },
+        expected_supplier_name: {
+          type: 'string',
+          description: 'Supplier name read from the attached document, used to select the correct PDF when several are attached.',
+        },
+      },
+    },
+    handler: recommendAttachedPOProjectTargets,
+  },
+  {
+    name: 'inspect_attached_po_before_ingestion',
+    kind: 'read',
+    description:
+      'MANDATORY FIRST STEP for every attached PO ingestion. Parse the attached source PO, search all existing purchase orders, detect the same PO under the same or different PO numbers and across multiple projects, and compare header, supplier, date, currency, totals, line codes, quantities, prices, and discounts. If already_ingested is true, report every match and mismatch and STOP ingestion; never create another draft.',
+    parameters: {
+      type: 'object',
+      properties: {
+        po_number: {
+          type: 'string',
+          description: 'PO number read from the attached document, when available. Used to select the correct PDF when several are attached.',
+        },
+        expected_supplier_name: {
+          type: 'string',
+          description: 'Supplier name read from the attached document, used only to select the correct PDF when several are attached.',
+        },
+      },
+    },
+    handler: inspectAttachedPOAgainstDatabase,
   },
   {
     name: 'list_purchase_orders',
@@ -2071,7 +2641,6 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         (a.discount_percent ? ` (-${a.discount_percent}%)` : '')
     },
     preflight: async (a: any) => {
-      assertPOPartTypeConfirmed(a.part_type)
       const prefix = PREFIX_BY_PART_TYPE[a.part_type]
       if (!prefix) throw new Error(`Unknown part_type: ${a.part_type}`)
       if (a.beperp_part_no == null || String(a.beperp_part_no).trim() === '')
@@ -2128,7 +2697,6 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       }
     },
     handler: async (a: any) => {
-      assertPOPartTypeConfirmed(a.part_type)
       const prefix = PREFIX_BY_PART_TYPE[a.part_type]
       if (!prefix) throw new Error(`Unknown part_type: ${a.part_type}`)
       if (a.beperp_part_no == null || String(a.beperp_part_no).trim() === '')
@@ -2831,7 +3399,6 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .eq('id', a.project_subsection_id)
         .maybeSingle()
       if (!targetSub) throw new Error(`project_subsection ${a.project_subsection_id} not found.`)
-      assertProjectConfirmed(targetSub.project_id)
       if (!isProjectPartDuplicateExemptMaster(master)) {
         const existing = await findExistingProjectPartInProject(
           supabase as any,
@@ -2879,7 +3446,6 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         .maybeSingle()
       if (subErr) throw subErr
       if (!targetSub) throw new Error(`project_subsection ${a.project_subsection_id} not found.`)
-      assertProjectConfirmed(targetSub.project_id)
 
       if (!isProjectPartDuplicateExemptMaster(master)) {
         const existing = await findExistingProjectPartInProject(
@@ -3077,6 +3643,21 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         `${a.items?.length || 0} line(s), grand total ${a.currency || 'INR'} ${total.toFixed(2)} (excl. GST)`
     },
     handler: async (a: any) => {
+      const duplicateInspection = await inspectAttachedPOAgainstDatabase(a)
+      if (duplicateInspection.already_ingested) {
+        const matches = duplicateInspection.matches
+          .filter((match: any) => match.likely_duplicate)
+          .map((match: any) =>
+            `${match.po_number} (id=${match.po_id}, project=${match.project_id || 'none'}, ` +
+            `${match.data_matches ? 'data matches' : `${match.issues.length} mismatch(es)`})`,
+          )
+          .join('; ')
+        throw new Error(
+          `Draft blocked: the attached PO is already represented in the database. ${matches}. ` +
+          'Report the comparison result instead of creating another PO.',
+        )
+      }
+
       // Field-level interlocks
       if (a.project_id != null) assertInteger('project_id', a.project_id)
       assertInteger('supplier_id', a.supplier_id)
@@ -3777,7 +4358,11 @@ export function toOpenAITools() {
     function: {
       name: t.name,
       description:
-        (t.kind === 'write' ? '[WRITE — user approval required] ' : '') + t.description,
+        (
+          t.kind === 'write'
+            ? '[WRITE — approved automatically only when used as a PO-ingestion entry step; otherwise approval required] '
+            : ''
+        ) + t.description,
       parameters: t.parameters,
     },
   }))

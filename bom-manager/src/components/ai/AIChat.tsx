@@ -29,7 +29,7 @@ const SMART_COMMANDS = [
     label: 'PO Ingest',
     icon: ClipboardList,
     prompt:
-      'PO ingest: I will attach one or more PO PDFs. Always ask me to confirm the target project or projects and the Part Master table for every missing part before creating or mapping anything. Allow mapping different PO lines across multiple projects when needed. For each PO, resolve or create the supplier, create missing master parts only in my selected table, update existing part prices with the PO date, map each part only once in its confirmed target project, then draft the matching PO after mapping.',
+      'PO ingest automatically: First inspect every attached PO for an existing exact PO number and for the same PO saved under different PO numbers or across multiple projects. If found, compare all header and line data and report matches or mismatches without creating a duplicate. If new, automatically resolve the supplier, classify missing parts into the correct Part Master tables, update PO-dated prices, resolve each target project from database evidence, map every part once, and continue without confirmation through Draft PO creation. Pause only for a real validation blocker or a deletion.',
   },
   {
     label: 'Select Project',
@@ -207,7 +207,7 @@ export default function AIChat() {
             </div>
             <div>
               <p className="text-sm font-bold leading-none">BOM Assistant</p>
-              <p className="text-[10px] text-white/60 mt-0.5">All writes require your approval</p>
+              <p className="text-[10px] text-white/60 mt-0.5">PO entry runs automatically · deletes require approval</p>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -406,7 +406,7 @@ export default function AIChat() {
             )}
           </div>
           <p className="text-[10px] text-slate-400 mt-1.5 leading-tight">
-            Enter to send · Shift+Enter for newline · {busy ? 'Click ◼ to stop the AI' : 'Drop / paste images & PDFs'} · Writes always need your approval.
+            Enter to send · Shift+Enter for newline · {busy ? 'Click ◼ to stop the AI' : 'Drop / paste images & PDFs'} · PO entry is automatic; deletes require approval.
           </p>
         </div>
       </div>
@@ -452,8 +452,8 @@ function SmartCommandPanel({
         </div>
         <p>1. Attach one or more PO PDFs.</p>
         <p>2. Click PO Ingest.</p>
-        <p>3. I will always ask you to confirm the part master table and target project before adding or mapping parts.</p>
-        <p>4. Approved actions appear here, then the draft PO is created.</p>
+        <p>3. I first check for the same PO under any PO number or project and audit existing data.</p>
+        <p>4. New POs continue automatically through part classification, project mapping, and draft creation.</p>
         <p>5. Use AI PO Audit to select a project and check stored POs against attached PDFs.</p>
       </div>
     </div>

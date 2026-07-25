@@ -34,8 +34,10 @@ vi.mock('@/store/useAIStore', () => ({
 
 import {
   approvePending,
+  isActivePOIngestion,
   parseToolArguments,
   serializeToolPayload,
+  shouldAutoExecuteWrite,
 } from '@/lib/ai-runner'
 
 beforeEach(() => {
@@ -89,5 +91,46 @@ describe('AI runner safety helpers', () => {
 
     expect(handler).toHaveBeenCalledTimes(1)
     expect(state.pending[0].status).toBe('executed')
+  })
+
+  it('auto-executes non-delete entry writes only during an active PO ingestion', () => {
+    state.messages = [{
+      role: 'user',
+      content: 'PO ingest automatically',
+      attachments: [{
+        kind: 'pdf',
+        name: 'po.pdf',
+        size: 100,
+        text: 'PO',
+        pageCount: 1,
+        truncated: false,
+      }],
+    }]
+
+    expect(isActivePOIngestion()).toBe(true)
+    expect(shouldAutoExecuteWrite('create_supplier')).toBe(true)
+    expect(shouldAutoExecuteWrite('apply_existing_po_pdf_correction')).toBe(false)
+    expect(shouldAutoExecuteWrite('delete_unlinked_project_part')).toBe(false)
+  })
+
+  it('does not keep an old PO ingestion active for a later unrelated request', () => {
+    state.messages = [
+      {
+        role: 'user',
+        content: 'Ingest this PO',
+        attachments: [{
+          kind: 'pdf',
+          name: 'po.pdf',
+          size: 100,
+          text: 'PO',
+          pageCount: 1,
+          truncated: false,
+        }],
+      },
+      { role: 'user', content: 'Update a stock record', ts: 2 },
+    ]
+
+    expect(isActivePOIngestion()).toBe(false)
+    expect(shouldAutoExecuteWrite('create_supplier')).toBe(false)
   })
 })

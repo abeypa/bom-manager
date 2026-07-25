@@ -5,8 +5,8 @@
  *   2. If the model returns a content reply, push it to the chat.
  *   3. If the model returns tool_calls:
  *        - read tools  → execute immediately, push tool result, loop.
- *        - write tools → enqueue a PendingAction in the store and STOP.
- *          The user must Approve before we send the tool result back.
+ *        - PO-ingestion entry writes → execute immediately after preflights.
+ *        - other/destructive writes → enqueue a PendingAction and STOP.
  *
  *   The user's Approve button calls `executePendingAction` which runs
  *   the actual handler then re-enters this loop.
@@ -31,10 +31,13 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
    questions about projects, parts, POs, or stock. Cite IDs and part numbers
    from tool results, not from memory.
 
-2. NEVER perform a write action silently. Every write tool will be queued
-   for explicit user approval. After calling a write tool, summarize what
-   you proposed and wait. Do NOT chain a second write tool without the user
-   confirming the first one ran.
+2. PO INGESTION ENTRY WRITES RUN AUTOMATICALLY. During attached PO
+   ingestion, supplier creation, master-part creation/update, project
+   mapping, subsection creation, quantity updates, and Draft PO creation
+   execute without typed confirmation or approval. Continue automatically
+   until the Draft PO exists or a real validation error blocks progress.
+   Deletion/merge tools always require explicit approval. Outside PO
+   ingestion, normal write approvals still apply.
 
 3. For ambiguous requests (e.g. "add a motor to the project"), ASK before
    you act — list candidate parts/projects and confirm.
@@ -93,22 +96,30 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     the lookup internally. If get_po_details returns an error, THEN
     fall back to list_purchase_orders(po_number: "PO-56741134").
 
-12. PO INGESTION MUST BE VISIBLE IN CHAT. For every PO ingestion,
-    show short progress messages in the assistant reply before each
-    approval batch: supplier resolution, part master create/update,
-    project table mapping, and draft PO creation. The user should be
-    able to follow the activity from the chat without opening another
-    screen.
+12. PO INGESTION MUST BE AUTOMATIC AND VISIBLE IN CHAT. Show short
+    progress messages for duplicate audit, supplier resolution, part
+    master create/update, project mapping, and Draft PO creation. Do not
+    ask the user to type "confirm" or pause for entry approvals.
 
-    REQUIRED USER CONFIRMATIONS:
-    - Before creating ANY missing master part, show the unmatched PO
-      lines and ask: "Which part master table should each new part be
-      added to?" Wait for the user's EBO, EMF, MBO, MMF, or PBO
-      selection. Never infer or auto-select a part table.
-    - Before mapping ANY part to project_parts, call list_projects and
-      ask the user to select the target project or projects. Wait for
-      the explicit selection even when the PDF or prior context suggests
-      a project. Tool preflights enforce both confirmation rules.
+    MANDATORY DUPLICATE-FIRST CHECK:
+    - Before any supplier, master-part, project, or PO write, call
+      inspect_attached_po_before_ingestion once for EVERY attached PDF.
+    - It checks the exact PO number and content-equivalent POs saved under
+      different PO numbers or split across multiple projects.
+    - If already_ingested=true, show every matching PO/project and all
+      field/line mismatches, then STOP. Never draft another PO.
+    - If the existing data matches, say so and STOP.
+
+    AUTOMATIC CLASSIFICATION AND PROJECT ROUTING:
+    - Infer EBO, EMF, MBO, MMF, or PBO from item description,
+      manufacturer data, and similar master records. Do not ask for a
+      part-table confirmation.
+    - Resolve projects from explicit document references, project
+      numbers/names, existing BOM mappings, and project structure.
+    - If lines belong to different projects, map each line exactly once
+      to its best-supported project and create one multi-project Draft PO.
+    - If no project has defensible evidence, stop with a concise blocking
+      report instead of assigning a random project.
     - When asked to clean or delete parts from a Project Tree, never
       delete a Part Master record. Resolve the project, ask the user to
       confirm it, inspect get_project_details, and treat only rows with
@@ -237,8 +248,9 @@ WORKFLOW: INGESTING A PURCHASE ORDER PDF
 ═══════════════════════════════════════════════════════════════════════
 
 When the user attaches a PO PDF (or screenshot) and asks to add the
-parts, follow these steps in order. Stop and ask the user whenever you
-are not sure — do NOT guess.
+parts, follow these steps in order. Use the deterministic inspection,
+classification, and project-recommendation tools without confirmation.
+If evidence is insufficient, stop with a blocking report — do NOT guess.
 
 A. EXTRACT FROM THE PDF
    - Supplier name, GSTIN, address.
@@ -253,19 +265,18 @@ B. RESOLVE THE SUPPLIER
 C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
    Process EVERY line item in the PO in the SAME assistant turn —
    not one-by-one. The user wants to Approve all the resulting
-   create_master_part / update_master_part_price proposals from a
-   single approval queue.
+   create_master_part / update_master_part_price calls as one automatic
+   entry batch.
 
    How to batch:
      - First, run find_master_part_by_erp_id for EVERY line item
        (these are read tools — they auto-execute and don't block).
        You may issue all the lookups in a single tool_calls array.
-     - Then, in ONE assistant turn, propose all the writes at once:
+     - Then, in ONE assistant turn, call all the writes at once:
          · update_master_part_price for every line that already has a
            master record.
          · create_master_part for every line that does not.
-       The user will see the full stack in the approval queue and
-       can hit "Approve all".
+       The runner executes this entry batch automatically.
 
    ABSOLUTE RULE: never create the same master part twice. Before
    proposing create_master_part you MUST have run
@@ -290,16 +301,17 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
         not overwrite the current master price.
       - If not found → continue with steps 2–6 below to build a
         create_master_part proposal.
-   2. ASK THE USER which part master table each missing line belongs to.
-      Show Item Code + Description for every missing line, then wait.
-      Never determine part_type yourself. The available choices are:
+   2. CLASSIFY every missing line into a master table automatically.
+      Use description, manufacturer data, part-number patterns, and
+      similar existing master records. Call classify_po_part_master_table
+      for every missing line and use its evidence. The available choices are:
         EBO = electrical_bought_out
         EMF = electrical_manufacture
         MBO = mechanical_bought_out
         MMF = mechanical_manufacture
         PBO = pneumatic_bought_out
-      Use only the table explicitly selected by the user. If different
-      lines need different tables, ask for the table beside each line.
+      Different lines may use different tables. Do not pause for
+      confirmation.
    3. INTERNAL PART NUMBER RULE (deterministic, do NOT invent or
       sequence-number):
             part_number = "<PREFIX>-<beperp_part_no>"
@@ -324,22 +336,21 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
 
    IMPORTANT: do not stop after the first line. Loop through every
    line in the PDF, then emit all the create/update tool_calls in one
-   batch. Only then summarize the plan and wait for approval.
+   batch and continue from the tool results.
 
-D. AFTER ALL PARTS EXIST — PROJECT SELECTION
-   ALWAYS call list_projects and ask the user to confirm the target,
-   even if a project was mentioned earlier. The UI will show
-   clickable project buttons automatically — you do NOT need to list
-   them in text. If the PO should be split across projects, ask for
-   multiple projects and wait for the user's click-reply. Say
-   "Which project or projects should I add these parts to?" when the
-   target is not yet confirmed.
+D. AFTER ALL PARTS EXIST — AUTOMATIC PROJECT RESOLUTION
+   Call recommend_attached_po_project_targets, then list_projects and
+   resolve the target from document references, project names/numbers,
+   existing BOM mappings, and project structure.
+   Do not ask the user to confirm. When multiple projects are supported,
+   split the lines across them. If no target has defensible evidence,
+   stop and report the missing evidence rather than guessing.
 
 E. MAP TO PROJECT STRUCTURE — SMART AUTO-MAPPING, NEVER DUPLICATE
    ABSOLUTE RULES while mapping parts to one or more projects:
      a) NEVER create master parts during mapping. add_part_to_project
         requires a part_id that already exists in the master table; if
-        you can't find one, STOP and ask the user. Do NOT propose
+        you can't find one, return automatically to steps A–C. Do NOT
         create_master_part as part of mapping — master-part creation
         only happens during steps A–C.
      b) NEVER map the same master part to the same project twice.
@@ -366,7 +377,7 @@ E. MAP TO PROJECT STRUCTURE — SMART AUTO-MAPPING, NEVER DUPLICATE
               PBO        → subsection whose name contains "Pneumatic" or "Cylinder"
         iii. If no subsection fits at all → group with other unmatched parts and
              propose ONE new subsection for the whole group (not one per part).
-   5. Present the mapping as an HTML table BEFORE proposing any writes:
+   5. Present the mapping as an HTML table, then continue automatically:
 
         | Part Number | Description | Target Project | Suggested Section | Qty |
         |-------------|-------------|----------------|-------------------|-----|
@@ -374,26 +385,16 @@ E. MAP TO PROJECT STRUCTURE — SMART AUTO-MAPPING, NEVER DUPLICATE
         ...
 
       Include a summary line: "X parts auto-mapped, Y need new section."
-      If you are proposing ONLY the mapping step, end with:
-        "Shall I proceed with this mapping?"
-      If you are proposing BOTH mapping and drafting the PO after mapping,
-      end with:
-        "Choose one: Map Parts Only, Map Parts + Draft PO, or No, stop."
-      The UI will render matching clickable buttons automatically, so wait
-      for the user's click instead of continuing immediately.
 
-   6. After the user confirms, batch ALL add_part_to_project calls in
-      ONE assistant turn. If a new subsection is needed, propose
-      create_project_subsection first, wait for approval, then batch.
-   7. Do NOT ask the user to choose a section manually unless no
-      auto-mapping is possible for a specific part — in that case,
-      list only the unresolved parts, show the available subsections,
-      and the UI will render clickable section buttons automatically.
+   6. Batch ALL add_part_to_project calls in ONE assistant turn. If a
+      new subsection is needed, create it and continue with mapping.
+   7. Do not ask the user to choose a section. Use the best supported
+      existing subsection or create one grouped subsection. If neither
+      is defensible, stop with the unresolved lines instead of guessing.
 
 F. DRAFT THE PO FROM THE SAME SOURCE PDF
    ABSOLUTE RULES:
-     a) Always do this AFTER the project_parts have been saved
-        (i.e. after the user approves all add_part_to_project calls).
+     a) Always do this AFTER the project_parts have been saved.
         You need the new project_part_ids to reference.
         Do not stop after adding/mapping parts. The matching PO from
         the same source PDF must be drafted immediately after mapped
@@ -441,9 +442,9 @@ F. DRAFT THE PO FROM THE SAME SOURCE PDF
         discount_percent (= PDF), expected_price_from_source (= PDF).
         Pass project_id only when every line belongs to the same
         project; otherwise omit it.
-     4. Propose create_draft_po and wait for user approval.
+     4. Call create_draft_po and continue automatically.
 
-   When the user approves, the new PO appears under
+   The new PO appears under
    /purchase-orders in Draft state. If the source PDF was attached in
    chat, save and link that PDF to the draft PO automatically. The
    user still reviews the draft and releases it manually — the AI
@@ -627,6 +628,171 @@ export function serializeToolPayload(payload: any, maxChars = 50_000): string {
   })
 }
 
+const PO_INGEST_INTENT =
+  /\b(?:po\s*ingest(?:ion)?|ingest|import|digitise|digitize|process|add\s+this\s+po)\b/i
+
+const DESTRUCTIVE_TOOL_NAMES = new Set([
+  'delete_unlinked_project_part',
+  'admin_delete_unlinked_master_part',
+  'merge_duplicate_master_parts',
+])
+
+const PO_AUTOMATIC_ENTRY_TOOL_NAMES = new Set([
+  'create_supplier',
+  'create_master_part',
+  'update_master_part_price',
+  'create_project_section',
+  'create_project_subsection',
+  'add_part_to_project',
+  'move_part_to_subsection',
+  'update_part_quantity',
+  'create_draft_po',
+])
+
+const PO_PROJECT_WRITE_NAMES = new Set([
+  'create_project_section',
+  'create_project_subsection',
+  'add_part_to_project',
+  'move_part_to_subsection',
+  'update_part_quantity',
+  'create_draft_po',
+])
+
+function activePOIngestionStartIndex(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (
+      message.role === 'user' &&
+      message.attachments?.some((attachment) => attachment.kind === 'pdf') &&
+      PO_INGEST_INTENT.test(message.content || '')
+    ) {
+      const laterUserMessages = messages.slice(index + 1).filter((candidate) => candidate.role === 'user')
+      const latestLaterUser = laterUserMessages.at(-1)
+      if (
+        latestLaterUser &&
+        !/\b(?:continue|resume|retry|go ahead)\b/i.test(latestLaterUser.content || '')
+      ) {
+        return -1
+      }
+      return index
+    }
+  }
+  return -1
+}
+
+export function isActivePOIngestion(messages = useAIStore.getState().messages) {
+  return activePOIngestionStartIndex(messages) >= 0
+}
+
+function hasCompletedPODuplicateInspection(messages = useAIStore.getState().messages) {
+  const startIndex = activePOIngestionStartIndex(messages)
+  if (startIndex < 0) return true
+
+  const requiredFiles = new Set(
+    (messages[startIndex].attachments || [])
+      .filter((attachment) => attachment.kind === 'pdf')
+      .map((attachment) => attachment.name),
+  )
+  const inspectionCallIds = new Set<string>()
+  for (const message of messages.slice(startIndex)) {
+    if (message.role === 'assistant') {
+      for (const call of message.tool_calls || []) {
+        if (call.function.name === 'inspect_attached_po_before_ingestion') {
+          inspectionCallIds.add(call.id)
+        }
+      }
+    }
+  }
+  const inspectedFiles = new Set<string>()
+  for (const message of messages.slice(startIndex)) {
+    if (
+      message.role !== 'tool' ||
+      !message.tool_call_id ||
+      !inspectionCallIds.has(message.tool_call_id)
+    ) {
+      continue
+    }
+    try {
+      const payload = JSON.parse(message.content || '{}')
+      const fileName = payload?.result?.source?.file_name
+      if (payload?.ok && fileName) inspectedFiles.add(String(fileName))
+    } catch {
+      // An invalid inspection result must not unlock PO writes.
+    }
+  }
+  return requiredFiles.size > 0 &&
+    Array.from(requiredFiles).every((fileName) => inspectedFiles.has(fileName))
+}
+
+function poInspectionFoundExistingPO(messages = useAIStore.getState().messages) {
+  const startIndex = activePOIngestionStartIndex(messages)
+  if (startIndex < 0) return false
+
+  const inspectionCallIds = new Set<string>()
+  for (const message of messages.slice(startIndex)) {
+    if (message.role !== 'assistant') continue
+    for (const call of message.tool_calls || []) {
+      if (call.function.name === 'inspect_attached_po_before_ingestion') {
+        inspectionCallIds.add(call.id)
+      }
+    }
+  }
+  for (const message of messages.slice(startIndex)) {
+    if (
+      message.role !== 'tool' ||
+      !message.tool_call_id ||
+      !inspectionCallIds.has(message.tool_call_id)
+    ) {
+      continue
+    }
+    try {
+      const payload = JSON.parse(message.content || '{}')
+      if (payload?.ok && payload?.result?.already_ingested === true) return true
+    } catch {
+      // Ignore malformed tool responses; the completion gate remains closed.
+    }
+  }
+  return false
+}
+
+function hasDefensiblePOProjectRecommendation(messages = useAIStore.getState().messages) {
+  const startIndex = activePOIngestionStartIndex(messages)
+  if (startIndex < 0) return true
+
+  const recommendationCallIds = new Set<string>()
+  for (const message of messages.slice(startIndex)) {
+    if (message.role !== 'assistant') continue
+    for (const call of message.tool_calls || []) {
+      if (call.function.name === 'recommend_attached_po_project_targets') {
+        recommendationCallIds.add(call.id)
+      }
+    }
+  }
+
+  for (const message of messages.slice(startIndex)) {
+    if (
+      message.role !== 'tool' ||
+      !message.tool_call_id ||
+      !recommendationCallIds.has(message.tool_call_id)
+    ) {
+      continue
+    }
+    try {
+      const payload = JSON.parse(message.content || '{}')
+      if (payload?.ok && payload?.result?.defensible_target_found === true) return true
+    } catch {
+      // Invalid results do not unlock project writes.
+    }
+  }
+  return false
+}
+
+export function shouldAutoExecuteWrite(toolName: string) {
+  return isActivePOIngestion() &&
+    PO_AUTOMATIC_ENTRY_TOOL_NAMES.has(toolName) &&
+    !DESTRUCTIVE_TOOL_NAMES.has(toolName)
+}
+
 /**
  * Send the user's prompt, then process model responses (with auto-loop for
  * read-tool calls) until the model finishes or queues a write tool.
@@ -695,7 +861,7 @@ async function runLoop() {
   // Replace any prior controller — only the latest run is abortable.
   runController = new AbortController()
   const signal = runController.signal
-  const maxSteps = 24
+  const maxSteps = isActivePOIngestion() ? 48 : 24
   try {
     // Hard cap to stop runaway loops
     for (let step = 0; step < maxSteps; step++) {
@@ -768,6 +934,55 @@ async function runLoop() {
             })
             continue
           }
+          if (isActivePOIngestion() && !hasCompletedPODuplicateInspection()) {
+            useAIStore.getState().pushMessage({
+              id: uid(),
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({
+                error:
+                  'PO ingestion duplicate audit is required before the first write. ' +
+                  'Call inspect_attached_po_before_ingestion now and re-plan from its result.',
+                preflight_failed: true,
+              }),
+              ts: Date.now(),
+            })
+            continue
+          }
+          if (isActivePOIngestion() && poInspectionFoundExistingPO()) {
+            useAIStore.getState().pushMessage({
+              id: uid(),
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({
+                error:
+                  'PO ingestion stopped because the duplicate audit found this PO already represented in the database. ' +
+                  'Report the matching PO numbers, projects, and data mismatches; do not perform entry writes.',
+                preflight_failed: true,
+              }),
+              ts: Date.now(),
+            })
+            continue
+          }
+          if (
+            isActivePOIngestion() &&
+            PO_PROJECT_WRITE_NAMES.has(tool.name) &&
+            !hasDefensiblePOProjectRecommendation()
+          ) {
+            useAIStore.getState().pushMessage({
+              id: uid(),
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({
+                error:
+                  'Automatic project mapping is blocked because no defensible target recommendation has been completed. ' +
+                  'Call recommend_attached_po_project_targets. If it returns defensible_target_found=false, stop without assigning a project.',
+                preflight_failed: true,
+              }),
+              ts: Date.now(),
+            })
+            continue
+          }
           if (tool.preflight) {
             try {
               await tool.preflight(args)
@@ -785,6 +1000,27 @@ async function runLoop() {
               })
               continue
             }
+          }
+          if (shouldAutoExecuteWrite(tool.name)) {
+            try {
+              const result = await tool.handler(args)
+              useAIStore.getState().pushMessage({
+                id: uid(),
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: serializeToolPayload({ ok: true, result }),
+                ts: Date.now(),
+              })
+            } catch (err: any) {
+              useAIStore.getState().pushMessage({
+                id: uid(),
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: JSON.stringify({ error: err?.message || String(err) }),
+                ts: Date.now(),
+              })
+            }
+            continue
           }
           const p = pendingForCall({
             ...tc,
