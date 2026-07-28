@@ -109,7 +109,7 @@ export default function AISettings({ onClose }: { onClose: () => void }) {
               autoComplete="off"
             />
             <p className="mt-2 text-[11px] text-slate-500">
-              Status: <span className="font-semibold text-slate-700">{loading ? 'Checking...' : configured ? 'Configured' : 'Not configured'}</span>
+              Status: <span className="font-semibold text-slate-700">{loading ? 'Checking...' : configured ? 'Key saved — validated on first AI request' : 'Not configured'}</span>
             </p>
           </div>
 

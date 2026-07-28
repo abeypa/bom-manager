@@ -113,6 +113,16 @@ describe('OpenRouter client', () => {
       .rejects.toThrow('Provider unavailable')
   })
 
+  it('explains that OpenRouter 401 means the saved key must be replaced', async () => {
+    saveSettings({ apiKey: 'expired-key', model: DEFAULT_MODEL })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { message: 'Missing Authentication header', code: 401 },
+    }), { status: 401 })))
+
+    await expect(chatCompletion({ messages: [], tools: [] }))
+      .rejects.toThrow('invalid, expired, or revoked')
+  })
+
   it('includes safe provider diagnostics in request errors', async () => {
     saveSettings({ apiKey: 'test-key', model: DEFAULT_MODEL })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({

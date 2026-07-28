@@ -263,6 +263,11 @@ export async function chatCompletion(opts: {
   const payload = await readResponsePayload(res)
   const providerError = getOpenRouterError(payload)
   if (!res.ok || providerError) {
+    if (res.status === 401) {
+      throw new Error(
+        'The saved OpenRouter API key is invalid, expired, or revoked. Open AI Settings, enter the current key, and save it.',
+      )
+    }
     if (res.status === 404 && /no endpoints found/i.test(providerError || '')) {
       throw new Error(`OpenRouter 404: ${unavailableModelMessage(model)}`)
     }
