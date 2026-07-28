@@ -24,7 +24,7 @@ import { supabase } from '@/lib/supabase'
 import { auditPurchaseOrderPdf } from '@/lib/po-pdf-audit'
 import { getSignedUrl } from '@/api/storage'
 import { urlToPDFAttachment } from '@/lib/ai-attachments'
-import { parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
+import { parsePurchaseOrderAttachment, parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
 import { compareAttachedPOWithDatabasePO as compareAttachedPOWithDatabasePOPure } from '@/lib/po-ingestion-duplicate'
 import { backfillPurchaseOrderPdfTaxAmounts } from '@/lib/po-tax-backfill'
 import { useAIStore } from '@/store/useAIStore'
@@ -212,7 +212,7 @@ function findSourcePdfAttachmentForDraftPO(args: any) {
 
     for (const attachment of pdfAttachments) {
       try {
-        const parsed = parsePurchaseOrderText(attachment.text || '')
+        const parsed = parsePurchaseOrderAttachment(attachment)
         const parsedPoNumber = String(parsed?.po_number || '').trim().toUpperCase()
         const parsedSupplierName = String(parsed?.supplier_name || '').trim().toUpperCase()
 
@@ -408,7 +408,7 @@ async function inspectAttachedPOAgainstDatabase(args: any = {}) {
     throw new Error('Attach the source PO PDF before starting PO ingestion.')
   }
 
-  const parsed = parsePurchaseOrderText(attachment.text || '')
+  const parsed = parsePurchaseOrderAttachment(attachment)
   if (!parsed.po_number && parsed.lines.length === 0) {
     throw new Error(`Could not read a PO number or material lines from ${attachment.name}.`)
   }
@@ -509,7 +509,7 @@ async function inspectAttachedPOAgainstDatabase(args: any = {}) {
 async function recommendAttachedPOProjectTargets(args: any = {}) {
   const attachment = findSourcePdfAttachmentForDraftPO(args)
   if (!attachment) throw new Error('Attach the source PO PDF before resolving project targets.')
-  const parsed = parsePurchaseOrderText(attachment.text || '')
+  const parsed = parsePurchaseOrderAttachment(attachment)
   const itemCodes = Array.from(new Set(
     parsed.lines.map((line: any) => String(line.item_code || '').trim()).filter(Boolean),
   ))

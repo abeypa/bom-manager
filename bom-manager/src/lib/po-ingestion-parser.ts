@@ -33,6 +33,14 @@ export interface ParsedPODocument {
   new_supplier_name?: string | null
 }
 
+export interface PurchaseOrderTextAttachment {
+  name?: string | null
+  size?: number | null
+  type?: string | null
+  pageCount?: number | null
+  text?: string | null
+}
+
 const CURRENCY_SYMBOLS: Record<string, string> = {
   INR: 'INR',
   RS: 'INR',
@@ -841,4 +849,16 @@ export function parsePurchaseOrderText(args: {
     raw_text: rawText,
     lines: parsedLines,
   }
+}
+
+export function parsePurchaseOrderAttachment(
+  attachment: PurchaseOrderTextAttachment | null | undefined,
+): ParsedPODocument {
+  return parsePurchaseOrderText({
+    fileName: String(attachment?.name || 'attached-po.pdf'),
+    fileSize: Number(attachment?.size || 0),
+    mimeType: String(attachment?.type || 'application/pdf'),
+    pageCount: Number(attachment?.pageCount || 0) || undefined,
+    text: String(attachment?.text || ''),
+  })
 }
