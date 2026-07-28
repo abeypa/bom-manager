@@ -47,7 +47,8 @@ export interface AISettings {
   model: string
 }
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const CHAT_URL = '/api/openrouter/chat'
+const DIRECT_WORKER_URL = 'http://127.0.0.1:8787'
 const STORAGE_KEY = 'bom-ai:openrouter'
 
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4.5'
@@ -69,6 +70,26 @@ function getConfiguredModelId(model: unknown): string {
 
 function getConfiguredApiKey(apiKey: unknown): string {
   return typeof apiKey === 'string' ? apiKey.trim() : ''
+}
+
+function isLocalDev() {
+  return typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
+}
+
+async function getWorkerAuthHeaders() {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (!token) throw new Error('Your session has expired. Sign in again to use AI.')
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+async function workerFetch(path: string, init: RequestInit): Promise<Response> {
+  const response = await fetch(path, init)
+  if (!(isLocalDev() && response.status === 405)) return response
+  return fetch(`${DIRECT_WORKER_URL}${path}`, init)
 }
 
 function unavailableModelMessage(modelId: string) {
@@ -226,14 +247,9 @@ export async function chatCompletion(opts: {
     throw new Error('AI not configured - set the OpenRouter API key and model in AI Settings.')
   }
 
-  const res = await fetch(OPENROUTER_URL, {
+  const res = await workerFetch(CHAT_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      'HTTP-Referer': window.location.origin,
-      'X-Title': 'BOM Manager',
-    },
+    headers: await getWorkerAuthHeaders(),
     body: JSON.stringify({
       model,
       messages: opts.messages,

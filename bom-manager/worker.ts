@@ -14,6 +14,7 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1'
 const APP_TITLE = 'BOM Manager'
 const SETTINGS_TABLE = 'app_settings'
+const KEY_PLAINTEXT = 'ai_api_key'
 const KEY_CIPHERTEXT = 'ai_api_key_ciphertext'
 const KEY_IV = 'ai_api_key_iv'
 
@@ -183,17 +184,19 @@ async function loadStoredOpenRouterKey(
   env: Env,
   bearerToken: string,
 ): Promise<{ key: string | null; source: ConfigSource }> {
-  const configSecret = requireEnv(env, 'OPENROUTER_CONFIG_SECRET')
-  const query = `${SETTINGS_TABLE}?select=key,value&key=in.(${KEY_CIPHERTEXT},${KEY_IV})`
+  const query = `${SETTINGS_TABLE}?select=key,value&key=in.(${KEY_PLAINTEXT},${KEY_CIPHERTEXT},${KEY_IV})`
   const res = await supabaseFetch(env, bearerToken, query, { method: 'GET' })
   if (res.ok) {
     const rows = await res.json() as any[]
     const ciphertext = rows.find((row) => row.key === KEY_CIPHERTEXT)?.value
     const iv = rows.find((row) => row.key === KEY_IV)?.value
-    if (ciphertext && iv) {
+    const configSecret = env.OPENROUTER_CONFIG_SECRET?.trim()
+    if (configSecret && ciphertext && iv) {
       const decrypted = await decryptValue(configSecret, ciphertext, iv)
       return { key: decrypted, source: 'app_settings' }
     }
+    const plaintext = String(rows.find((row) => row.key === KEY_PLAINTEXT)?.value || '').trim()
+    if (plaintext) return { key: plaintext, source: 'app_settings' }
   }
 
   return { key: null, source: 'none' }
@@ -304,8 +307,6 @@ async function handleOpenRouterProxy(request: Request, env: Env): Promise<Respon
 
   const auth = await requireAuthenticated(request, env)
   if (!auth.ok) return auth.response
-  const storageError = requireSecureStorage(env)
-  if (storageError) return storageError
 
   const { key: apiKey } = await loadStoredOpenRouterKey(env, auth.token)
   if (!apiKey) {

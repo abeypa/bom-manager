@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const supabaseMock = vi.hoisted(() => ({
   from: vi.fn(),
+  auth: {
+    getSession: vi.fn(),
+  },
 }))
 
 vi.mock('@/lib/supabase', () => ({ supabase: supabaseMock }))
@@ -21,6 +24,10 @@ const storage = new Map<string, string>()
 beforeEach(() => {
   storage.clear()
   supabaseMock.from.mockReset()
+  supabaseMock.auth.getSession.mockReset()
+  supabaseMock.auth.getSession.mockResolvedValue({
+    data: { session: { access_token: 'session-token' } },
+  })
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => storage.get(key) ?? null,
     setItem: (key: string, value: string) => storage.set(key, value),
@@ -80,7 +87,7 @@ describe('OpenRouter client', () => {
       .rejects.toThrow('provider/model')
   })
 
-  it('trims the API key before sending the authorization header', async () => {
+  it('sends the session token to the same-origin AI proxy', async () => {
     saveSettings({ apiKey: '  test-key  ', model: DEFAULT_MODEL })
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       id: 'gen-1',
@@ -91,7 +98,8 @@ describe('OpenRouter client', () => {
 
     await chatCompletion({ messages: [], tools: [] })
 
-    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-key')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/openrouter/chat')
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer session-token')
   })
 
   it('surfaces provider errors returned with HTTP 200', async () => {

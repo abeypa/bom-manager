@@ -28,17 +28,44 @@ describe('OpenRouter Worker configuration errors', () => {
     })
   })
 
-  it('reports a missing encryption secret after authenticating without a service-role key', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ id: 'user-1' }), {
+  it('forwards the plaintext settings key without requiring an encryption secret', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/auth/v1/user')) {
+        return new Response(JSON.stringify({ id: 'user-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/rest/v1/app_settings')) {
+        return new Response(JSON.stringify([
+          { key: 'ai_api_key', value: '  sk-or-test  ' },
+        ]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer sk-or-test')
+      return new Response(JSON.stringify({
+        id: 'generation-1',
+        model: 'provider/model',
+        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'OK' } }],
+      }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
-      }),
-    ))
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     const response = await worker.fetch(
-      new Request('https://bom.test/api/openrouter/config', {
-        headers: { Authorization: 'Bearer session-token' },
+      new Request('https://bom.test/api/openrouter/chat', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: 'provider/model', messages: [], tools: [] }),
       }),
       {
         ASSETS: { fetch: () => Promise.resolve(new Response('asset')) },
@@ -47,9 +74,7 @@ describe('OpenRouter Worker configuration errors', () => {
       } as any,
     )
 
-    expect(response.status).toBe(503)
-    await expect(response.json()).resolves.toEqual({
-      error: 'AI Settings storage is missing Cloudflare secrets: OPENROUTER_CONFIG_SECRET',
-    })
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ id: 'generation-1' })
   })
 })
