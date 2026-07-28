@@ -48,7 +48,6 @@ export interface AISettings {
 }
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1'
 const STORAGE_KEY = 'bom-ai:openrouter'
 
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4.5'
@@ -66,6 +65,10 @@ export const RECOMMENDED_MODELS = [
 function getConfiguredModelId(model: unknown): string {
   const modelId = typeof model === 'string' ? model.trim() : ''
   return modelId || DEFAULT_MODEL
+}
+
+function getConfiguredApiKey(apiKey: unknown): string {
+  return typeof apiKey === 'string' ? apiKey.trim() : ''
 }
 
 function unavailableModelMessage(modelId: string) {
@@ -91,7 +94,7 @@ export function loadSettings(): AISettings {
     if (!raw) return { apiKey: '', model: DEFAULT_MODEL }
     const parsed = JSON.parse(raw)
     return {
-      apiKey: parsed.apiKey || '',
+      apiKey: getConfiguredApiKey(parsed.apiKey),
       model: getConfiguredModelId(parsed.model),
     }
   } catch {
@@ -101,7 +104,7 @@ export function loadSettings(): AISettings {
 
 export function saveSettings(settings: AISettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    apiKey: settings.apiKey || '',
+    apiKey: getConfiguredApiKey(settings.apiKey),
     model: getConfiguredModelId(settings.model),
   }))
 }
@@ -121,7 +124,7 @@ export async function loadSettingsFromDB(): Promise<AISettings | null> {
     if (error) return null
 
     const rows = Array.isArray(data) ? data : []
-    const apiKey = rows.find((row: any) => row.key === 'ai_api_key')?.value || ''
+    const apiKey = getConfiguredApiKey(rows.find((row: any) => row.key === 'ai_api_key')?.value)
     const model = getConfiguredModelId(rows.find((row: any) => row.key === 'ai_model')?.value)
 
     if (!apiKey && !model) return null
@@ -132,12 +135,13 @@ export async function loadSettingsFromDB(): Promise<AISettings | null> {
 }
 
 export async function saveSettingsToDB(settings: AISettings): Promise<void> {
+  const apiKey = getConfiguredApiKey(settings.apiKey)
   const payload = [
     { key: 'ai_model', value: getConfiguredModelId(settings.model), updated_at: new Date().toISOString() },
   ]
 
-  if (settings.apiKey) {
-    payload.push({ key: 'ai_api_key', value: settings.apiKey, updated_at: new Date().toISOString() })
+  if (apiKey) {
+    payload.push({ key: 'ai_api_key', value: apiKey, updated_at: new Date().toISOString() })
   }
 
   const { error } = await (supabase as any).from('app_settings').upsert(payload)
@@ -195,27 +199,8 @@ export async function validateOpenRouterModel(apiKey: string, model: string): Pr
   if (separatorIndex <= 0 || separatorIndex === modelId.length - 1) {
     throw new Error('Model id must use the provider/model format.')
   }
-
-  const author = encodeURIComponent(modelId.slice(0, separatorIndex))
-  const slug = encodeURIComponent(modelId.slice(separatorIndex + 1))
-  const response = await fetch(`${OPENROUTER_API_BASE}/models/${author}/${slug}/endpoints`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'HTTP-Referer': window.location.origin,
-      'X-Title': 'BOM Manager',
-    },
-  })
-  const payload = await readResponsePayload(response)
-  const endpoints = payload?.data?.endpoints
-
-  if (response.status === 404 || (response.ok && Array.isArray(endpoints) && endpoints.length === 0)) {
-    throw new Error(unavailableModelMessage(modelId))
-  }
-  if (!response.ok) {
-    throw new Error(`OpenRouter could not validate model "${modelId}": ${getOpenRouterError(payload) || `HTTP ${response.status}`}`)
-  }
-  if (!Array.isArray(endpoints)) {
-    throw new Error(`OpenRouter returned an invalid endpoint response for model "${modelId}".`)
+  if (!getConfiguredApiKey(apiKey)) {
+    throw new Error('OpenRouter API key is required.')
   }
 }
 
@@ -236,6 +221,7 @@ export async function chatCompletion(opts: {
     }
   }
 
+  apiKey = getConfiguredApiKey(apiKey)
   if (!apiKey || !model) {
     throw new Error('AI not configured - set the OpenRouter API key and model in AI Settings.')
   }

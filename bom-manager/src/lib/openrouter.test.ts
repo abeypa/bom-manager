@@ -65,28 +65,33 @@ describe('OpenRouter client', () => {
     expect(JSON.parse(String(request.body)).model).toBe(model)
   })
 
-  it('validates the exact configured model endpoint before saving', async () => {
+  it('accepts any provider/model id without making a discovery request', async () => {
     const model = 'inclusionai/ling-3.0-flash:free'
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      data: { id: model, endpoints: [{ name: 'ExampleProvider' }] },
-    }), { status: 200 }))
+    const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
     await validateOpenRouterModel('test-key', model)
 
-    expect(fetchMock.mock.calls[0][0]).toContain('inclusionai/ling-3.0-flash%3Afree/endpoints')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('explains the valid Ling variant without changing the selected model', async () => {
-    const model = 'inclusionai/ling-3.0-flash'
-    saveSettings({ apiKey: 'test-key', model })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      data: { id: model, endpoints: [] },
-    }), { status: 200 })))
+  it('rejects malformed model ids locally', async () => {
+    await expect(validateOpenRouterModel('test-key', 'model-without-provider'))
+      .rejects.toThrow('provider/model')
+  })
 
-    await expect(validateOpenRouterModel('test-key', model))
-      .rejects.toThrow('inclusionai/ling-3.0-flash:free')
-    expect(loadSettings().model).toBe(model)
+  it('trims the API key before sending the authorization header', async () => {
+    saveSettings({ apiKey: '  test-key  ', model: DEFAULT_MODEL })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'gen-1',
+      model: DEFAULT_MODEL,
+      choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'OK' } }],
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await chatCompletion({ messages: [], tools: [] })
+
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-key')
   })
 
   it('surfaces provider errors returned with HTTP 200', async () => {
