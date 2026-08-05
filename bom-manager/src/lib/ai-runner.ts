@@ -21,6 +21,8 @@ import {
 } from '@/lib/ai-tools'
 import { useAIStore, ChatMessage, PendingAction } from '@/store/useAIStore'
 import type { Attachment } from '@/lib/ai-attachments'
+import { getConfirmedProjectIds } from '@/lib/ai-confirmations'
+import { supabase } from '@/lib/supabase'
 
 const SYSTEM_PROMPT = `You are the BOM Manager AI assistant for Bharath Engineering Pvt Ltd.
 
@@ -110,16 +112,18 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
       field/line mismatches, then STOP. Never draft another PO.
     - If the existing data matches, say so and STOP.
 
-    AUTOMATIC CLASSIFICATION AND PROJECT ROUTING:
+    AUTOMATIC CLASSIFICATION AND USER-CONFIRMED PROJECT ROUTING:
     - Infer EBO, EMF, MBO, MMF, or PBO from item description,
       manufacturer data, and similar master records. Do not ask for a
       part-table confirmation.
-    - Resolve projects from explicit document references, project
+    - Recommend projects from explicit document references, project
       numbers/names, existing BOM mappings, and project structure.
+    - Show the recommendation and ask the user to select the target
+      project(s). Never write to a project before this selection.
     - If lines belong to different projects, map each line exactly once
       to its best-supported project and create one multi-project Draft PO.
-    - If no project has defensible evidence, stop with a concise blocking
-      report instead of assigning a random project.
+    - If no project has defensible evidence, list the available projects
+      and ask the user to select instead of assigning a random project.
     - When asked to clean or delete parts from a Project Tree, never
       delete a Part Master record. Resolve the project, ask the user to
       confirm it, inspect get_project_details, and treat only rows with
@@ -338,13 +342,12 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
    line in the PDF, then emit all the create/update tool_calls in one
    batch and continue from the tool results.
 
-D. AFTER ALL PARTS EXIST — AUTOMATIC PROJECT RESOLUTION
+D. AFTER ALL PARTS EXIST — PROJECT RECOMMENDATION AND SELECTION
    Call recommend_attached_po_project_targets, then list_projects and
-   resolve the target from document references, project names/numbers,
-   existing BOM mappings, and project structure.
-   Do not ask the user to confirm. When multiple projects are supported,
-   split the lines across them. If no target has defensible evidence,
-   stop and report the missing evidence rather than guessing.
+   present the evidence-based candidate(s). Ask the user to select one
+   or more target projects and WAIT. A recommendation is never permission
+   to write. After the user selects, continue automatically. If evidence
+   is weak, still list projects and ask instead of guessing.
 
 E. MAP TO PROJECT STRUCTURE — SMART AUTO-MAPPING, NEVER DUPLICATE
    ABSOLUTE RULES while mapping parts to one or more projects:
@@ -670,7 +673,7 @@ function activePOIngestionStartIndex(messages: ChatMessage[]) {
       const latestLaterUser = laterUserMessages.at(-1)
       if (
         latestLaterUser &&
-        !/\b(?:continue|resume|retry|go ahead)\b/i.test(latestLaterUser.content || '')
+        !/\b(?:continue|resume|retry|go ahead)\b|\b(?:use|select(?:ed)?|choose)\b.{0,40}\bprojects?\b|\bprojects?\b.{0,40}\bid\b/i.test(latestLaterUser.content || '')
       ) {
         return -1
       }
@@ -755,7 +758,7 @@ function poInspectionFoundExistingPO(messages = useAIStore.getState().messages) 
   return false
 }
 
-function hasDefensiblePOProjectRecommendation(messages = useAIStore.getState().messages) {
+function hasCompletedPOProjectRecommendation(messages = useAIStore.getState().messages) {
   const startIndex = activePOIngestionStartIndex(messages)
   if (startIndex < 0) return true
 
@@ -779,12 +782,82 @@ function hasDefensiblePOProjectRecommendation(messages = useAIStore.getState().m
     }
     try {
       const payload = JSON.parse(message.content || '{}')
-      if (payload?.ok && payload?.result?.defensible_target_found === true) return true
+      if (payload?.ok && payload?.result) return true
     } catch {
       // Invalid results do not unlock project writes.
     }
   }
   return false
+}
+
+export async function assertPOProjectWriteTargetsConfirmed(toolName: string, args: any) {
+  const confirmed = getConfirmedProjectIds(useAIStore.getState().messages)
+  if (confirmed.size === 0) {
+    throw new Error(
+      'Project selection is required before project mapping. Present the project recommendation, ask the user to select the target project, and wait.',
+    )
+  }
+
+  const targetProjectIds = new Set<number>()
+  if (toolName === 'create_project_section' || toolName === 'create_project_subsection') {
+    if (Number.isInteger(Number(args.project_id))) targetProjectIds.add(Number(args.project_id))
+  } else if (toolName === 'add_part_to_project' || toolName === 'move_part_to_subsection') {
+    const subsectionId = Number(
+      toolName === 'add_part_to_project' ? args.project_subsection_id : args.target_subsection_id,
+    )
+    const { data } = await (supabase as any)
+      .from('project_subsections')
+      .select('project_id')
+      .eq('id', subsectionId)
+      .maybeSingle()
+    if (data?.project_id) targetProjectIds.add(Number(data.project_id))
+  } else if (toolName === 'update_part_quantity') {
+    const { data: part } = await (supabase as any)
+      .from('project_parts')
+      .select('project_section_id')
+      .eq('id', Number(args.project_part_id))
+      .maybeSingle()
+    if (part?.project_section_id) {
+      const { data: subsection } = await (supabase as any)
+        .from('project_subsections')
+        .select('project_id')
+        .eq('id', Number(part.project_section_id))
+        .maybeSingle()
+      if (subsection?.project_id) targetProjectIds.add(Number(subsection.project_id))
+    }
+  } else if (toolName === 'create_draft_po') {
+    if (Number.isInteger(Number(args.project_id))) targetProjectIds.add(Number(args.project_id))
+    const projectPartIds = Array.from(new Set(
+      (args.items || []).map((item: any) => Number(item.project_part_id)).filter(Number.isInteger),
+    ))
+    if (projectPartIds.length) {
+      const { data: parts } = await (supabase as any)
+        .from('project_parts')
+        .select('project_section_id')
+        .in('id', projectPartIds)
+      const subsectionIds = Array.from(new Set(
+        (parts || []).map((part: any) => Number(part.project_section_id)).filter(Number.isInteger),
+      ))
+      if (subsectionIds.length) {
+        const { data: subsections } = await (supabase as any)
+          .from('project_subsections')
+          .select('project_id')
+          .in('id', subsectionIds)
+        for (const subsection of subsections || []) {
+          if (subsection.project_id) targetProjectIds.add(Number(subsection.project_id))
+        }
+      }
+    }
+  }
+
+  const unconfirmed = Array.from(targetProjectIds).filter((projectId) => !confirmed.has(projectId))
+  if (targetProjectIds.size === 0 || unconfirmed.length > 0) {
+    throw new Error(
+      `Project write blocked. Confirmed project id(s): ${Array.from(confirmed).join(', ')}; ` +
+      `requested project id(s): ${Array.from(targetProjectIds).join(', ') || 'unresolved'}. ` +
+      'Use only the project(s) selected by the user.',
+    )
+  }
 }
 
 export function shouldAutoExecuteWrite(toolName: string) {
@@ -967,7 +1040,7 @@ async function runLoop() {
           if (
             isActivePOIngestion() &&
             PO_PROJECT_WRITE_NAMES.has(tool.name) &&
-            !hasDefensiblePOProjectRecommendation()
+            !hasCompletedPOProjectRecommendation()
           ) {
             useAIStore.getState().pushMessage({
               id: uid(),
@@ -975,13 +1048,30 @@ async function runLoop() {
               tool_call_id: tc.id,
               content: JSON.stringify({
                 error:
-                  'Automatic project mapping is blocked because no defensible target recommendation has been completed. ' +
-                  'Call recommend_attached_po_project_targets. If it returns defensible_target_found=false, stop without assigning a project.',
+                  'Project recommendation is required before project selection and mapping. ' +
+                  'Call recommend_attached_po_project_targets, present the candidates, and ask the user to select the target project.',
                 preflight_failed: true,
               }),
               ts: Date.now(),
             })
             continue
+          }
+          if (isActivePOIngestion() && PO_PROJECT_WRITE_NAMES.has(tool.name)) {
+            try {
+              await assertPOProjectWriteTargetsConfirmed(tool.name, args)
+            } catch (err: any) {
+              useAIStore.getState().pushMessage({
+                id: uid(),
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: JSON.stringify({
+                  error: err?.message || String(err),
+                  preflight_failed: true,
+                }),
+                ts: Date.now(),
+              })
+              continue
+            }
           }
           if (tool.preflight) {
             try {

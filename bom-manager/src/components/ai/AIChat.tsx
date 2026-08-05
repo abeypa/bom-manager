@@ -29,7 +29,7 @@ const SMART_COMMANDS = [
     label: 'PO Ingest',
     icon: ClipboardList,
     prompt:
-      'PO ingest automatically: First inspect every attached PO for an existing exact PO number and for the same PO saved under different PO numbers or across multiple projects. If found, compare all header and line data and report matches or mismatches without creating a duplicate. If new, automatically resolve the supplier, classify missing parts into the correct Part Master tables, update PO-dated prices, resolve each target project from database evidence, map every part once, and continue without confirmation through Draft PO creation. Pause only for a real validation blocker or a deletion.',
+      'PO ingest: First inspect every attached PO for an existing exact PO number and for the same PO saved under different PO numbers or across multiple projects. If found, compare all header and line data and report matches or mismatches without creating a duplicate. If new, automatically resolve the supplier, classify missing parts, and update PO-dated prices. Then recommend project candidates and ask me to select the target project before any project mapping. After my selection, map every part once and continue automatically through Draft PO creation.',
   },
   {
     label: 'Select Project',
@@ -453,7 +453,7 @@ function SmartCommandPanel({
         <p>1. Attach one or more PO PDFs.</p>
         <p>2. Click PO Ingest.</p>
         <p>3. I first check for the same PO under any PO number or project and audit existing data.</p>
-        <p>4. New POs continue automatically through part classification, project mapping, and draft creation.</p>
+        <p>4. New POs classify parts automatically, then wait for your project selection before mapping and Draft creation.</p>
         <p>5. Use AI PO Audit to select a project and check stored POs against attached PDFs.</p>
       </div>
     </div>

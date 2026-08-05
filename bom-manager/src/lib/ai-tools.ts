@@ -26,6 +26,7 @@ import { getSignedUrl } from '@/api/storage'
 import { urlToPDFAttachment } from '@/lib/ai-attachments'
 import { parsePurchaseOrderAttachment, parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
 import { compareAttachedPOWithDatabasePO as compareAttachedPOWithDatabasePOPure } from '@/lib/po-ingestion-duplicate'
+import { hasDefensiblePOProjectEvidence } from '@/lib/po-ingestion-project-routing'
 import { backfillPurchaseOrderPdfTaxAmounts } from '@/lib/po-tax-backfill'
 import { useAIStore } from '@/store/useAIStore'
 import {
@@ -648,18 +649,7 @@ async function recommendAttachedPOProjectTargets(args: any = {}) {
       matched_line_codes: Array.from(entry.matched_line_codes),
     }))
   const top = rankedProjects[0]
-  const runnerUp = rankedProjects[1]
-  const unambiguousLineEvidence = lineRecommendations.length > 0 &&
-    lineRecommendations.every((line: any) => {
-      const candidateProjectIds = new Set(line.candidates.map((candidate: any) => candidate.project_id))
-      return candidateProjectIds.size === 1
-    })
-  const defensible = Boolean(top && (
-    top.score >= 80 ||
-    (!runnerUp && top.score >= 10) ||
-    top.score >= (runnerUp?.score || 0) + 20 ||
-    unambiguousLineEvidence
-  ))
+  const defensible = Boolean(top && hasDefensiblePOProjectEvidence(rankedProjects, lineRecommendations))
 
   return {
     source_file: attachment.name,
@@ -670,8 +660,8 @@ async function recommendAttachedPOProjectTargets(args: any = {}) {
     ranked_projects: rankedProjects.slice(0, 10),
     line_recommendations: lineRecommendations,
     guidance: defensible
-      ? 'Use the recommended project for unmatched lines; preserve stronger per-line existing BOM evidence when it points elsewhere.'
-      : 'Do not guess a project. Stop ingestion and report that no project has sufficient document/BOM evidence.',
+      ? 'Present these evidence-based recommendations, ask the user to select the target project(s), and wait before any project write.'
+      : 'Project evidence is insufficient. Ask the user to select the target project(s), and wait before any project write.',
   }
 }
 

@@ -20,6 +20,9 @@ const state = vi.hoisted(() => ({
 vi.mock('@/lib/openrouter', () => ({
   chatCompletion: vi.fn(),
 }))
+vi.mock('@/lib/supabase', () => ({
+  supabase: { from: vi.fn() },
+}))
 vi.mock('@/lib/ai-tools', () => ({
   TOOL_REGISTRY: [{ name: 'write_test', kind: 'write', description: '', parameters: {}, handler }],
   findTool: (name: string) => name === 'write_test'
@@ -34,6 +37,7 @@ vi.mock('@/store/useAIStore', () => ({
 
 import {
   approvePending,
+  assertPOProjectWriteTargetsConfirmed,
   isActivePOIngestion,
   parseToolArguments,
   serializeToolPayload,
@@ -132,5 +136,47 @@ describe('AI runner safety helpers', () => {
 
     expect(isActivePOIngestion()).toBe(false)
     expect(shouldAutoExecuteWrite('create_supplier')).toBe(false)
+  })
+
+  it('keeps PO ingestion active after the user selects a project', () => {
+    state.messages = [
+      {
+        role: 'user',
+        content: 'PO ingest',
+        attachments: [{
+          kind: 'pdf',
+          name: 'po.pdf',
+          size: 100,
+          text: 'PO',
+          pageCount: 1,
+          truncated: false,
+        }],
+      },
+      { role: 'assistant', content: 'Which project should I use?' },
+      { role: 'user', content: 'Use project: Tata Sanand SVS Upgrade (70022), id 13' },
+    ]
+
+    expect(isActivePOIngestion()).toBe(true)
+    expect(shouldAutoExecuteWrite('add_part_to_project')).toBe(true)
+  })
+
+  it('blocks project writes to a project the user did not select', async () => {
+    state.messages = [
+      { role: 'assistant', content: 'Which project should I use?' },
+      { role: 'user', content: 'Use project: Tata Sanand SVS Upgrade, id 13' },
+    ]
+
+    await expect(assertPOProjectWriteTargetsConfirmed('create_project_section', { project_id: 9 }))
+      .rejects.toThrow('Confirmed project id(s): 13; requested project id(s): 9')
+  })
+
+  it('allows project writes to the project selected by the user', async () => {
+    state.messages = [
+      { role: 'assistant', content: 'Which project should I use?' },
+      { role: 'user', content: 'Use project: Tata Sanand SVS Upgrade, id 13' },
+    ]
+
+    await expect(assertPOProjectWriteTargetsConfirmed('create_project_section', { project_id: 13 }))
+      .resolves.toBeUndefined()
   })
 })
