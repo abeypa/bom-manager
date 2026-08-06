@@ -1,0 +1,45 @@
+{
+  "name": "bep-vault",
+  "productName": "BEP Vault",
+  "version": "1.0.0",
+  "description": "Backup, restore and project archive for BEP BOM Manager",
+  "main": "main.js",
+  "author": "BEP India",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1030.0",
+    "adm-zip": "^0.5.16",
+    "dotenv": "^17.4.1",
+    "pg": "^8.20.0"
+  },
+  "build": {
+    "appId": "com.bepindia.vault",
+    "productName": "BEP Vault",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "engine/**/*",
+      "renderer/**/*",
+      "build/icon.ico"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "BEP-Vault.exe"
+    }
+  }
+}

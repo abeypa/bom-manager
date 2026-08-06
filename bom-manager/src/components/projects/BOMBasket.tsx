@@ -253,7 +253,7 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
 
           {!projectId && (
             <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs font-medium text-amber-100">
-              Open a project first to set the target for this BOM basket. Then come back here and drag parts in from Part Master.
+              Open a project first to set the target for this BOM basket. Then come back here and drag parts in from Part Master or drag sections, subsections, and parts from the project tree.
             </div>
           )}
 
@@ -366,7 +366,7 @@ const BOMBasket = ({ projectId, projectCurrency = 'INR' }: BOMBasketProps) => {
                 Draft basket is empty
               </div>
               <p className="mt-2 text-sm text-slate-500">
-                Drag a part from the project tree or add parts from Part Master.
+                Drag a section, subsection, or part from the project tree, or add parts from Part Master.
               </p>
             </div>
           ) : (

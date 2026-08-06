@@ -42,3 +42,9 @@ IIS.docx
 
 # AG-K Internal (Optional - can be included)
 # .agent/
+
+# Generated desktop build outputs / backups
+bep-vault/dist-final/
+Supabase backup/archives/
+Supabase backup/.env.backup-before-pooler-fix
+Supabase backup/archives/.tmp/

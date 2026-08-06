@@ -799,7 +799,104 @@ function codeMatches(left: any, right: any) {
 }
 
 function normalizeSupplierText(value: string) {
-  return value.toLowerCase().replace(/\s+/g, ' ').replace(/[.,]/g, '').trim()
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[®™©]/g, '')
+    .replace(/[()]/g, ' ')
+    .replace(/[.,]/g, ' ')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+async function resolveSupplierForPoPdfCorrection(
+  currentSupplierId: number | null | undefined,
+  currentSupplierName: string,
+  pdfSupplierName: string,
+) {
+  const pdfSupplierRaw = String(pdfSupplierName || '').trim()
+  const pdfSupplierNorm = normalizeSupplierText(pdfSupplierRaw)
+  const currentSupplierRaw = String(currentSupplierName || '').trim()
+
+  if (!pdfSupplierNorm) {
+    return {
+      supplier_id: currentSupplierId ?? null,
+      supplier_name: currentSupplierRaw || null,
+      supplier_changed: false,
+      match_strategy: 'pdf_supplier_missing',
+    }
+  }
+
+  const { data: suppliers, error } = await (supabase as any)
+    .from('suppliers')
+    .select('id, name')
+    .not('name', 'is', null)
+
+  if (error) throw error
+
+  const exactPdfRaw = pdfSupplierRaw.toLowerCase()
+  const ranked = (suppliers || [])
+    .map((supplier: any) => {
+      const supplierRaw = String(supplier.name || '').trim()
+      const supplierNorm = normalizeSupplierText(supplierRaw)
+      const isCurrent = currentSupplierId != null && supplier.id === currentSupplierId
+      let score = 0
+
+      if (supplierRaw.toLowerCase() === exactPdfRaw) score = 400
+      else if (supplierNorm && supplierNorm === pdfSupplierNorm) score = 300
+      else if (
+        supplierNorm &&
+        pdfSupplierNorm &&
+        (supplierNorm.includes(pdfSupplierNorm) || pdfSupplierNorm.includes(supplierNorm))
+      ) {
+        score = 200
+      }
+
+      return {
+        id: supplier.id,
+        name: supplierRaw,
+        isCurrent,
+        score,
+      }
+    })
+    .filter((supplier: any) => supplier.score > 0)
+    .sort((left: any, right: any) =>
+      right.score - left.score ||
+      Number(right.isCurrent) - Number(left.isCurrent) ||
+      left.name.length - right.name.length ||
+      left.id - right.id,
+    )
+
+  const best = ranked[0]
+  const second = ranked[1]
+
+  if (!best) {
+    throw new Error(
+      `Supplier mismatch: DB supplier is "${currentSupplierName || 'Unassigned'}", PDF supplier is "${pdfSupplierName}". ` +
+      `No supplier row could be auto-matched to the PDF supplier.`,
+    )
+  }
+
+  if (second && second.score === best.score && !best.isCurrent && !second.isCurrent) {
+    throw new Error(
+      `Supplier mismatch: PDF supplier "${pdfSupplierName}" matches multiple supplier rows equally (` +
+      ranked
+        .slice(0, 3)
+        .map((supplier: any) => `#${supplier.id} "${supplier.name}"`)
+        .join(', ') +
+      '). Resolve the supplier master rows first.',
+    )
+  }
+
+  return {
+    supplier_id: best.id,
+    supplier_name: best.name,
+    supplier_changed: best.id !== (currentSupplierId ?? null),
+    match_strategy:
+      best.score === 400 ? 'exact_name' : best.score === 300 ? 'normalized_name' : 'partial_name',
+  }
 }
 
 async function resolveStoredFileUrl(stored: string) {
@@ -1037,11 +1134,11 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
     )
   }
 
-  const dbSupplier = normalizeSupplierText(po.suppliers?.name || '')
-  const pdfSupplier = normalizeSupplierText(parsed.supplier_name || '')
-  if (dbSupplier && pdfSupplier && !dbSupplier.includes(pdfSupplier) && !pdfSupplier.includes(dbSupplier)) {
-    throw new Error(`Supplier mismatch: DB supplier is "${po.suppliers?.name}", PDF supplier is "${parsed.supplier_name}".`)
-  }
+  const supplierResolution = await resolveSupplierForPoPdfCorrection(
+    po.supplier_id,
+    po.suppliers?.name || '',
+    parsed.supplier_name || '',
+  )
 
   const { data: subsections, error: subError } = await (supabase as any)
     .from('project_subsections')
@@ -1164,7 +1261,17 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
   if (unresolved.length && !skipUnresolvedLines) {
     return {
       ok_to_apply: false,
-      po: { id: po.id, po_number: po.po_number, status: po.status, supplier: po.suppliers?.name, project: po.project },
+      po: {
+        id: po.id,
+        po_number: po.po_number,
+        status: po.status,
+        supplier_id: po.supplier_id || null,
+        supplier: po.suppliers?.name,
+        resolved_supplier_id: supplierResolution.supplier_id,
+        resolved_supplier: supplierResolution.supplier_name,
+        supplier_changed: supplierResolution.supplier_changed,
+        project: po.project,
+      },
       parsed_pdf: { po_number: parsed.po_number, supplier_name: parsed.supplier_name, line_count: parsed.lines.length },
       unresolved,
       message: 'Correction blocked until every PDF line is mapped to an existing project BOM part.',
@@ -1176,7 +1283,17 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
   if (receivedExtraItems.length && !allowDeleteReceivedLines) {
     return {
       ok_to_apply: false,
-      po: { id: po.id, po_number: po.po_number, status: po.status, supplier: po.suppliers?.name, project: po.project },
+      po: {
+        id: po.id,
+        po_number: po.po_number,
+        status: po.status,
+        supplier_id: po.supplier_id || null,
+        supplier: po.suppliers?.name,
+        resolved_supplier_id: supplierResolution.supplier_id,
+        resolved_supplier: supplierResolution.supplier_name,
+        supplier_changed: supplierResolution.supplier_changed,
+        project: po.project,
+      },
       parsed_pdf: { po_number: parsed.po_number, supplier_name: parsed.supplier_name, line_count: parsed.lines.length },
       extra_items: extraItems.map((item: any) => ({
         id: item.id,
@@ -1205,7 +1322,11 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
         id: po.id,
         po_number: po.po_number,
         status: po.status,
+        supplier_id: po.supplier_id || null,
         supplier: po.suppliers?.name,
+        resolved_supplier_id: supplierResolution.supplier_id,
+        resolved_supplier: supplierResolution.supplier_name,
+        supplier_changed: supplierResolution.supplier_changed,
         project: po.project,
         old_total: dbComparableTotal,
         new_total: newGrand,
@@ -1232,7 +1353,12 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
       id: po.id,
       po_number: po.po_number,
       status: po.status,
+      supplier_id: po.supplier_id || null,
       supplier: po.suppliers?.name,
+      resolved_supplier_id: supplierResolution.supplier_id,
+      resolved_supplier: supplierResolution.supplier_name,
+      supplier_changed: supplierResolution.supplier_changed,
+      supplier_match_strategy: supplierResolution.match_strategy,
       project: po.project,
       old_total: dbComparableTotal,
       new_total: newGrand,
@@ -1247,6 +1373,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
       currency: parsed.currency || 'INR',
     },
     changes: {
+      update_supplier: supplierResolution.supplier_changed ? 1 : 0,
       update_lines: updates,
       insert_lines: inserts,
       delete_lines: extraItems.length,
@@ -1262,7 +1389,11 @@ function summarizePoCorrectionPlan(plan: any) {
     po_id: plan.po?.id,
     po_number: plan.po?.po_number,
     status: plan.po?.status,
+    supplier_id: plan.po?.supplier_id,
     supplier: plan.po?.supplier,
+    resolved_supplier_id: plan.po?.resolved_supplier_id,
+    resolved_supplier: plan.po?.resolved_supplier,
+    supplier_changed: Boolean(plan.po?.supplier_changed),
     pdf_po_number: plan.parsed_pdf?.po_number,
     old_line_count: plan.po?.old_line_count,
     new_line_count: plan.po?.new_line_count ?? plan.parsed_pdf?.line_count,
@@ -1424,6 +1555,9 @@ async function applyExistingPoPdfCorrection(a: any) {
   const headerPatch: any = {
     updated_date: new Date().toISOString(),
   }
+  if (plan.po?.resolved_supplier_id && plan.po.resolved_supplier_id !== plan.po.supplier_id) {
+    headerPatch.supplier_id = plan.po.resolved_supplier_id
+  }
   if (a.correct_po_number !== false && plan.parsed_pdf?.po_number && /^PO\/.+\/\d+/i.test(plan.parsed_pdf.po_number)) {
     headerPatch.po_number = plan.parsed_pdf.po_number
   }
@@ -1445,6 +1579,8 @@ async function applyExistingPoPdfCorrection(a: any) {
     po_number: headerPatch.po_number || plan.po.po_number,
     status_unchanged: plan.po.status,
     line_count: plan.desired_items?.length ?? 0,
+    supplier_id: headerPatch.supplier_id || plan.po.supplier_id || null,
+    supplier_name: plan.po?.resolved_supplier || plan.po?.supplier || null,
     changes: plan.changes,
     totals,
   }
@@ -4033,76 +4169,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     summarize: (a) =>
       `Correct existing PO #${a.po_id} from its attached PDF${a.allow_delete_received_lines ? ' (including received extra lines)' : ''}`,
     handler: async (a: any) => {
-      assertInteger('po_id', a.po_id)
-      const plan = await buildExistingPoPdfCorrectionPlan(a.po_id, Boolean(a.allow_delete_received_lines))
-      if (!plan.ok_to_apply) {
-        throw new Error(plan.message || 'PO PDF correction is not safe to apply yet.')
-      }
-
-      for (const item of plan.desired_items || []) {
-        const row = {
-          purchase_order_id: a.po_id,
-          part_type: item.part_type,
-          part_id: item.part_id,
-          part_number: item.part_number,
-          description: item.description,
-          quantity: item.quantity,
-          received_qty: item.received_qty || 0,
-          unit_price: item.unit_price,
-          discount_percent: item.discount_percent || 0,
-          total_amount: item.total_amount,
-          project_part_id: item.project_part_id,
-        }
-
-        if (item.old_item_id) {
-          const { error } = await (supabase as any)
-            .from('purchase_order_items')
-            .update(row)
-            .eq('id', item.old_item_id)
-          if (error) throw error
-        } else {
-          const { error } = await (supabase as any)
-            .from('purchase_order_items')
-            .insert(row)
-          if (error) throw error
-        }
-      }
-
-      if ((plan.delete_item_ids || []).length) {
-        const { error } = await (supabase as any)
-          .from('purchase_order_items')
-          .delete()
-          .in('id', plan.delete_item_ids)
-        if (error) throw error
-      }
-
-      const headerPatch: any = {
-        updated_date: new Date().toISOString(),
-      }
-      if (a.correct_po_number !== false && plan.parsed_pdf?.po_number && /^PO\/.+\/\d+/i.test(plan.parsed_pdf.po_number)) {
-        headerPatch.po_number = plan.parsed_pdf.po_number
-      }
-      if (a.correct_po_date !== false && plan.parsed_pdf?.po_date) {
-        headerPatch.po_date = plan.parsed_pdf.po_date
-      }
-      if (Object.keys(headerPatch).length > 1) {
-        const { error } = await (supabase as any)
-          .from('purchase_orders')
-          .update(headerPatch)
-          .eq('id', a.po_id)
-        if (error) throw error
-      }
-
-      const totals = await purchaseOrdersApi.recalcPOTotals(a.po_id)
-      return {
-        corrected: true,
-        po_id: a.po_id,
-        po_number: headerPatch.po_number || plan.po.po_number,
-        status_unchanged: plan.po.status,
-        line_count: plan.desired_items?.length ?? 0,
-        changes: plan.changes,
-        totals,
-      }
+      return applyExistingPoPdfCorrection(a)
     },
   },
   {

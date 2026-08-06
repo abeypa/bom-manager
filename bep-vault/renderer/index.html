@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>BEP Vault</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">BV</div>
+        <div>
+          <div class="brand-name">BEP Vault</div>
+          <div class="brand-sub">Backup &amp; Archive</div>
+        </div>
+      </div>
+      <nav>
+        <button class="nav-item active" data-screen="dashboard">🏠 Dashboard</button>
+        <button class="nav-item" data-screen="backups">💾 Backups</button>
+        <button class="nav-item" data-screen="archive">📦 Project Archive</button>
+        <button class="nav-item" data-screen="settings">⚙️ Settings</button>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="link-btn" id="show-log-btn">Activity log</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- DASHBOARD -->
+      <section class="screen active" id="screen-dashboard">
+        <h1>Dashboard</h1>
+        <div id="setup-banner" class="banner banner-warn hidden">
+          BEP Vault is not connected yet. <button class="btn btn-sm" id="goto-settings-btn">Open Settings</button>
+        </div>
+        <div id="health-banner" class="banner hidden"></div>
+        <div class="cards" id="dashboard-cards"></div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Quick actions</h2>
+          </div>
+          <div class="actions-row">
+            <button class="btn btn-primary" id="dash-backup-btn">▶ Run Full Backup Now</button>
+            <button class="btn" id="dash-incremental-btn">Run Incremental Backup</button>
+            <button class="btn" id="dash-open-folder-btn">Open Backup Folder</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Live database</h2>
+            <button class="btn btn-sm" id="refresh-tables-btn">Refresh</button>
+          </div>
+          <div id="table-counts" class="table-counts muted">Click Refresh to load row counts.</div>
+        </div>
+      </section>
+
+      <!-- BACKUPS -->
+      <section class="screen" id="screen-backups">
+        <h1>Backups</h1>
+        <div class="actions-row">
+          <button class="btn btn-primary" id="run-full-btn">▶ Full Backup Now</button>
+          <button class="btn" id="run-incremental-btn">Incremental Backup Now</button>
+          <button class="btn" id="open-backups-btn">Open Backup Folder</button>
+        </div>
+        <div class="panel">
+          <table class="table">
+            <thead>
+              <tr><th>Date</th><th>Type</th><th>Size</th><th>Files included</th><th></th></tr>
+            </thead>
+            <tbody id="backups-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ARCHIVE -->
+      <section class="screen" id="screen-archive">
+        <h1>Project Archive</h1>
+        <p class="muted">Move a finished project (its BOM structure, purchase orders and tracking history) out of the live database into a single archive file. Master parts are never touched. Restore any time.</p>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Live projects</h2>
+            <button class="btn btn-sm" id="refresh-projects-btn">Refresh</button>
+          </div>
+          <table class="table">
+            <thead><tr><th>Number</th><th>Project</th><th>Customer</th><th>Status</th><th>POs</th><th></th></tr></thead>
+            <tbody id="projects-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Archived projects</h2>
+            <div>
+              <button class="btn btn-sm" id="import-archive-btn">Import archive file…</button>
+              <button class="btn btn-sm" id="open-archives-btn">Open Archive Folder</button>
+            </div>
+          </div>
+          <table class="table">
+            <thead><tr><th>Project</th><th>Archived on</th><th>Size</th><th>Contents</th><th></th></tr></thead>
+            <tbody id="archives-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="screen" id="screen-settings">
+        <h1>Settings</h1>
+
+        <div id="import-env-banner" class="banner banner-info hidden">
+          Found your existing backup toolkit configuration.
+          <button class="btn btn-sm btn-primary" id="import-env-btn">Import connection settings</button>
+        </div>
+
+        <div class="panel">
+          <h2>Database connection</h2>
+          <div class="form-grid">
+            <label>Host <input id="set-db-host" placeholder="db.xxxx.supabase.co" /></label>
+            <label>Port <input id="set-db-port" type="number" value="5432" /></label>
+            <label>Database <input id="set-db-name" value="postgres" /></label>
+            <label>User <input id="set-db-user" value="postgres" /></label>
+            <label>Password <input id="set-db-password" type="password" /></label>
+          </div>
+          <div class="actions-row">
+            <button class="btn" id="test-connection-btn">Test connection</button>
+            <span id="test-result" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>File storage (S3 keys — needed to back up drawings &amp; PDFs)</h2>
+          <div class="form-grid">
+            <label>Access key ID <input id="set-s3-key" /></label>
+            <label>Secret access key <input id="set-s3-secret" type="password" /></label>
+            <label>Region <input id="set-s3-region" /></label>
+            <label>Endpoint <input id="set-s3-endpoint" placeholder="https://xxxx.storage.supabase.co/storage/v1/s3" /></label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Folders</h2>
+          <div class="form-grid wide">
+            <label>Backups folder
+              <span class="folder-row"><input id="set-backup-root" /><button class="btn btn-sm" data-pick="set-backup-root">Browse…</button></span>
+            </label>
+            <label>Archives folder
+              <span class="folder-row"><input id="set-archive-root" /><button class="btn btn-sm" data-pick="set-archive-root">Browse…</button></span>
+            </label>
+            <label>PostgreSQL bin folder (only if tools are not found automatically)
+              <span class="folder-row"><input id="set-pg-bin" placeholder="C:\Program Files\PostgreSQL\16\bin" /><button class="btn btn-sm" data-pick="set-pg-bin">Browse…</button></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Automatic backups</h2>
+          <div class="form-grid">
+            <label class="checkbox"><input type="checkbox" id="set-sched-enabled" /> Weekly automatic backup</label>
+            <label>Day
+              <select id="set-sched-day">
+                <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option>
+                <option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option>
+                <option value="6">Saturday</option>
+              </select>
+            </label>
+            <label>Time <input id="set-sched-time" type="time" value="10:00" /></label>
+            <label>Keep full backups <input id="set-retention-full" type="number" min="1" value="5" /></label>
+            <label>Keep incrementals <input id="set-retention-incr" type="number" min="1" value="20" /></label>
+            <label class="checkbox"><input type="checkbox" id="set-autostart" /> Start BEP Vault with Windows (runs in tray)</label>
+          </div>
+        </div>
+
+        <div class="actions-row">
+          <button class="btn btn-primary" id="save-settings-btn">Save settings</button>
+          <span id="save-result" class="muted"></span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Progress overlay -->
+  <div class="overlay hidden" id="progress-overlay">
+    <div class="dialog">
+      <h2 id="progress-title">Working…</h2>
+      <div class="spinner" id="progress-spinner"></div>
+      <div class="progress-log" id="progress-log"></div>
+      <div class="actions-row right">
+        <button class="btn btn-primary hidden" id="progress-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic modal -->
+  <div class="overlay hidden" id="modal-overlay">
+    <div class="dialog" id="modal-dialog"></div>
+  </div>
+
+  <!-- Log viewer -->
+  <div class="overlay hidden" id="log-overlay">
+    <div class="dialog wide">
+      <h2>Activity log</h2>
+      <pre class="progress-log tall" id="log-content"></pre>
+      <div class="actions-row right"><button class="btn" id="log-close-btn">Close</button></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

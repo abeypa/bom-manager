@@ -299,6 +299,7 @@ const TreeItem = ({
             className="mt-0.5 rounded-lg p-1.5 text-slate-300 transition-colors hover:bg-slate-100 hover:text-slate-600"
             {...attributes}
             {...listeners}
+            title="Drag part to reorder or drop into BOM / PO basket"
           >
             <GripVertical size={14} />
           </div>
@@ -380,6 +381,7 @@ const TreeItem = ({
             className="rounded-lg p-1.5 text-slate-300 transition-colors hover:bg-white hover:text-slate-600"
             {...attributes}
             {...listeners}
+            title={`Drag ${type} to reorder or drop into BOM / PO basket`}
           >
             <GripVertical size={14} />
           </div>

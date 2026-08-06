@@ -155,7 +155,11 @@ const ProjectDetails = () => {
   const addToBOMBasket = useBOMBasketStore((state) => state.addItems)
   const setCurrentBOMBasketProject = useBOMBasketStore((state) => state.setCurrentProjectId)
 
-  const [activeDragItem, setActiveDragItem] = useState<any | null>(null)
+  const [activeDragPreview, setActiveDragPreview] = useState<{
+    title: string
+    subtitle: string
+    badge: string
+  } | null>(null)
 
   // ── Data ────────────────────────────────────────────────────
   const { data: project, isLoading, error: projectError } = useQuery<any>({
@@ -406,6 +410,54 @@ const ProjectDetails = () => {
     return []
   }
 
+  const getSelectedProjectParts = () =>
+    (project?.sections || [])
+      .flatMap((section: any) => section.subsections || [])
+      .flatMap((subsection: any) => subsection.parts || [])
+      .filter((part: any) => selectedPartIds.has(part.id))
+
+  const buildDragPreview = (dragPayload: any) => {
+    if (!dragPayload) return null
+
+    if (dragPayload.type === 'master_part') {
+      return {
+        title: dragPayload.data.part_number || 'Part Master item',
+        subtitle: dragPayload.data.description || 'Drag into BOM basket',
+        badge: 'Part Master',
+      }
+    }
+
+    if (dragPayload.type === 'part') {
+      return {
+        title:
+          dragPayload.data.part_ref?.part_number ||
+          dragPayload.data.part_number ||
+          `PART-${dragPayload.data.id}`,
+        subtitle:
+          dragPayload.data.description ||
+          dragPayload.data.part_ref?.description ||
+          'Project part',
+        badge:
+          selectedPartIds.has(dragPayload.data.id) && selectedPartIds.size > 1
+            ? `${selectedPartIds.size} selected parts`
+            : 'Project part',
+      }
+    }
+
+    const partsToAdd = collectDraggedParts(dragPayload.type, dragPayload.data)
+    const entityName =
+      dragPayload.data?.name ||
+      dragPayload.data?.section_name ||
+      dragPayload.data?.description ||
+      'Project item'
+
+    return {
+      title: entityName,
+      subtitle: `${partsToAdd.length} ${partsToAdd.length === 1 ? 'part' : 'parts'} ready for BOM basket`,
+      badge: dragPayload.type === 'section' ? 'Section' : 'Subsection',
+    }
+  }
+
   const collisionDetection: CollisionDetection = (args) => {
     const pointerHits = pointerWithin(args)
     if (pointerHits.length > 0) return pointerHits
@@ -415,20 +467,12 @@ const ProjectDetails = () => {
   const handleDragStart = (event: any) => {
     const { active } = event
     const dragPayload = resolveDragPayload(active)
-    if (dragPayload?.type === 'master_part') {
-      setActiveDragItem(dragPayload.data)
-      return
-    }
-    if (dragPayload?.type === 'part') {
-      setActiveDragItem(dragPayload.data)
-      return
-    }
-    setActiveDragItem(dragPayload?.data || null)
+    setActiveDragPreview(buildDragPreview(dragPayload))
   }
 
   const handleDragEnd = async (event: any) => {
     const { active, over } = event
-    setActiveDragItem(null)
+    setActiveDragPreview(null)
     if (!over) return
 
     const activeId = active.id.toString()
@@ -443,6 +487,22 @@ const ProjectDetails = () => {
         addToBOMBasket(projectId, [draggedData.data])
         setBomBasketOpen(true)
         showToast('success', 'Part added to BOM basket')
+        return
+      }
+
+      if (draggedData.type === 'part' && selectedPartIds.has(draggedData.data.id) && selectedPartIds.size > 1) {
+        const selectedParts = getSelectedProjectParts()
+        if (selectedParts.length > 0) {
+          addToBOMBasket(
+            projectId,
+            selectedParts.map((part: any) => mapProjectPartToBOMBasketItem(part)),
+          )
+          setBomBasketOpen(true)
+          showToast(
+            'success',
+            `${selectedParts.length} parts added to BOM basket`,
+          )
+        }
         return
       }
 
@@ -938,17 +998,20 @@ const ProjectDetails = () => {
 
         {/* Actual Drag Overlay for better UX */}
         <DragOverlay>
-          {activeDragItem ? (
+          {activeDragPreview ? (
             <div className="bg-white border-2 border-primary-500 rounded-lg p-4 shadow-2xl opacity-90 scale-95 pointer-events-none flex items-center gap-3 ring-4 ring-primary-500/10">
               <div className="bg-primary-600 p-2 rounded-lg">
                  <Package className="w-4 h-4 text-white" />
               </div>
               <div>
-                <p className="text-xs font-black text-navy-900">
-                  {activeDragItem.part_ref?.part_number || activeDragItem.part_number || activeDragItem.part_ref}
+                <div className="inline-flex rounded-full bg-primary-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-primary-700">
+                  {activeDragPreview.badge}
+                </div>
+                <p className="mt-1 text-xs font-black text-navy-900">
+                  {activeDragPreview.title}
                 </p>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[150px]">
-                  {activeDragItem.description || activeDragItem.part_ref?.description}
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[220px]">
+                  {activeDragPreview.subtitle}
                 </p>
               </div>
             </div>
