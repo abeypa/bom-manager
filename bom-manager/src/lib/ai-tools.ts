@@ -2928,13 +2928,14 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     name: 'update_master_part_price',
     kind: 'write',
     description:
-      'Update price / discount / image / last_price_date / supplier on an EXISTING master part. Use when a new PO has the same item code at a different price, or when a different supplier is now sourcing the part (pass supplier_id to record the current/primary supplier — the same part can be supplied by multiple suppliers over time).',
+      'Update price / discount / ERP code / image / last_price_date / supplier on an EXISTING master part. Use when a new PO has the same item code at a different price, when a different supplier is now sourcing the part (pass supplier_id to record the current/primary supplier — the same part can be supplied by multiple suppliers over time), or when the existing master row is clearly the same part but its beperp_part_no needs to be filled/corrected.',
     parameters: {
       type: 'object',
       required: ['part_type', 'part_id'],
       properties: {
         part_type: { type: 'string', enum: part_type_enum },
         part_id: { type: 'number' },
+        beperp_part_no: { type: 'string', description: 'Optional. Correct or fill the ERP Integration ID (Item Code from PO PDF) on the existing master part. Must remain unique across all part master tables.' },
         base_price: { type: 'number' },
         discount_percent: { type: 'number' },
         currency: { type: 'string' },
@@ -2947,6 +2948,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
     summarize: (a) => {
       const bits = []
+      if (a.beperp_part_no != null) bits.push(`erp=${a.beperp_part_no}`)
       if (a.base_price != null) bits.push(`price=${a.base_price}`)
       if (a.discount_percent != null) bits.push(`disc=${a.discount_percent}%`)
       if (a.supplier_id != null) bits.push(`supplier=#${a.supplier_id}`)
@@ -2955,6 +2957,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
     handler: async (a: any) => {
       assertInteger('part_id', a.part_id)
+      if (a.beperp_part_no != null) assertNonEmpty('beperp_part_no', a.beperp_part_no)
       if (a.base_price != null) assertNumberInRange('base_price', a.base_price, 0, MAX_PRICE)
       if (a.discount_percent != null) assertNumberInRange('discount_percent', a.discount_percent, 0, 100)
       const { data: currentRow, error: currentError } = await (supabase as any)
@@ -2966,6 +2969,23 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       if (a.supplier_id != null) {
         assertInteger('supplier_id', a.supplier_id)
         await assertRowExists('suppliers', a.supplier_id, 'supplier')
+      }
+      if (a.beperp_part_no != null) {
+        const nextErp = String(a.beperp_part_no).trim()
+        for (const pt of part_type_enum) {
+          const { data: dup } = await (supabase as any)
+            .from(pt)
+            .select('id, part_number, beperp_part_no')
+            .eq('beperp_part_no', nextErp)
+            .limit(5)
+          const conflicting = (dup || []).find((row: any) => !(pt === a.part_type && row.id === a.part_id))
+          if (conflicting) {
+            throw new Error(
+              `update_master_part_price: ERP id "${nextErp}" already belongs to ${pt} #${conflicting.id} (${conflicting.part_number}). ` +
+              `Do not reuse one ERP code across multiple master parts.`,
+            )
+          }
+        }
       }
 
       const hasIncomingPriceEvidence =
@@ -2981,6 +3001,7 @@ export const TOOL_REGISTRY: ToolSpec[] = [
       const patch: any = {}
       if (a.image_path) patch.image_path = a.image_path
       if (a.manufacturer_part_number) patch.manufacturer_part_number = a.manufacturer_part_number
+      if (a.beperp_part_no != null) patch.beperp_part_no = String(a.beperp_part_no).trim()
       if (shouldPromotePrice) {
         if (a.base_price != null) patch.base_price = a.base_price
         if (a.discount_percent != null) patch.discount_percent = a.discount_percent
@@ -2988,10 +3009,13 @@ export const TOOL_REGISTRY: ToolSpec[] = [
         if (a.supplier_id != null) patch.supplier_id = a.supplier_id
         if (hasIncomingPriceEvidence) patch.updated_date = a.last_price_date || new Date().toISOString()
       }
+      if (!patch.updated_date && Object.keys(patch).length) {
+        patch.updated_date = new Date().toISOString()
+      }
 
       const hasPatchBeyondUpdatedDate = Object.keys(patch).some((key) => key !== 'updated_date')
       if (!hasPatchBeyondUpdatedDate && !hasIncomingPriceEvidence) {
-        throw new Error('update_master_part_price: nothing to update — supply at least one of base_price, discount_percent, currency, image_path, manufacturer_part_number, supplier_id, last_price_date, or change_reason.')
+        throw new Error('update_master_part_price: nothing to update — supply at least one of beperp_part_no, base_price, discount_percent, currency, image_path, manufacturer_part_number, supplier_id, last_price_date, or change_reason.')
       }
 
       const historyNeeded =

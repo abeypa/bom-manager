@@ -200,13 +200,16 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
     Do NOT call search_image_url, get_po_details, audit_project_po_pdfs,
     get_project_details, preview_existing_po_pdf_correction, or
     search_master_parts in this blocker-fix workflow. If the master part
-    exists, ask the user to confirm the target project before proposing
-    one add_part_to_project using the PDF quantity, unit_price, discount,
-    and the best matching subsection. If the master part is missing, show
-    the unresolved item code and description, ask which part master table
-    it belongs to, and wait. Only after the user selects EBO, EMF, MBO,
-    MMF, or PBO may you propose create_master_part using that exact table;
-    then stop.
+    exists and is already the BOM/PO-linked part but its ERP code is
+    missing or wrong, propose update_master_part_price with
+    beperp_part_no first, then stop. If the master part exists but is not
+    yet mapped into the target project, ask the user to confirm the target
+    project before proposing one add_part_to_project using the PDF
+    quantity, unit_price, discount, and the best matching subsection. If
+    the master part is missing, show the unresolved item code and
+    description, ask which part master table it belongs to, and wait. Only
+    after the user selects EBO, EMF, MBO, MMF, or PBO may you propose
+    create_master_part using that exact table; then stop.
     After the user approves master creation, map that created part to the
     project in the next step. Do not rerun the PO repair preview until
     the missing BOM mapping has been approved.
@@ -294,7 +297,11 @@ C. PROCESS ALL LINE ITEMS TOGETHER (BATCH MODE)
    For each line item the per-line resolution is:
    1. find_master_part_by_erp_id with the Item Code.
       - If found → queue update_master_part_price with the new
-        price / discount / supplier_id / last_price_date. Use the PO
+        price / discount / supplier_id / last_price_date. If the same
+        master part is clearly the right record but its ERP Integration
+        ID is blank or outdated, also pass beperp_part_no with the PDF's
+        Item Code so AI can repair the master identity instead of asking
+        for manual SQL. Use the PO
         date as last_price_date, and include a change_reason such as
         "po_ingestion_snapshot:<po_number>" when you know the PO
         number. This update is required even when the part already
