@@ -287,24 +287,64 @@ function valueAfterLabel(lines: string[], label: RegExp) {
   return lines.slice(idx + 1, idx + 5).find(line => line && !/^[:\s]+$/.test(line)) || null
 }
 
+function labelValueWindow(lines: string[], label: RegExp, lookahead = 3) {
+  const idx = lines.findIndex(line => label.test(line))
+  if (idx < 0) return null
+
+  const sameLineValue = lines[idx].split(':').slice(1).join(':').trim()
+  const trailingLines = lines
+    .slice(idx + 1, idx + 1 + lookahead)
+    .filter(line => line && !/^[:\s]+$/.test(line))
+
+  return [sameLineValue, ...trailingLines].filter(Boolean).join(' ').trim() || null
+}
+
+function normalizePONumber(value: string) {
+  return value.replace(/\s+/g, '').toUpperCase()
+}
+
+function extractFullPONumber(value: string | null | undefined) {
+  if (!value) return null
+  const match = value.match(/\b(PO\s*\/\s*[A-Z0-9]+\s*\/\s*\d{2}\s*[-/]\s*\d{2}\s*\/\s*\d{3,})\b/i)
+  return match?.[1] ? normalizePONumber(match[1]) : null
+}
+
+function extractPartialPONumber(value: string | null | undefined) {
+  if (!value) return null
+  const match = value.match(/\b(PO\s*\/\s*[A-Z0-9][A-Z0-9/_.-]*)\b/i)
+  return match?.[1] ? normalizePONumber(match[1]) : null
+}
+
+function chooseMoreSpecificPONumber(primary: string | null, fallback: string | null) {
+  if (!primary) return fallback
+  if (!fallback) return primary
+
+  const normalizedPrimary = normalizePONumber(primary)
+  const normalizedFallback = normalizePONumber(fallback)
+
+  if (normalizedFallback.startsWith(normalizedPrimary) && normalizedFallback.length > normalizedPrimary.length) {
+    return normalizedFallback
+  }
+
+  return normalizedPrimary
+}
+
 function detectPONumber(text: string, lines: string[], fileName: string) {
   const filenameMeta = metadataFromFilename(fileName)
-  const fullBepNumber = firstMatch(text, [
-    /\b(PO\/[A-Z0-9]+\/\d{2}[-/]\d{2}\/\d{3,})\b/i,
-  ])
+  const fullBepNumber = extractFullPONumber(text)
   if (fullBepNumber) return fullBepNumber
 
-  const documentNo = valueAfterLabel(lines, /^document\s+no\b/i)
-  const fromDocumentNo =
-    documentNo?.match(/\b(PO\/[A-Z0-9]+\/\d{2}[-/]\d{2}\/\d{3,})\b/i)?.[1] ||
-    documentNo?.match(/\b(PO\/[A-Z0-9/_.-]+)/i)?.[1]
-  if (fromDocumentNo) return fromDocumentNo
+  const documentNoWindow = labelValueWindow(lines, /^document\s+no\b/i)
+  const fromDocumentNo = extractFullPONumber(documentNoWindow) || extractPartialPONumber(documentNoWindow)
+  if (fromDocumentNo) return chooseMoreSpecificPONumber(fromDocumentNo, filenameMeta.poNumber)
 
   const explicit = firstMatch(text, [
-    /\b(PO\/[A-Z0-9/_.-]+)/i,
     /\bp\.?\s*o\.?\s*(?:no|number|#)\s*[:\-]?\s*([A-Z0-9][A-Z0-9/_.-]{3,})/i,
   ])
-  return explicit || filenameMeta.poNumber
+  return chooseMoreSpecificPONumber(
+    extractPartialPONumber(text) || (explicit ? normalizePONumber(explicit) : null),
+    filenameMeta.poNumber,
+  )
 }
 
 function detectPODate(text: string, lines: string[], fileName: string) {
