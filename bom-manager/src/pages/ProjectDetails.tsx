@@ -36,6 +36,7 @@ import ProjectSectionCopyModal from '@/components/projects/ProjectSectionCopyMod
 import ProjectDocumentsTab from '@/components/projects/ProjectDocumentsTab'
 import JobOrderTab from '@/components/projects/JobOrderTab'
 import POPdfAuditCard from '@/components/projects/POPdfAuditCard'
+import BOMBasket from '@/components/projects/BOMBasket'
 
 // New modular components
 import BOMSectionCard from '@/components/projects/BOMSectionCard'
@@ -416,6 +417,19 @@ const ProjectDetails = () => {
       .flatMap((subsection: any) => subsection.parts || [])
       .filter((part: any) => selectedPartIds.has(part.id))
 
+  const addProjectPartsToBomBasket = (parts: any[]) => {
+    if (!parts.length) {
+      showToast('error', 'No parts found to add')
+      return
+    }
+
+    addToBOMBasket(
+      projectId,
+      parts.map((part: any) => mapProjectPartToBOMBasketItem(part)),
+    )
+    setBomBasketOpen(true)
+  }
+
   const buildDragPreview = (dragPayload: any) => {
     if (!dragPayload) return null
 
@@ -521,33 +535,13 @@ const ProjectDetails = () => {
       return
     }
 
-    // 2. DROP INTO PO BASKET
-    if (overId === 'po-basket') {
-      const draggedData = resolveDragPayload(active)
-      if (!draggedData) return
-
-      // Check for multi-select
-      if (draggedData.type === 'part' && selectedPartIds.has(draggedData.data.id) && selectedPartIds.size > 1) {
-        const selectedParts = project?.sections?.flatMap((s: any) => s.subsections).flatMap((sub: any) => sub.parts).filter((p: any) => selectedPartIds.has(p.id))
-        addToBasket(selectedParts)
-        setSelectedPartIds(new Set())
-      } else {
-        const partsToAdd = collectDraggedParts(draggedData.type, draggedData.data)
-        if (partsToAdd.length > 0) {
-          addToBasket(partsToAdd)
-          showToast('success', `${partsToAdd.length} ${partsToAdd.length === 1 ? 'part' : 'parts'} added to basket`)
-        }
-      }
-      return
-    }
-
-    // 3. TREE REORDERING
+    // 2. TREE REORDERING
     if (activeId === overId) return
     
     // Check if over internal tree node (starts with section-, sub-, part-)
     if (!overId.startsWith('section-') && !overId.startsWith('sub-') && !overId.startsWith('part-')) return
 
-    // 3.1 Reordering Sections
+    // 2.1 Reordering Sections
     if (activeId.startsWith('section-') && overId.startsWith('section-')) {
       const activeDataId = parseInt(activeId.split('-')[1])
       const overDataId = parseInt(overId.split('-')[1])
@@ -558,7 +552,7 @@ const ProjectDetails = () => {
       showToast('success', 'Section order updated')
     }
 
-    // 3.2 Reordering/Moving Subsections
+    // 2.2 Reordering/Moving Subsections
     if (activeId.startsWith('sub-') && (overId.startsWith('sub-') || overId.startsWith('section-'))) {
       const subId = parseInt(activeId.split('-')[1])
       let targetSectionId: number
@@ -586,7 +580,7 @@ const ProjectDetails = () => {
       showToast('success', 'Subsection moved')
     }
 
-    // 3.3 Reordering/Moving Parts
+    // 2.3 Reordering/Moving Parts
     if (activeId.startsWith('part-') && (overId.startsWith('part-') || overId.startsWith('sub-'))) {
       const partId = parseInt(activeId.split('-')[1])
       let targetSubId: number
@@ -674,21 +668,14 @@ const ProjectDetails = () => {
               {selectedPartIds.size > 0 && isAdmin && (
                 <button
                   onClick={() => {
-                    const parts: any[] = []
-                    project?.sections?.forEach((s: any) => {
-                      s.subsections?.forEach((sub: any) => {
-                        sub.parts?.forEach((p: any) => {
-                          if (selectedPartIds.has(p.id)) parts.push(p)
-                        })
-                      })
-                    })
-                    addToBasket(parts)
+                    const parts = getSelectedProjectParts()
+                    addProjectPartsToBomBasket(parts)
                     setSelectedPartIds(new Set())
                   }}
                   className="btn bg-navy-900 hover:bg-black text-white shadow-lg shadow-navy-900/20 px-6 animate-in slide-in-from-right duration-300"
                 >
-                  <ShoppingCart className="h-4 w-4 mr-2" />
-                  ADD TO BASKET ({selectedPartIds.size})
+                  <ClipboardList className="h-4 w-4 mr-2" />
+                  ADD TO BOM BASKET ({selectedPartIds.size})
                 </button>
               )}
               <button
@@ -697,18 +684,6 @@ const ProjectDetails = () => {
               >
                 <ClipboardList className="h-4 w-4 mr-2" />
                 BOM BASKET
-              </button>
-              <button 
-                onClick={() => setBasketOpen(!basketOpen)}
-                className={`btn ${basketItems.length > 0 ? 'bg-primary-500 text-white' : 'btn-secondary'} relative`}
-              >
-                <ShoppingBag className="h-4 w-4 mr-2" />
-                PO BASKET
-                {basketItems.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
-                    {basketItems.length}
-                  </span>
-                )}
               </button>
               <button 
                 onClick={handleExport}
@@ -830,15 +805,12 @@ const ProjectDetails = () => {
                           onToggleSelectPart={handleSelectPart}
                           onToggleSelectAll={handleSelectAll}
                           onAddSelectedToBasket={() => {
-                            const allParts = (project?.sections || [])
-                              .flatMap((s: any) => s.subsections || [])
-                              .flatMap((sub: any) => sub.parts || [])
-                            const selectedParts = allParts.filter((p: any) => selectedPartIds.has(p.id))
+                            const selectedParts = getSelectedProjectParts()
                             
                             if (selectedParts.length > 0) {
-                              addToBasket(selectedParts)
+                              addProjectPartsToBomBasket(selectedParts)
                               setSelectedPartIds(new Set())
-                              showToast('success', `${selectedParts.length} parts added to basket`)
+                              showToast('success', `${selectedParts.length} parts added to BOM basket`)
                             } else {
                               showToast('error', 'No selected parts found to add')
                             }
@@ -993,6 +965,8 @@ const ProjectDetails = () => {
             )}
           </div>
         </div>
+
+        <BOMBasket projectId={projectId} projectCurrency={project.currency || 'INR'} />
 
 
 

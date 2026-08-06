@@ -299,7 +299,7 @@ const TreeItem = ({
             className="mt-0.5 rounded-lg p-1.5 text-slate-300 transition-colors hover:bg-slate-100 hover:text-slate-600"
             {...attributes}
             {...listeners}
-            title="Drag part to reorder or drop into BOM / PO basket"
+            title="Drag part to reorder or drop into BOM basket"
           >
             <GripVertical size={14} />
           </div>
@@ -381,7 +381,7 @@ const TreeItem = ({
             className="rounded-lg p-1.5 text-slate-300 transition-colors hover:bg-white hover:text-slate-600"
             {...attributes}
             {...listeners}
-            title={`Drag ${type} to reorder or drop into BOM / PO basket`}
+            title={`Drag ${type} to reorder or drop into BOM basket`}
           >
             <GripVertical size={14} />
           </div>
@@ -778,7 +778,7 @@ export default function BOMTreeView({
               <div>
                 <div className="text-sm font-semibold">{selectedPartIds.size} parts selected</div>
                 <div className="text-xs text-slate-300">
-                  Selected items can be moved to the procurement basket in one step.
+                  Selected items can be moved to the BOM basket in one step.
                 </div>
               </div>
             </div>
@@ -789,7 +789,7 @@ export default function BOMTreeView({
                 className="inline-flex items-center gap-2 rounded-xl bg-primary-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-600"
               >
                 <ShoppingCart size={13} />
-                Add to basket
+                Add to BOM basket
               </button>
               <button
                 onClick={onClearSelection}
