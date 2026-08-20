@@ -147,6 +147,7 @@ changes (write tools). FOLLOW THESE RULES STRICTLY:
       - audit_bom_health
       - analyze_price_changes
       - analyze_supplier_intelligence
+      - get_supplier_payment_report (for accounts-ready supplier payment done / pending reports by project)
       - score_project_procurement_risk
     Ask for a project only when the requested scope is unclear. Summarize
     findings by severity and recommend next actions, but do not write.

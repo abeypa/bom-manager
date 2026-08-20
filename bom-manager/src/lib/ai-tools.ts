@@ -1678,6 +1678,35 @@ export const TOOL_REGISTRY: ToolSpec[] = [
     },
   },
   {
+    name: 'get_supplier_payment_report',
+    kind: 'read',
+    description:
+      'Get a project-wise supplier payment report for accounts. Aggregates PO payable total, payment done, pending balance, overpaid amount, and PO counts grouped by project and supplier. Use this for "payment done/pending", "accounts report", or "supplier payment report" requests.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'number', description: 'Optional project id to scope to one project.' },
+        status: { type: 'string', description: "Optional project status filter or 'all'." },
+        customer: { type: 'string', description: 'Optional customer filter.' },
+        dateFrom: { type: 'string', description: 'Optional ISO start date using PO date.' },
+        dateTo: { type: 'string', description: 'Optional ISO end date using PO date.' },
+        include_cancelled: { type: 'boolean', default: false },
+        include_fully_paid: { type: 'boolean', default: true },
+      },
+    },
+    handler: async (args: any) => {
+      return await reportsApi.getSupplierPaymentProjectReport({
+        projectId: args.project_id,
+        status: args.status || 'all',
+        customer: args.customer,
+        dateFrom: args.dateFrom,
+        dateTo: args.dateTo,
+        includeCancelled: Boolean(args.include_cancelled),
+        includeFullyPaid: args.include_fully_paid !== false,
+      })
+    },
+  },
+  {
     name: 'get_reconciliation',
     kind: 'read',
     description: 'BOM vs PO per-part reconciliation. Optional project_id to scope.',

@@ -3,7 +3,7 @@ import {
   Bot, X, Send, Settings as SettingsIcon, Trash2, Check, X as XIcon,
   Loader2, AlertTriangle, FileText, Paperclip, Image as ImageIcon, FileText as PdfIcon,
   Square, ClipboardList, FolderKanban, Tags, Table2, Sparkles, ShoppingCart,
-  Zap, FileSearch, HeartPulse, TrendingUp, Truck, ShieldAlert,
+  Zap, FileSearch, HeartPulse, TrendingUp, Truck, ShieldAlert, CreditCard,
 } from 'lucide-react'
 import { useAIStore, ChatMessage } from '@/store/useAIStore'
 import { sendUserMessage, approvePending, rejectPending, stopAI } from '@/lib/ai-runner'
@@ -86,6 +86,12 @@ const SMART_COMMANDS = [
       'Run supplier intelligence. Summarize open PO value, overdue POs, draft exposure, top suppliers by value, and supplier follow-up priorities. Ask for project or supplier only if needed. Do not change any data.',
   },
   {
+    label: 'Payments Report',
+    icon: CreditCard,
+    prompt:
+      'Create a correct accounts-ready supplier payment report project-wise. Group by project and supplier, and show PO count, PO numbers, gross payable total, payment done, payment pending, and any overpaid exceptions separately. Present it as a clean HTML report I can send to the accounts team. Do not change any data.',
+  },
+  {
     label: 'Risk Score',
     icon: ShieldAlert,
     prompt:
@@ -134,6 +140,15 @@ export default function AIChat() {
   const removeAttachment = (i: number) =>
     setAttachments(a => a.filter((_, idx) => idx !== i))
 
+  const resolveShortcutPrompt = (raw: string) => {
+    const trimmed = raw.trim()
+    const normalized = trimmed.toLowerCase()
+    if (normalized === '/payments-report' || normalized === '/supplier-payments') {
+      return 'Create a correct accounts-ready supplier payment report project-wise. Group by project and supplier, and show PO count, PO numbers, gross payable total, payment done, payment pending, and any overpaid exceptions separately. Present it as a clean HTML report I can send to the accounts team. Do not change any data.'
+    }
+    return trimmed
+  }
+
   const runSmartCommand = async (prompt: string) => {
     if (busy) return
     if (!isConfigured()) {
@@ -153,7 +168,7 @@ export default function AIChat() {
   }, [messages.length, pending.length])
 
   const submit = async () => {
-    const t = input.trim()
+    const t = resolveShortcutPrompt(input)
     if ((!t && attachments.length === 0) || busy) return
     // If key not in localStorage yet, try DB sync before giving up
     if (!isConfigured()) {
@@ -380,7 +395,7 @@ export default function AIChat() {
                   submit()
                 }
               }}
-              placeholder={isConfigured() ? 'Ask, paste/drop an image or PDF…' : 'Configure your OpenRouter key to start.'}
+              placeholder={isConfigured() ? 'Ask, paste/drop an image or PDF… (/payments-report for accounts)' : 'Configure your OpenRouter key to start.'}
               rows={1}
               className="flex-1 text-sm resize-none px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500/20 max-h-32"
             />
@@ -406,7 +421,7 @@ export default function AIChat() {
             )}
           </div>
           <p className="text-[10px] text-slate-400 mt-1.5 leading-tight">
-            Enter to send · Shift+Enter for newline · {busy ? 'Click ◼ to stop the AI' : 'Drop / paste images & PDFs'} · PO entry is automatic; deletes require approval.
+            Enter to send · Shift+Enter for newline · {busy ? 'Click ◼ to stop the AI' : 'Drop / paste images & PDFs'} · Try /payments-report for accounts · PO entry is automatic; deletes require approval.
           </p>
         </div>
       </div>

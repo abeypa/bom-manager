@@ -4,6 +4,52 @@ This directory contains administrative scripts for managing the BOM Manager appl
 
 ## Scripts
 
+### `supabase_data_admin.mjs` - Supabase Data Audit & Safe Normalization
+A professional maintenance script for reviewing live Supabase data quality and applying low-risk cleanup updates.
+
+#### What it checks
+- Duplicate supplier names, project numbers, section names, subsection names, PO numbers, and part numbers after normalization
+- Blank required values on core records
+- Hierarchy issues such as orphan sections, subsections, or project-part links
+- Safe text cleanup opportunities such as trimming whitespace, lowercasing emails, and uppercasing currencies
+
+#### What it can update
+- Trim and normalize text fields on:
+  - `suppliers`
+  - `projects`
+  - `project_sections`
+  - `project_subsections`
+  - `purchase_orders`
+  - `profiles`
+  - All master part tables
+- Convert blank optional fields to `NULL`
+- Lowercase emails
+- Uppercase currencies
+
+#### Safety model
+- Default mode is read-only
+- Use `--apply` to write changes
+- Duplicate-prone key fields are reported first and blocked from automatic normalization if a collision would be created
+
+#### Requirements
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+#### Usage
+```bash
+# Full read-only audit
+npm run db:audit
+
+# Audit only suppliers and projects
+npm run db:audit -- --table suppliers,projects
+
+# Preview normalization candidates without writing
+npm run db:normalize
+
+# Apply safe normalization updates
+npm run db:normalize -- --apply
+```
+
 ### `create_user.sh` - User Management Script
 A bash script for managing users via the Supabase Management API.
 
@@ -207,3 +253,4 @@ For issues with these scripts:
 - [Auth Configuration Guide](../docs/security/auth_configuration.md)
 - [Security Best Practices](../docs/security/security_best_practices.md)
 - [Setup Checklist](../docs/security/setup_checklist.md)
+- [Supabase Data Admin Guide](../docs/SUPABASE_DATA_ADMIN.md)
