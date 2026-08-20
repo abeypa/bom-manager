@@ -89,7 +89,7 @@ const SMART_COMMANDS = [
     label: 'Payments Report',
     icon: CreditCard,
     prompt:
-      'Create a correct accounts-ready supplier payment report project-wise. Group by project and supplier, and show PO count, PO numbers, gross payable total, payment done, payment pending, and any overpaid exceptions separately. Present it as a clean HTML report I can send to the accounts team. Do not change any data.',
+      'Create a correct accounts-ready supplier payment report project-wise. Group by project and supplier, and show PO count, PO numbers, gross payable total, payment done, payment pending, and any overpaid exceptions separately. Also show project-wise total paid and total pending, plus one overall all-project total paid and total pending summary. Present it as a clean HTML report I can send to the accounts team. Do not change any data.',
   },
   {
     label: 'Risk Score',
@@ -144,7 +144,7 @@ export default function AIChat() {
     const trimmed = raw.trim()
     const normalized = trimmed.toLowerCase()
     if (normalized === '/payments-report' || normalized === '/supplier-payments') {
-      return 'Create a correct accounts-ready supplier payment report project-wise. Group by project and supplier, and show PO count, PO numbers, gross payable total, payment done, payment pending, and any overpaid exceptions separately. Present it as a clean HTML report I can send to the accounts team. Do not change any data.'
+      return 'Create a correct accounts-ready supplier payment report project-wise. Group by project and supplier, and show PO count, PO numbers, gross payable total, payment done, payment pending, and any overpaid exceptions separately. Also show project-wise total paid and total pending, plus one overall all-project total paid and total pending summary. Present it as a clean HTML report I can send to the accounts team. Do not change any data.'
     }
     return trimmed
   }

@@ -77,6 +77,34 @@ export interface SupplierPaymentProjectRow {
   currencies: string[]
 }
 
+export interface ProjectPaymentSummary {
+  project_id: number | null
+  project_name: string
+  project_number: string
+  supplier_count: number
+  po_count: number
+  payable_total: number
+  paid_total: number
+  pending_total: number
+  overpaid_total: number
+  currencies: string[]
+}
+
+export interface SupplierPaymentProjectReport {
+  rows: SupplierPaymentProjectRow[]
+  project_totals: ProjectPaymentSummary[]
+  overall_totals: {
+    project_count: number
+    supplier_count: number
+    po_count: number
+    payable_total: number
+    paid_total: number
+    pending_total: number
+    overpaid_total: number
+    currencies: string[]
+  }
+}
+
 export interface ReportFilters {
   status?: string          // Project status filter
   customer?: string
@@ -102,6 +130,15 @@ const roundMoney = (value: number) =>
 const normalizePaymentAmount = (payment: any) => {
   const amount = Number(payment?.amount || 0)
   return payment?.payment_type === 'Refund' ? -amount : amount
+}
+
+const calcLineNetAmount = (line: any): number => {
+  const explicit = Number(line?.total_amount || 0)
+  if (explicit > 0) return explicit
+  const qty = Number(line?.quantity || 0)
+  const price = Number(line?.unit_price || 0)
+  const disc = Number(line?.discount_percent || 0)
+  return roundMoney(qty * price * (1 - disc / 100))
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -263,7 +300,7 @@ export const reportsApi = {
       includeCancelled?: boolean
       includeFullyPaid?: boolean
     },
-  ): Promise<SupplierPaymentProjectRow[]> => {
+  ): Promise<SupplierPaymentProjectReport> => {
     let query = (supabase as any)
       .from('purchase_orders')
       .select(`
@@ -277,13 +314,18 @@ export const reportsApi = {
         tax_amount,
         po_date,
         suppliers (name),
-        project:projects (project_name, project_number, status, customer)
+        project:projects (project_name, project_number, status, customer),
+        purchase_order_items (
+          id,
+          project_part_id,
+          quantity,
+          unit_price,
+          discount_percent,
+          total_amount
+        )
       `)
       .order('po_date', { ascending: false })
 
-    if (filters?.projectId) {
-      query = query.eq('project_id', filters.projectId)
-    }
     if (filters?.poStatus && filters.poStatus !== 'all') {
       query = query.eq('status', filters.poStatus)
     }
@@ -312,7 +354,22 @@ export const reportsApi = {
       }
       return true
     })
-    if (!rows.length) return []
+    if (!rows.length) {
+      return {
+        rows: [],
+        project_totals: [],
+        overall_totals: {
+          project_count: 0,
+          supplier_count: 0,
+          po_count: 0,
+          payable_total: 0,
+          paid_total: 0,
+          pending_total: 0,
+          overpaid_total: 0,
+          currencies: [],
+        },
+      }
+    }
 
     const poIds = rows.map((po: any) => po.id).filter(Boolean)
     const { data: paymentRows, error: paymentsError } = await (supabase as any)
@@ -328,56 +385,201 @@ export const reportsApi = {
       paidByPo.set(poId, roundMoney((paidByPo.get(poId) || 0) + normalizePaymentAmount(payment)))
     }
 
+    const projectPartIds = Array.from(new Set(
+      rows.flatMap((po: any) => (po.purchase_order_items || []).map((item: any) => item.project_part_id)).filter(Boolean),
+    ))
+
+    let projectPartRows: any[] = []
+    if (projectPartIds.length > 0) {
+      const { data, error } = await (supabase as any)
+        .from('project_parts')
+        .select('id, project_section_id')
+        .in('id', projectPartIds)
+      if (error) throw error
+      projectPartRows = data || []
+    }
+
+    const subsectionIds = Array.from(new Set(projectPartRows.map((row: any) => row.project_section_id).filter(Boolean)))
+    let subsectionRows: any[] = []
+    if (subsectionIds.length > 0) {
+      const { data, error } = await (supabase as any)
+        .from('project_subsections')
+        .select('id, project_id')
+        .in('id', subsectionIds)
+      if (error) throw error
+      subsectionRows = data || []
+    }
+
+    const projectIdsFromItems = Array.from(new Set(subsectionRows.map((row: any) => row.project_id).filter(Boolean)))
+    let projectRows: any[] = []
+    if (projectIdsFromItems.length > 0) {
+      const { data, error } = await (supabase as any)
+        .from('projects')
+        .select('id, project_name, project_number, status, customer')
+        .in('id', projectIdsFromItems)
+      if (error) throw error
+      projectRows = data || []
+    }
+
+    const projectPartToSubsection = new Map(projectPartRows.map((row: any) => [row.id, row.project_section_id]))
+    const subsectionToProject = new Map(subsectionRows.map((row: any) => [row.id, row.project_id]))
+    const projectById = new Map(projectRows.map((row: any) => [row.id, row]))
+
+    const filteredProjectMatch = (project: any) => {
+      if (filters?.projectId && Number(project?.id || 0) !== Number(filters.projectId)) return false
+      if (filters?.status && filters.status !== 'all' && project?.status !== filters.status) return false
+      if (
+        filters?.customer &&
+        !String(project?.customer || '').toLowerCase().includes(String(filters.customer).toLowerCase())
+      ) return false
+      return true
+    }
+
     const groups = new Map<string, SupplierPaymentProjectRow>()
+    const projectTotalsMap = new Map<string, ProjectPaymentSummary>()
+    const overallCurrencies = new Set<string>()
+    const overallPoNumbers = new Set<string>()
+    const overallSuppliers = new Set<string>()
+
     for (const po of rows) {
-      const projectId = po.project_id ?? null
-      const supplierId = po.supplier_id ?? null
-      const payable = roundMoney(
+      const poNumber = po.po_number || `PO#${po.id}`
+      const payableTotal = roundMoney(
         Number(po?.tax_amount != null
           ? Number(po?.grand_total || 0) + Number(po?.tax_amount || 0)
           : Number(po?.grand_total || 0)),
       )
-      const paid = roundMoney(paidByPo.get(Number(po.id)) || 0)
-      const balance = roundMoney(payable - paid)
-      const pending = balance > 0.01 ? balance : 0
-      const overpaid = balance < -0.01 ? Math.abs(balance) : 0
-      const key = `${projectId ?? 'none'}::${supplierId ?? 'none'}`
+      const paidTotal = roundMoney(paidByPo.get(Number(po.id)) || 0)
+      const supplierId = po.supplier_id ?? null
+      const supplierName = po.suppliers?.name || 'Unknown Supplier'
+      const lineBuckets = new Map<number, number>()
 
-      const current = groups.get(key) || {
-        project_id: projectId,
-        project_name: po.project?.project_name || 'Unassigned Project',
-        project_number: po.project?.project_number || '—',
-        supplier_id: supplierId,
-        supplier_name: po.suppliers?.name || 'Unknown Supplier',
-        po_count: 0,
-        po_numbers: [],
-        payable_total: 0,
-        paid_total: 0,
-        pending_total: 0,
-        overpaid_total: 0,
-        fully_paid_po_count: 0,
-        pending_po_count: 0,
-        overpaid_po_count: 0,
-        currencies: [],
+      for (const item of po.purchase_order_items || []) {
+        const subsectionId = projectPartToSubsection.get(item.project_part_id)
+        const projectId = subsectionToProject.get(subsectionId)
+        if (!projectId) continue
+        lineBuckets.set(projectId, roundMoney((lineBuckets.get(projectId) || 0) + calcLineNetAmount(item)))
       }
 
-      current.po_count += 1
-      current.po_numbers.push(po.po_number || `PO#${po.id}`)
-      current.payable_total = roundMoney(current.payable_total + payable)
-      current.paid_total = roundMoney(current.paid_total + paid)
-      current.pending_total = roundMoney(current.pending_total + pending)
-      current.overpaid_total = roundMoney(current.overpaid_total + overpaid)
-      if (overpaid > 0) current.overpaid_po_count += 1
-      else if (pending > 0) current.pending_po_count += 1
-      else current.fully_paid_po_count += 1
-      if (po.currency && !current.currencies.includes(po.currency)) {
-        current.currencies.push(po.currency)
+      let allocations: Array<{ project_id: number | null; project_name: string; project_number: string; net_amount: number; currency: string | null }> = []
+      const totalMappedNet = roundMoney(Array.from(lineBuckets.values()).reduce((sum, value) => sum + value, 0))
+
+      if (lineBuckets.size > 0) {
+        allocations = Array.from(lineBuckets.entries())
+          .map(([projectId, netAmount]) => {
+            const project = projectById.get(projectId) || null
+            return {
+              project_id: projectId,
+              project_name: project?.project_name || po.project?.project_name || 'Unassigned Project',
+              project_number: project?.project_number || po.project?.project_number || '—',
+              net_amount: netAmount,
+              currency: po.currency || null,
+            }
+          })
+          .filter((allocation) => filteredProjectMatch(projectById.get(allocation.project_id as number)))
       }
 
-      groups.set(key, current)
+      if (!allocations.length) {
+        const fallbackProject = po.project_id ? { id: po.project_id, ...po.project } : null
+        if (!filters?.projectId || Number(fallbackProject?.id || 0) === Number(filters.projectId)) {
+          if (filteredProjectMatch(fallbackProject)) {
+            allocations = [{
+              project_id: fallbackProject?.id ?? null,
+              project_name: fallbackProject?.project_name || 'Unassigned Project',
+              project_number: fallbackProject?.project_number || '—',
+              net_amount: totalMappedNet > 0 ? totalMappedNet : Number(po?.grand_total || 0),
+              currency: po.currency || null,
+            }]
+          }
+        }
+      }
+
+      if (!allocations.length) continue
+
+      const allocationBasis = roundMoney(allocations.reduce((sum, row) => sum + Number(row.net_amount || 0), 0))
+      const hasBasis = allocationBasis > 0
+
+      allocations.forEach((allocation, index) => {
+        const projectShareRaw = hasBasis
+          ? payableTotal * (Number(allocation.net_amount || 0) / allocationBasis)
+          : payableTotal / allocations.length
+        const paidShareRaw = hasBasis
+          ? paidTotal * (Number(allocation.net_amount || 0) / allocationBasis)
+          : paidTotal / allocations.length
+
+        const payable = roundMoney(index === allocations.length - 1
+          ? payableTotal - allocations.slice(0, index).reduce((sum, prev) => sum + roundMoney(hasBasis ? payableTotal * (Number(prev.net_amount || 0) / allocationBasis) : payableTotal / allocations.length), 0)
+          : projectShareRaw)
+        const paid = roundMoney(index === allocations.length - 1
+          ? paidTotal - allocations.slice(0, index).reduce((sum, prev) => sum + roundMoney(hasBasis ? paidTotal * (Number(prev.net_amount || 0) / allocationBasis) : paidTotal / allocations.length), 0)
+          : paidShareRaw)
+        const balance = roundMoney(payable - paid)
+        const pending = balance > 0.01 ? balance : 0
+        const overpaid = balance < -0.01 ? Math.abs(balance) : 0
+        const key = `${allocation.project_id ?? 'none'}::${supplierId ?? 'none'}`
+
+        const current = groups.get(key) || {
+          project_id: allocation.project_id,
+          project_name: allocation.project_name,
+          project_number: allocation.project_number,
+          supplier_id: supplierId,
+          supplier_name: supplierName,
+          po_count: 0,
+          po_numbers: [],
+          payable_total: 0,
+          paid_total: 0,
+          pending_total: 0,
+          overpaid_total: 0,
+          fully_paid_po_count: 0,
+          pending_po_count: 0,
+          overpaid_po_count: 0,
+          currencies: [],
+        }
+
+        if (!current.po_numbers.includes(poNumber)) {
+          current.po_count += 1
+          current.po_numbers.push(poNumber)
+        }
+        current.payable_total = roundMoney(current.payable_total + payable)
+        current.paid_total = roundMoney(current.paid_total + paid)
+        current.pending_total = roundMoney(current.pending_total + pending)
+        current.overpaid_total = roundMoney(current.overpaid_total + overpaid)
+        if (overpaid > 0) current.overpaid_po_count += 1
+        else if (pending > 0) current.pending_po_count += 1
+        else current.fully_paid_po_count += 1
+        if (allocation.currency && !current.currencies.includes(allocation.currency)) {
+          current.currencies.push(allocation.currency)
+        }
+        groups.set(key, current)
+
+        const projectTotalKey = String(allocation.project_id ?? 'none')
+        const projectTotal = projectTotalsMap.get(projectTotalKey) || {
+          project_id: allocation.project_id,
+          project_name: allocation.project_name,
+          project_number: allocation.project_number,
+          supplier_count: 0,
+          po_count: 0,
+          payable_total: 0,
+          paid_total: 0,
+          pending_total: 0,
+          overpaid_total: 0,
+          currencies: [],
+        }
+        projectTotal.payable_total = roundMoney(projectTotal.payable_total + payable)
+        projectTotal.paid_total = roundMoney(projectTotal.paid_total + paid)
+        projectTotal.pending_total = roundMoney(projectTotal.pending_total + pending)
+        projectTotal.overpaid_total = roundMoney(projectTotal.overpaid_total + overpaid)
+        if (!projectTotal.currencies.includes(po.currency || '')) {
+          if (po.currency) projectTotal.currencies.push(po.currency)
+        }
+        projectTotalsMap.set(projectTotalKey, projectTotal)
+
+        if (allocation.currency) overallCurrencies.add(allocation.currency)
+        overallPoNumbers.add(`${allocation.project_id ?? 'none'}::${poNumber}`)
+        overallSuppliers.add(`${allocation.project_id ?? 'none'}::${supplierId ?? 'none'}`)
+      })
     }
 
-    const result = Array.from(groups.values())
+    const resultRows = Array.from(groups.values())
       .filter((row) => filters?.includeFullyPaid !== false || row.paid_total > 0 || row.pending_total > 0 || row.overpaid_total > 0)
       .sort((a, b) =>
         a.project_number.localeCompare(b.project_number, undefined, { numeric: true }) ||
@@ -385,7 +587,36 @@ export const reportsApi = {
         a.supplier_name.localeCompare(b.supplier_name),
       )
 
-    return result
+    const projectTotals = Array.from(projectTotalsMap.values())
+      .map((project) => ({
+        ...project,
+        supplier_count: resultRows.filter((row) => row.project_id === project.project_id).length,
+        po_count: Array.from(new Set(
+          resultRows
+            .filter((row) => row.project_id === project.project_id)
+            .flatMap((row) => row.po_numbers),
+        )).length,
+      }))
+      .filter((row) => filters?.includeFullyPaid !== false || row.paid_total > 0 || row.pending_total > 0 || row.overpaid_total > 0)
+      .sort((a, b) =>
+        a.project_number.localeCompare(b.project_number, undefined, { numeric: true }) ||
+        a.project_name.localeCompare(b.project_name),
+      )
+
+    return {
+      rows: resultRows,
+      project_totals: projectTotals,
+      overall_totals: {
+        project_count: projectTotals.length,
+        supplier_count: overallSuppliers.size,
+        po_count: overallPoNumbers.size,
+        payable_total: roundMoney(projectTotals.reduce((sum, row) => sum + row.payable_total, 0)),
+        paid_total: roundMoney(projectTotals.reduce((sum, row) => sum + row.paid_total, 0)),
+        pending_total: roundMoney(projectTotals.reduce((sum, row) => sum + row.pending_total, 0)),
+        overpaid_total: roundMoney(projectTotals.reduce((sum, row) => sum + row.overpaid_total, 0)),
+        currencies: Array.from(overallCurrencies.values()).sort(),
+      },
+    }
   },
 
   /**
