@@ -24,6 +24,12 @@ import { supabase } from '@/lib/supabase'
 import { auditPurchaseOrderPdf } from '@/lib/po-pdf-audit'
 import { getSignedUrl } from '@/api/storage'
 import { urlToPDFAttachment } from '@/lib/ai-attachments'
+import {
+  comparablePoHeaderTotal,
+  isPoCorrectionAmountOk,
+  parsedMatchesOriginalPOCurrency,
+  poCorrectionAmountMismatchMessage,
+} from '@/lib/po-correction-amounts'
 import { parsePurchaseOrderAttachment, parsePurchaseOrderText } from '@/lib/po-ingestion-parser'
 import { compareAttachedPOWithDatabasePO as compareAttachedPOWithDatabasePOPure } from '@/lib/po-ingestion-duplicate'
 import { hasDefensiblePOProjectEvidence } from '@/lib/po-ingestion-project-routing'
@@ -115,20 +121,6 @@ function assertMaxLen(field: string, v: any, max: number) {
 async function assertRowExists(table: string, id: number, label?: string) {
   const { data } = await (supabase as any).from(table).select('id').eq('id', id).maybeSingle()
   if (!data) throw new Error(`${label || table} #${id} does not exist.`)
-}
-
-function parsedMatchesOriginalPOCurrency(po: any, parsed: any) {
-  const parsedCurrency = String(parsed?.currency || 'INR').trim().toUpperCase()
-  const currentCurrency = String(po?.currency || 'INR').trim().toUpperCase()
-  const originalCurrency = String(po?.original_currency || '').trim().toUpperCase()
-  return Boolean(originalCurrency && parsedCurrency === originalCurrency && currentCurrency !== parsedCurrency)
-}
-
-function comparablePoHeaderTotal(po: any, parsed: any) {
-  if (parsedMatchesOriginalPOCurrency(po, parsed)) {
-    return Number(po.original_grand_total ?? po.grand_total ?? 0)
-  }
-  return Number(po.grand_total || 0)
 }
 
 function extractLikelyCatalogNumbers(text: string): string[] {
@@ -1307,14 +1299,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
   }
 
   const newGrand = desiredItems.reduce((sum, item) => sum + item.total_amount, 0)
-  const pdfBasic = Number(parsed.basic_amount || 0)
-  const dbComparableTotal = comparablePoHeaderTotal(po, parsed)
-  // Accept if: PDF basic matches newGrand, OR the comparable DB total matches newGrand
-  // (for converted foreign-currency POs this uses original_grand_total).
-  const amountOk =
-    pdfBasic <= 0 ||
-    Math.abs(newGrand - pdfBasic) <= Math.max(5, pdfBasic * 0.02) ||
-    (dbComparableTotal > 0 && Math.abs(newGrand - dbComparableTotal) <= Math.max(5, dbComparableTotal * 0.02))
+  const amountOk = isPoCorrectionAmountOk(po, parsed, newGrand)
   if (!amountOk) {
     return {
       ok_to_apply: false,
@@ -1341,7 +1326,7 @@ async function buildExistingPoPdfCorrectionPlan(poId: number, allowDeleteReceive
         basic_amount: parsed.basic_amount,
         currency: parsed.currency || 'INR',
       },
-      message: `Correction blocked: parsed line total ${newGrand.toFixed(2)} does not match PDF Basic Amount ${pdfBasic.toFixed(2)} or comparable DB total ${dbComparableTotal.toFixed(2)}.`,
+      message: poCorrectionAmountMismatchMessage(po, parsed, newGrand),
     }
   }
   const inserts = desiredItems.filter((item) => !item.old_item_id).length
